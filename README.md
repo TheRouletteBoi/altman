@@ -99,7 +99,7 @@ vcpkg install
 ```bat
 mkdir build
 cmake -B build -S . ^
-  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake ^
+  -DCMAKE_TOOLCHAIN_FILE=%USERPROFILE%\vcpkg\scripts\buildsystems\vcpkg.cmake ^
   -A x64 -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
