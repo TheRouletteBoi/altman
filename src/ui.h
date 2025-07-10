@@ -2,7 +2,6 @@
 #define UI_H
 
 #include <cstdint>
-#include <imgui.h>
 
 bool RenderUI();
 
@@ -14,8 +13,8 @@ extern char join_jobid_buf[JOIN_JOBID_BUF_SIZE];
 
 extern int join_type_combo_index;
 extern int g_activeTab;
-enum Tab
-{
+
+enum Tab {
     Tab_Accounts,
     Tab_Friends,
     Tab_Servers,

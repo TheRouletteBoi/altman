@@ -57,7 +57,6 @@ void CreateRenderTarget();
 
 void CleanupRenderTarget();
 
-// DPI handling functions
 float GetDPIScale(HWND hwnd) {
     const UINT dpi = GetDpiForWindow(hwnd);
     return dpi / 96.0f;
@@ -68,12 +67,14 @@ void ReloadFonts(float dpiScale) {
     io.Fonts->Clear();
     float baseFontSize = 16.0f * dpiScale;
     float iconFontSize = 13.0f * dpiScale;
+
     // Load main font
     g_rubikFont = io.Fonts->AddFontFromFileTTF("assets/fonts/rubik-regular.ttf", baseFontSize);
     if (!g_rubikFont) {
         LOG_ERROR("Failed to load rubik-regular.ttf font.");
         g_rubikFont = io.Fonts->AddFontDefault();
     }
+
     // Load icon font
     ImFontConfig iconCfg;
     iconCfg.MergeMode = true;
@@ -88,14 +89,15 @@ void ReloadFonts(float dpiScale) {
         LOG_ERROR("Failed to load fa-solid.ttf font for icons.");
     }
     io.FontDefault = g_rubikFont;
-    // Scale ImGui style
+
     ImGuiStyle &style = ImGui::GetStyle();
-    style = ImGuiStyle(); // Reset to default
+    style = ImGuiStyle();
     ImGui::StyleColorsDark();
+
     style.ScaleAllSizes(dpiScale);
-    // Rebuild font atlas
+
     io.Fonts->Build();
-    // Recreate device objects if they exist
+
     if (g_pd3dDevice) {
         ImGui_ImplDX11_InvalidateDeviceObjects();
         ImGui_ImplDX11_CreateDeviceObjects();
@@ -103,7 +105,6 @@ void ReloadFonts(float dpiScale) {
 }
 
 
-// Simple helper function to load an image into a DX11 texture with common settings
 bool LoadTextureFromMemory(const void *data, size_t data_size, ID3D11ShaderResourceView **out_srv, int *out_width,
                            int *out_height) {
     // Load from disk into a raw RGBA buffer
@@ -217,7 +218,7 @@ int WINAPI WinMain(
                 g_selectedAccountIds.erase(acct.id);
             } else if (banInfo.status == Roblox::BanCheckResult::Terminated) {
                 acct.status = "Terminated";
-                acct.banExpiry = 0;  // Terminated accounts don't have an end date
+                acct.banExpiry = 0; // Terminated accounts don't have an end date
                 g_selectedAccountIds.erase(acct.id);
             }
         }
