@@ -18,6 +18,7 @@
 #include "ui/modal_popup.h"
 #include "../../ui.h"
 #include "../servers/servers_utils.h"
+#include "../accounts/accounts_join_ui.h"
 
 using namespace ImGui;
 using namespace std;
@@ -141,13 +142,16 @@ static void RenderFavoritesList(float listWidth, float availableHeight) {
             }
 
             if (BeginPopupContextItem("FavoriteContext")) {
+                if (MenuItem("Fill Join Options")) {
+                    FillJoinOptions(game.placeId, "");
+                }
                 if (MenuItem("Copy Place ID")) {
                     SetClipboardText(to_string(game.placeId).c_str());
                 }
                 if (MenuItem("Copy Universe ID")) {
                     SetClipboardText(to_string(game.universeId).c_str());
                 }
-
+                
                 if (BeginMenu("Rename")) {
                     if (renamingUniverseId != game.universeId) {
                         strncpy(renameBuffer, game.name.c_str(), sizeof(renameBuffer) - 1);
