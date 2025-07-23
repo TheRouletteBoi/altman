@@ -389,6 +389,7 @@ void RenderHistoryTab() {
 							ModalPopup::Add("Invalid log entry.");
 						}
 					}
+				}
 			}
 
 			Separator();
