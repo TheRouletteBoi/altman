@@ -23,6 +23,7 @@
 #include "ui/confirm.h"
 #include "../../ui.h"
 #include "../data.h"
+#include "accounts_join_ui.h"
 
 #pragma comment(lib, "Dwmapi.lib")
 
@@ -130,6 +131,9 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
             }
 
             if (placeId && !jobId.empty()) {
+                if (MenuItem("Fill Join Options")) {
+                    FillJoinOptions(placeId, jobId);
+                }
                 if (MenuItem("Copy Place ID"))
                     SetClipboardText(to_string(placeId).c_str());
                 if (MenuItem("Copy Job ID"))

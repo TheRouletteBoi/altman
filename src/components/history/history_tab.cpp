@@ -25,6 +25,7 @@
 #include "ui/confirm.h"
 #include "../../ui.h"
 #include "../data.h"
+#include "../accounts/accounts_join_ui.h"
 
 namespace fs = filesystem;
 using namespace ImGui;
@@ -285,35 +286,6 @@ void RenderHistoryTab() {
 			PushID(i);
 			if (Selectable(niceLabel(logInfo).c_str(), g_selected_log_idx == i))
 				g_selected_log_idx = i;
-			if (!logInfo.placeId.empty() && !logInfo.jobId.empty() &&
-			    BeginPopupContextItem("HistoryRowCtx")) {
-				if (MenuItem("Copy Place ID")) {
-					SetClipboardText(logInfo.placeId.c_str());
-				}
-				if (MenuItem("Copy Job ID")) {
-					SetClipboardText(logInfo.jobId.c_str());
-				}
-				if (BeginMenu("Copy Launch Method")) {
-					char buf[256];
-					snprintf(buf, sizeof(buf), "roblox://placeId=%s&gameInstanceId=%s",
-					         logInfo.placeId.c_str(), logInfo.jobId.c_str());
-					if (MenuItem("Deep Link")) SetClipboardText(buf);
-					string js = "Roblox.GameLauncher.joinGameInstance(" + logInfo.placeId + ", \"" +
-					            logInfo.jobId + "\")";
-					if (MenuItem("JavaScript")) SetClipboardText(js.c_str());
-					string luau =
-							"game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" + logInfo.placeId +
-							", \"" + logInfo.jobId + "\")";
-					if (MenuItem("ROBLOX Luau")) SetClipboardText(luau.c_str());
-					ImGui::EndMenu();
-				}
-				if (MenuItem("Generate Invite Link")) {
-					string link = "https://www.roblox.com/games/start?placeId=" + logInfo.placeId +
-					              "&gameInstanceId=" + logInfo.jobId;
-					SetClipboardText(link.c_str());
-				}
-				EndPopup();
-			}
 			PopID();
 		}
 
@@ -339,42 +311,83 @@ void RenderHistoryTab() {
 			Indent(desiredTextIndent / 2);
 			bool canLaunch = !logInfo.placeId.empty() && !logInfo.jobId.empty() &&
 			                 !g_selectedAccountIds.empty();
-			if (canLaunch && Button("Launch this game session")) {
-				if (!logInfo.placeId.empty() && !logInfo.jobId.empty() && !g_selectedAccountIds.empty()) {
-					uint64_t place_id_val = 0;
-					try {
-						place_id_val = stoull(logInfo.placeId);
-					} catch (...) {
+			if (canLaunch) {
+				bool clicked = Button("Launch this game session");
+				if (BeginPopupContextItem("LaunchButtonCtx", ImGuiPopupFlags_MouseButtonRight)) {
+					if (MenuItem("Fill Join Options")) {
+						uint64_t place_id_val = 0;
+						try {
+							place_id_val = stoull(logInfo.placeId);
+							FillJoinOptions(place_id_val, logInfo.jobId);
+						} catch (...) {
+							LOG_INFO("Invalid Place ID in log.");
+						}
 					}
+					if (MenuItem("Copy Place ID")) {
+						SetClipboardText(logInfo.placeId.c_str());
+					}
+					if (MenuItem("Copy Job ID")) {
+						SetClipboardText(logInfo.jobId.c_str());
+					}
+					if (BeginMenu("Copy Launch Method")) {
+						if (MenuItem("Browser Link")) {
+							string link = "https://www.roblox.com/games/start?placeId=" + logInfo.placeId +
+										"&gameInstanceId=" + logInfo.jobId;
+							SetClipboardText(link.c_str());
+						}
+						char buf[256];
+						snprintf(buf, sizeof(buf), "roblox://placeId=%s&gameInstanceId=%s",
+								logInfo.placeId.c_str(), logInfo.jobId.c_str());
+						if (MenuItem("Deep Link")) SetClipboardText(buf);
+						string js = "Roblox.GameLauncher.joinGameInstance(" + logInfo.placeId + ", \"" +
+									logInfo.jobId + "\")";
+						if (MenuItem("JavaScript")) SetClipboardText(js.c_str());
+						string luau =
+								"game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" + logInfo.placeId +
+								", \"" + logInfo.jobId + "\")";
+						if (MenuItem("ROBLOX Luau")) SetClipboardText(luau.c_str());
+						ImGui::EndMenu();
+					}
+					EndPopup();
+				}
+				
+				if (clicked) {
+					if (!logInfo.placeId.empty() && !logInfo.jobId.empty() && !g_selectedAccountIds.empty()) {
+						uint64_t place_id_val = 0;
+						try {
+							place_id_val = stoull(logInfo.placeId);
+						} catch (...) {
+						}
 
-					if (place_id_val > 0) {
-						vector<pair<int, string> > accounts;
-                                                for (int id: g_selectedAccountIds) {
-                                                        auto it = find_if(g_accounts.begin(), g_accounts.end(),
-                                                                          [&](const AccountData &a) { return a.id == id; });
-                                                        if (it != g_accounts.end() && it->status != "Banned" && it->status != "Terminated")
-                                                                accounts.emplace_back(it->id, it->cookie);
-                                                }
-						if (!accounts.empty()) {
-							LOG_INFO("Launching game from history...");
-							thread([place_id_val, jobId = logInfo.jobId, accounts]() {
-										launchRobloxSequential(place_id_val, jobId, accounts);
-									})
-									.detach();
+						if (place_id_val > 0) {
+							vector<pair<int, string> > accounts;
+							for (int id: g_selectedAccountIds) {
+									auto it = find_if(g_accounts.begin(), g_accounts.end(),
+													[&](const AccountData &a) { return a.id == id; });
+									if (it != g_accounts.end() && it->status != "Banned" && it->status != "Terminated")
+											accounts.emplace_back(it->id, it->cookie);
+							}
+							if (!accounts.empty()) {
+								LOG_INFO("Launching game from history...");
+								thread([place_id_val, jobId = logInfo.jobId, accounts]() {
+											launchRobloxSequential(place_id_val, jobId, accounts);
+										})
+										.detach();
+							} else {
+								LOG_INFO("Selected account not found.");
+							}
 						} else {
-							LOG_INFO("Selected account not found.");
+							LOG_INFO("Invalid Place ID in log.");
 						}
 					} else {
-						LOG_INFO("Invalid Place ID in log.");
-					}
-				} else {
-					LOG_INFO("Place ID missing or no account selected.");
-					if (g_selectedAccountIds.empty()) {
-						Status::Error("No account selected to open log entry.");
-						ModalPopup::Add("Select an account first.");
-					} else {
-						Status::Error("Invalid log entry.");
-						ModalPopup::Add("Invalid log entry.");
+						LOG_INFO("Place ID missing or no account selected.");
+						if (g_selectedAccountIds.empty()) {
+							Status::Error("No account selected to open log entry.");
+							ModalPopup::Add("Select an account first.");
+						} else {
+							Status::Error("Invalid log entry.");
+							ModalPopup::Add("Invalid log entry.");
+						}
 					}
 				}
 			}

@@ -45,8 +45,10 @@ namespace Roblox {
 		if (json.contains("userPresences") && json["userPresences"].is_array() && !json["userPresences"].empty()) {
 			const auto &jsonData = json["userPresences"][0];
 			int typeInt = jsonData.value("userPresenceType", 0);
+			string status = presenceTypeToString(typeInt);
+			
 			LOG_INFO("Got user presence for " + std::to_string(userId));
-			return presenceTypeToString(typeInt);
+			return status;
 		}
 		return "Offline";
 	}
@@ -57,8 +59,13 @@ namespace Roblox {
 	};
 
         static VoiceSettings getVoiceChatStatus(const std::string &cookie) {
-                if (!canUseCookie(cookie))
-                        return {"Banned", 0};
+                // First check if account is banned/terminated
+                BanCheckResult status = cachedBanStatus(cookie);
+                if (status == BanCheckResult::Banned || 
+                    status == BanCheckResult::Terminated || 
+                    status == BanCheckResult::InvalidCookie) {
+                    return {"N/A", 0};
+                }
 
                 LOG_INFO("Fetching voice chat settings");
                 auto resp = HttpClient::get(
@@ -69,10 +76,9 @@ namespace Roblox {
                 if (resp.status_code < 200 || resp.status_code >= 300) {
                         LOG_INFO("Failed to fetch voice settings: HTTP " +
                                 std::to_string(resp.status_code));
-			if (resp.status_code == 403)
-				return {"Banned", 0};
-			return {"Unknown", 0};
-		}
+                        // Any API error for a non-banned account should return Unknown
+                        return {"Unknown", 0};
+                }
 
 		auto j = HttpClient::decode(resp);
 		bool banned = j.value("isBanned", false);
