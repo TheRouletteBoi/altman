@@ -465,12 +465,23 @@ static void RenderGameDetailsPanel(float panelWidth, float availableHeight) {
             OpenPopup("GamePageMenu");
         OpenPopupOnItemClick("GamePageMenu");
         if (BeginPopup("GamePageMenu")) {
+            // Get cookie from primary selected account (first in selected accounts list)
+            string primaryCookie;
+            if (!g_selectedAccountIds.empty()) {
+                auto primaryId = *g_selectedAccountIds.begin();
+                auto it = find_if(g_accounts.begin(), g_accounts.end(),
+                    [primaryId](const AccountData &a) { return a.id == primaryId; });
+                if (it != g_accounts.end()) {
+                    primaryCookie = it->cookie;
+                }
+            }
+
             if (MenuItem("Roblox Page"))
-                LaunchWebview("https://www.roblox.com/games/" + to_string(gameInfo.placeId), "Game Page", g_accounts.empty() ? "" : g_accounts.front().cookie);
+                LaunchWebview("https://www.roblox.com/games/" + to_string(gameInfo.placeId), "Game Page", primaryCookie);
             if (MenuItem("Rolimons"))
-                LaunchWebview("https://www.rolimons.com/game/" + to_string(gameInfo.placeId) + "/", "Rolimons");
+                LaunchWebview("https://www.rolimons.com/game/" + to_string(gameInfo.placeId) + "/", "Rolimons", primaryCookie);
             if (MenuItem("RoMonitor"))
-                LaunchWebview("https://romonitorstats.com/experience/" + to_string(gameInfo.placeId) + "/", "RoMonitor Stats");
+                LaunchWebview("https://romonitorstats.com/experience/" + to_string(gameInfo.placeId) + "/", "RoMonitor Stats", primaryCookie);
             EndPopup();
         }
         Unindent(desiredTextIndent / 2);
