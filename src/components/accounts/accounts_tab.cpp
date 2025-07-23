@@ -206,12 +206,25 @@ void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *t
 			float status_y = GetCursorPosY();
 			SetCursorPosY(status_y + vertical_padding);
 			TextColored(statusColor, "%s", account.status.c_str());
-			if (account.status == "Banned" && account.banExpiry > 0 && IsItemHovered())
+			if (IsItemHovered())
 			{
-				BeginTooltip();
-				string timeStr = formatCountdown(account.banExpiry);
-				TextUnformatted(timeStr.c_str());
-				EndTooltip();
+				if (account.status == "Banned" && account.banExpiry > 0)
+				{
+					BeginTooltip();
+					string timeStr = formatCountdown(account.banExpiry);
+					TextUnformatted(timeStr.c_str());
+					EndTooltip();
+				}
+				else if (account.status == "InGame")
+				{
+					auto userPresence = Roblox::getPresence(account.cookie, stoull(account.userId));
+					if (userPresence.find("InGame") == 0)
+					{
+						BeginTooltip();
+						TextUnformatted(userPresence.c_str());
+						EndTooltip();
+					}
+				}
 			}
 			SetCursorPosY(status_y + row_interaction_height);
 
@@ -253,12 +266,27 @@ void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *t
 			}
 
 			TextColored(voiceCol, "%s", account.voiceStatus.c_str());
-			if (account.voiceStatus == "Banned" && account.voiceBanExpiry > 0 && IsItemHovered())
+			if (IsItemHovered())
 			{
-				BeginTooltip();
-				string timeStr = formatCountdown(account.voiceBanExpiry);
-				TextUnformatted(timeStr.c_str());
-				EndTooltip();
+				if (account.voiceStatus == "Banned" && account.voiceBanExpiry > 0)
+				{
+					BeginTooltip();
+					string timeStr = formatCountdown(account.voiceBanExpiry);
+					TextUnformatted(timeStr.c_str());
+					EndTooltip();
+				}
+				else if (account.voiceStatus == "Unknown")
+				{
+					BeginTooltip();
+					TextUnformatted("HTTP request returned an error");
+					EndTooltip();
+				}
+				else if (account.voiceStatus == "N/A")
+				{
+					BeginTooltip();
+					TextUnformatted("HTTP request unavailable");
+					EndTooltip();
+				}
 			}
 			SetCursorPosY(voice_y + row_interaction_height);
 
