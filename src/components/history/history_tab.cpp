@@ -43,6 +43,10 @@ static atomic_bool g_logs_loading{false};
 static atomic_bool g_stop_log_watcher{false};
 static once_flag g_start_log_watcher_once;
 static mutex g_logs_mtx;
+static char g_search_buffer[128] = "";     // Buffer to hold search text
+static vector<int> g_filtered_log_indices;  // Indices of logs that match the search
+static bool g_search_active = false;       // Flag to indicate if search is active
+static bool g_should_scroll_to_selection = false; // Flag to auto-scroll to selection when search is cleared
 
 static void openLogsFolder() {
 	string dir = logsFolder();
@@ -50,6 +54,117 @@ static void openLogsFolder() {
 		ShellExecuteA(NULL, "open", dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
 	} else {
 		LOG_WARN("Logs folder not found.");
+	}
+}
+
+static void updateFilteredLogs() {
+	g_filtered_log_indices.clear();
+	g_search_active = (g_search_buffer[0] != '\0');
+	
+	// Return early if logs are loading - don't apply filters during load
+	if (g_logs_loading.load()) {
+		g_search_buffer[0] = '\0';  // Clear search
+		g_search_active = false;
+		return;
+	}
+	
+	if (!g_search_active) {
+		return; // No search active, no need to filter
+	}
+	
+	// Convert search term to lowercase for case-insensitive comparison
+	string searchTerm = g_search_buffer;
+	transform(searchTerm.begin(), searchTerm.end(), searchTerm.begin(), ::tolower);
+	
+	// Find logs matching the search term
+	lock_guard<mutex> lk(g_logs_mtx);
+	for (int i = 0; i < static_cast<int>(g_logs.size()); ++i) {
+		const auto &log = g_logs[i];
+		
+		// Skip installer logs
+		if (log.isInstallerLog) {
+			continue;
+		}
+		
+		// Convert filename to lowercase for case-insensitive comparison
+		string filename = log.fileName;
+		transform(filename.begin(), filename.end(), filename.begin(), ::tolower);
+		
+		// Check various fields for matches
+		bool found = false;
+		
+		// Check filename
+		if (filename.find(searchTerm) != string::npos) {
+			found = true;
+		}
+		
+		// Check full path
+		string path = log.fullPath;
+		transform(path.begin(), path.end(), path.begin(), ::tolower);
+		if (path.find(searchTerm) != string::npos) {
+			found = true;
+		}
+		
+		// Check version
+		string version = log.version;
+		transform(version.begin(), version.end(), version.begin(), ::tolower);
+		if (version.find(searchTerm) != string::npos) {
+			found = true;
+		}
+		
+		// Check placeId
+		string placeId = log.placeId;
+		if (placeId.find(searchTerm) != string::npos) {
+			found = true;
+		}
+		
+		// Check jobId
+		string jobId = log.jobId;
+		if (jobId.find(searchTerm) != string::npos) {
+			found = true;
+		}
+		
+		// Check universeId
+		string universeId = log.universeId;
+		if (universeId.find(searchTerm) != string::npos) {
+			found = true;
+		}
+		
+		// Check user ID
+		string userId = log.userId;
+		if (userId.find(searchTerm) != string::npos) {
+			found = true;
+		}
+		
+		// Check session data
+		for (const auto &session : log.sessions) {
+			if (session.placeId.find(searchTerm) != string::npos ||
+				session.jobId.find(searchTerm) != string::npos ||
+				session.universeId.find(searchTerm) != string::npos ||
+				session.serverIp.find(searchTerm) != string::npos) {
+				found = true;
+				break;
+			}
+		}
+		
+		if (found) {
+			g_filtered_log_indices.push_back(i);
+		}
+	}
+	
+	// If the current selection is no longer in the filtered list, deselect it
+	if (g_selected_log_idx != -1) {
+		bool selectionInFiltered = false;
+		for (int idx : g_filtered_log_indices) {
+			if (idx == g_selected_log_idx) {
+				selectionInFiltered = true;
+				break;
+			}
+		}
+		
+		if (!selectionInFiltered) {
+			g_selected_log_idx = -1;
+		}
 	}
 }
 
@@ -102,78 +217,39 @@ static void refreshLogs() {
 			return b.timestamp < a.timestamp;
 		}); {
 			lock_guard<mutex> lk(g_logs_mtx);
-			for (auto &log: tempLogs) {
-				auto it = find_if(g_logs.begin(), g_logs.end(), [&](const LogInfo &a) {
-					return a.fileName == log.fileName;
-				});
-				if (it == g_logs.end())
-					g_logs.push_back(log);
-			}
-			sort(g_logs.begin(), g_logs.end(), [](const LogInfo &a, const LogInfo &b) {
-				return b.timestamp < a.timestamp;
-			});
+			// Clear existing logs and replace with newly parsed logs
+			g_logs.clear();
+			g_logs = tempLogs;  // Replace with new logs
 			g_selected_log_idx = -1;
+			// Still save the logs for this session, but they'll be rebuilt next time
 			Data::SaveLogHistory(g_logs);
 		}
 
-		LOG_INFO("Log scan complete.");
+		LOG_INFO("Log scan complete. Recreated logs cache with " + std::to_string(tempLogs.size()) + " logs.");
 		g_logs_loading = false;
+		
+		// Update filtered logs after refresh completes
+		updateFilteredLogs();
 	});
 }
 
 static void workerScan() {
-	string dir = logsFolder();
-	if (dir.empty() || !fs::exists(dir))
-		return;
-
-	vector<LogInfo> tempLogs;
-	unordered_set<string> seenFiles; {
-		lock_guard<mutex> lk(g_logs_mtx);
-		for (const auto &log: g_logs)
-			seenFiles.insert(log.fileName);
-	}
-
-	for (const auto &entry: fs::directory_iterator(dir)) {
-		if (g_stop_log_watcher.load())
-			return;
-		if (entry.is_regular_file()) {
-			string fName = entry.path().filename().string();
-			if (fName.rfind(".log", fName.length() - 4) != string::npos) {
-				if (seenFiles.contains(fName))
-					continue;
-
-				LogInfo logInfo;
-				logInfo.fileName = fName;
-				logInfo.fullPath = entry.path().string();
-				parseLogFile(logInfo);
-				if (!logInfo.timestamp.empty() || !logInfo.version.empty()) {
-					tempLogs.push_back(logInfo);
-				}
-			}
-		}
-	}
-
-	if (!tempLogs.empty()) {
-		lock_guard<mutex> lk(g_logs_mtx);
-		for (auto &log: tempLogs) {
-			auto it = find_if(g_logs.begin(), g_logs.end(),
-			                  [&](const LogInfo &a) { return a.fileName == log.fileName; });
-			if (it == g_logs.end())
-				g_logs.push_back(log);
-		}
-		sort(g_logs.begin(), g_logs.end(), [](const LogInfo &a, const LogInfo &b) {
-			return b.timestamp < a.timestamp;
-		});
-		Data::SaveLogHistory(g_logs);
-	}
-
+	// Instead of incrementally scanning for new logs,
+	// simply trigger a full refresh to rebuild the entire logs cache
 	refreshLogs();
 }
 
-static void startLogWatcher() { {
+static void startLogWatcher() { 
+	{
 		lock_guard<mutex> lk(g_logs_mtx);
-		g_logs = Data::LoadLogHistory();
+		// Clear logs instead of loading from cache - always start fresh
+		g_logs.clear();
 	}
+	// Reset search state when starting
+	g_search_buffer[0] = '\0';
+	g_search_active = false;
+	g_filtered_log_indices.clear();
+	
 	refreshLogs();
 }
 
@@ -229,6 +305,7 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 			Unindent(desiredTextIndent);
 		};
 
+		// Display global log information at the top
 		addRow("File:", logInfo.fileName);
 
 		// Add options to open log file and copy name/path on file row right-click
@@ -250,25 +327,247 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 		addRow("Time:", timeStr);
 		addRow("Version:", logInfo.version);
 		addRow("Channel:", logInfo.channel);
-		addRow("Place ID:", logInfo.placeId);
-		addRow("Job ID:", logInfo.jobId);
-		addRow("Universe ID:", logInfo.universeId);
-		if (!logInfo.serverIp.empty()) {
-			string serverStr = logInfo.serverIp + ":" + logInfo.serverPort;
-			addRow("Server:", serverStr);
-		}
 		addRow("User ID:", logInfo.userId);
-
+		
 		EndTable();
 	}
 	PopStyleVar();
+	
+	// Display game instances section
+	if (!logInfo.sessions.empty()) {
+		Spacing();
+		Spacing();
+		Spacing();
+		Separator();
+		Spacing();
+		Spacing();
+		Spacing();
+		Indent(desiredTextIndent);  // Apply consistent indentation
+		TextUnformatted("Game Instances:");
+		Unindent(desiredTextIndent);
+		Spacing();
+		Spacing();
+		Spacing();
+		
+		ImGuiTreeNodeFlags baseFlags = ImGuiTreeNodeFlags_DefaultOpen;
+		
+		// Display each game instance with alternating colors
+		ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 3.0f);
+		
+		for (int i = 0; i < logInfo.sessions.size(); i++) {
+			const auto& session = logInfo.sessions[i];
+			
+			// Create a session title with timestamp
+			string sessionTitle;
+			if (!session.timestamp.empty()) {
+				string friendlyTime = friendlyTimestamp(session.timestamp);
+				sessionTitle = friendlyTime; // Removed the refresh icon
+			} else {
+				sessionTitle = "Game Instance " + to_string(i + 1); // Removed the refresh icon
+			}
+			
+			// Set alternating background colors for each instance
+			ImGui::PushID(i);
+			
+			// Use alternating row colors
+			if (i % 2 == 0) {
+				ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.2f, 0.2f, 0.55f));
+				ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.3f, 0.3f, 0.3f, 0.55f));
+				ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.25f, 0.25f, 0.25f, 0.55f));
+			} else {
+				ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.25f, 0.25f, 0.25f, 0.55f));
+				ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.35f, 0.35f, 0.35f, 0.55f));
+				ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.3f, 0.3f, 0.3f, 0.55f));
+			}
+			
+			// Create a collapsible section for each instance
+			if (TreeNodeEx(sessionTitle.c_str(), baseFlags)) {
+				ImGui::PopStyleColor(3);
+				
+				// Using a table for aligned fields
+				if (BeginTable("InstanceDetailsTable", 2, ImGuiTableFlags_BordersInnerV)) {
+					TableSetupColumn("##field", ImGuiTableColumnFlags_WidthFixed, 120.0f); // Increased width to prevent Universe ID from being cut off
+					TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
+					
+					// Place ID
+					if (!session.placeId.empty()) {
+						TableNextRow();
+						TableSetColumnIndex(0);
+						TextUnformatted("Place ID:");
+						
+						TableSetColumnIndex(1);
+						PushID("PlaceID");
+						Indent(10.0f); // Add padding before the value
+						TextWrapped("%s", session.placeId.c_str());
+						Unindent(10.0f);
+						if (BeginPopupContextItem("CopyPlaceID")) {
+							if (MenuItem("Copy")) {
+								SetClipboardText(session.placeId.c_str());
+							}
+							EndPopup();
+						}
+						PopID();
+					}
+					
+					// Job ID
+					if (!session.jobId.empty()) {
+						TableNextRow();
+						TableSetColumnIndex(0);
+						TextUnformatted("Job ID:");
+						
+						TableSetColumnIndex(1);
+						PushID("JobID");
+						Indent(10.0f); // Add padding before the value
+						TextWrapped("%s", session.jobId.c_str());
+						Unindent(10.0f);
+						if (BeginPopupContextItem("CopyJobID")) {
+							if (MenuItem("Copy")) {
+								SetClipboardText(session.jobId.c_str());
+							}
+							EndPopup();
+						}
+						PopID();
+					}
+					
+					// Universe ID
+					if (!session.universeId.empty()) {
+						TableNextRow();
+						TableSetColumnIndex(0);
+						TextUnformatted("Universe ID:");
+						
+						TableSetColumnIndex(1);
+						PushID("UniverseID");
+						Indent(10.0f); // Add padding before the value
+						TextWrapped("%s", session.universeId.c_str());
+						Unindent(10.0f);
+						if (BeginPopupContextItem("CopyUniverseID")) {
+							if (MenuItem("Copy")) {
+								SetClipboardText(session.universeId.c_str());
+							}
+							EndPopup();
+						}
+						PopID();
+					}
+					
+					// Server IP:Port
+					if (!session.serverIp.empty()) {
+						TableNextRow();
+						TableSetColumnIndex(0);
+						TextUnformatted("Server IP:");
+						
+						TableSetColumnIndex(1);
+						string serverStr = session.serverIp + ":" + session.serverPort;
+						PushID("ServerInfo");
+						Indent(10.0f); // Add padding before the value
+						TextWrapped("%s", serverStr.c_str());
+						Unindent(10.0f);
+						if (BeginPopupContextItem("CopyServerInfo")) {
+							if (MenuItem("Copy")) {
+								SetClipboardText(serverStr.c_str());
+							}
+							EndPopup();
+						}
+						PopID();
+					}
+					
+					EndTable();
+				}
+				
+				// Launch button for this specific instance
+				bool canLaunch = !session.placeId.empty() && !session.jobId.empty() && !g_selectedAccountIds.empty();
+				if (canLaunch) {
+					Spacing();
+					if (Button(("Launch this instance##" + to_string(i)).c_str())) {
+						uint64_t place_id_val = 0;
+						try {
+							place_id_val = stoull(session.placeId);
+						} catch (...) {}
+
+						if (place_id_val > 0) {
+							vector<pair<int, string> > accounts;
+							for (int id: g_selectedAccountIds) {
+									auto it = find_if(g_accounts.begin(), g_accounts.end(),
+													[&](const AccountData &a) { return a.id == id; });
+									if (it != g_accounts.end() && it->status != "Banned" && it->status != "Terminated")
+											accounts.emplace_back(it->id, it->cookie);
+							}
+							if (!accounts.empty()) {
+								LOG_INFO("Launching game instance from history...");
+								thread([place_id_val, jobId = session.jobId, accounts]() {
+											launchRobloxSequential(place_id_val, jobId, accounts);
+										})
+										.detach();
+							} else {
+								LOG_INFO("Selected account not found.");
+							}
+						} else {
+							LOG_INFO("Invalid Place ID in instance.");
+						}
+					}
+					
+					// Context menu for the launch button
+					if (BeginPopupContextItem(("LaunchButtonCtx##" + to_string(i)).c_str(), ImGuiPopupFlags_MouseButtonRight)) {
+						if (MenuItem("Fill Join Options")) {
+							uint64_t place_id_val = 0;
+							try {
+								place_id_val = stoull(session.placeId);
+								FillJoinOptions(place_id_val, session.jobId);
+							} catch (...) {
+								LOG_INFO("Invalid Place ID in instance.");
+							}
+						}
+						if (MenuItem("Copy Place ID")) {
+							SetClipboardText(session.placeId.c_str());
+						}
+						if (MenuItem("Copy Job ID")) {
+							SetClipboardText(session.jobId.c_str());
+						}
+						if (BeginMenu("Copy Launch Method")) {
+							if (MenuItem("Browser Link")) {
+								string link = "https://www.roblox.com/games/start?placeId=" + session.placeId +
+											"&gameInstanceId=" + session.jobId;
+								SetClipboardText(link.c_str());
+							}
+							char buf[256];
+							snprintf(buf, sizeof(buf), "roblox://placeId=%s&gameInstanceId=%s",
+									session.placeId.c_str(), session.jobId.c_str());
+							if (MenuItem("Deep Link")) SetClipboardText(buf);
+							string js = "Roblox.GameLauncher.joinGameInstance(" + session.placeId + ", \"" +
+										session.jobId + "\")";
+							if (MenuItem("JavaScript")) SetClipboardText(js.c_str());
+							string luau =
+									"game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" + session.placeId +
+									", \"" + session.jobId + "\")";
+							if (MenuItem("ROBLOX Luau")) SetClipboardText(luau.c_str());
+							ImGui::EndMenu();
+						}
+						EndPopup();
+					}
+				}
+				
+				TreePop();
+			} else {
+				ImGui::PopStyleColor(3);
+			}
+			
+			PopID();
+			Spacing();
+		}
+		
+		ImGui::PopStyleVar();
+	}
 }
 
 void RenderHistoryTab() {
 	call_once(g_start_log_watcher_once, startLogWatcher);
 
 	if (Button((string(ICON_REFRESH) + " Refresh Logs").c_str())) {
+		LOG_INFO("Recreating logs cache from scratch...");
 		refreshLogs();
+		// Reset search when refreshing logs
+		g_search_buffer[0] = '\0';
+		g_search_active = false;
+		updateFilteredLogs();
 	}
 	SameLine();
 	if (Button((string(ICON_FOLDER) + " Open Logs Folder").c_str())) {
@@ -276,11 +575,44 @@ void RenderHistoryTab() {
 	}
 	SameLine();
 	if (Button((string(ICON_TRASH) + " Clear Logs").c_str())) {
-		ConfirmPopup::Add("Clear all logs?", []() { clearLogs(); });
+		ConfirmPopup::Add("Clear all logs?", []() { 
+			clearLogs(); 
+			// Reset search when clearing logs
+			g_search_buffer[0] = '\0';
+			g_search_active = false;
+			updateFilteredLogs();
+		});
 	}
 	SameLine();
 	if (g_logs_loading.load()) {
 		TextUnformatted("Loading...");
+		SameLine();
+	}
+	
+	// Add search box on the same line, taking all available space
+	SameLine();
+	TextUnformatted("Search");
+	SameLine();
+	// Make search box take all available width between the buttons and the clear button
+	SetNextItemWidth(GetContentRegionAvail().x - GetStyle().ItemSpacing.x - CalcTextSize("Clear").x - GetStyle().FramePadding.x * 4.0f);
+	bool searchChanged = InputText("##SearchLogs", g_search_buffer, IM_ARRAYSIZE(g_search_buffer));
+	
+	SameLine();
+	if (Button("Clear")) {
+		g_search_buffer[0] = '\0';
+		searchChanged = true;
+		g_should_scroll_to_selection = true; // Auto-scroll to selection when search is cleared
+	}
+	
+	// If search text changed, update filtered logs
+	if (searchChanged) {
+		updateFilteredLogs();
+	}
+	
+	// Show search results count if search is active (below the search bar)
+	if (g_search_active) {
+		TextColored(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), 
+			"Found %d matching logs", g_filtered_log_indices.size());
 	}
 
 	Separator();
@@ -297,9 +629,30 @@ void RenderHistoryTab() {
 		string lastDay;
 		string lastVersion;
 		bool indented = false;
+		
+		// Determine which logs to display - all or filtered
+		const vector<int>& indices = g_search_active ? g_filtered_log_indices : vector<int>();
+		int numLogsToDisplay = g_search_active ? indices.size() : g_logs.size();
+		
+		// Helper to get the log index based on whether we're filtering or not
+		auto getLogIndex = [&](int i) -> int {
+			return g_search_active ? indices[i] : i;
+		};
+		
+		// If auto-scroll flag is set and search is cleared, scroll to selection
+		if (g_should_scroll_to_selection && !g_search_active && g_selected_log_idx >= 0) {
+			SetScrollHereY();
+			g_should_scroll_to_selection = false;
+		}
 
-		for (int i = 0; i < static_cast<int>(g_logs.size()); ++i) {
-			const auto &logInfo = g_logs[i];
+		for (int i = 0; i < numLogsToDisplay; ++i) {
+			int logIndex = getLogIndex(i);
+			const auto &logInfo = g_logs[logIndex];
+			
+			// Skip installer logs
+			if (logInfo.isInstallerLog) {
+				continue;
+			}
 
 			string thisDay = logInfo.timestamp.size() >= 10 ? logInfo.timestamp.substr(0, 10) : "Unknown";
 
@@ -313,9 +666,9 @@ void RenderHistoryTab() {
 				lastDay = thisDay;
 			}
 
-			PushID(i);
-			if (Selectable(niceLabel(logInfo).c_str(), g_selected_log_idx == i))
-				g_selected_log_idx = i;
+			PushID(logIndex);
+			if (Selectable(niceLabel(logInfo).c_str(), g_selected_log_idx == logIndex))
+				g_selected_log_idx = logIndex;
 			
 			// Add right-click context menu to open and manage log file
 			if (BeginPopupContextItem("LogEntryContextMenu")) {
@@ -363,96 +716,9 @@ void RenderHistoryTab() {
 			
 			Separator();
 			
-			// Buttons at bottom
-			bool canLaunch = !logInfo.placeId.empty() && !logInfo.jobId.empty() &&
-			                 !g_selectedAccountIds.empty();
-			
-			// Always show Open Log File button
+			// Just show Open Log File button at the bottom - instance-specific launch buttons are in each instance
 			if (Button("Open Log File")) {
 				ShellExecuteA(NULL, "open", logInfo.fullPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
-			}
-			
-			// Show Launch button if session info available
-			if (canLaunch) {
-				SameLine();
-				bool clicked = Button("Launch this game session");
-				if (BeginPopupContextItem("LaunchButtonCtx", ImGuiPopupFlags_MouseButtonRight)) {
-					if (MenuItem("Fill Join Options")) {
-						uint64_t place_id_val = 0;
-						try {
-							place_id_val = stoull(logInfo.placeId);
-							FillJoinOptions(place_id_val, logInfo.jobId);
-						} catch (...) {
-							LOG_INFO("Invalid Place ID in log.");
-						}
-					}
-					if (MenuItem("Copy Place ID")) {
-						SetClipboardText(logInfo.placeId.c_str());
-					}
-					if (MenuItem("Copy Job ID")) {
-						SetClipboardText(logInfo.jobId.c_str());
-					}
-					if (BeginMenu("Copy Launch Method")) {
-						if (MenuItem("Browser Link")) {
-							string link = "https://www.roblox.com/games/start?placeId=" + logInfo.placeId +
-										"&gameInstanceId=" + logInfo.jobId;
-							SetClipboardText(link.c_str());
-						}
-						char buf[256];
-						snprintf(buf, sizeof(buf), "roblox://placeId=%s&gameInstanceId=%s",
-								logInfo.placeId.c_str(), logInfo.jobId.c_str());
-						if (MenuItem("Deep Link")) SetClipboardText(buf);
-						string js = "Roblox.GameLauncher.joinGameInstance(" + logInfo.placeId + ", \"" +
-									logInfo.jobId + "\")";
-						if (MenuItem("JavaScript")) SetClipboardText(js.c_str());
-						string luau =
-								"game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" + logInfo.placeId +
-								", \"" + logInfo.jobId + "\")";
-						if (MenuItem("ROBLOX Luau")) SetClipboardText(luau.c_str());
-						ImGui::EndMenu();
-					}
-					EndPopup();
-				}
-				
-				if (clicked) {
-					if (!logInfo.placeId.empty() && !logInfo.jobId.empty() && !g_selectedAccountIds.empty()) {
-						uint64_t place_id_val = 0;
-						try {
-							place_id_val = stoull(logInfo.placeId);
-						} catch (...) {
-						}
-
-						if (place_id_val > 0) {
-							vector<pair<int, string> > accounts;
-							for (int id: g_selectedAccountIds) {
-									auto it = find_if(g_accounts.begin(), g_accounts.end(),
-													[&](const AccountData &a) { return a.id == id; });
-									if (it != g_accounts.end() && it->status != "Banned" && it->status != "Terminated")
-											accounts.emplace_back(it->id, it->cookie);
-							}
-							if (!accounts.empty()) {
-								LOG_INFO("Launching game from history...");
-								thread([place_id_val, jobId = logInfo.jobId, accounts]() {
-											launchRobloxSequential(place_id_val, jobId, accounts);
-										})
-										.detach();
-							} else {
-								LOG_INFO("Selected account not found.");
-							}
-						} else {
-							LOG_INFO("Invalid Place ID in log.");
-						}
-					} else {
-						LOG_INFO("Place ID missing or no account selected.");
-						if (g_selectedAccountIds.empty()) {
-							Status::Error("No account selected to open log entry.");
-							ModalPopup::Add("Select an account first.");
-						} else {
-							Status::Error("Invalid log entry.");
-							ModalPopup::Add("Invalid log entry.");
-						}
-					}
-				}
 			}
 
 			// Button to open log file directly if not already shown as part of another condition
@@ -460,7 +726,7 @@ void RenderHistoryTab() {
 	} else {
 		Indent(desiredTextIndent);
 		Spacing();
-		TextWrapped("Select a log from the list to see details or launch the session.");
+		TextWrapped("Select a log from the list to see details or launch an instance.");
 		Unindent(desiredTextIndent);
 	}
 	EndChild();
