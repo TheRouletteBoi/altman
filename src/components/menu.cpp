@@ -294,8 +294,11 @@ bool RenderMainMenu() {
                         if (BeginCombo("File", current)) {
                                 for (int i = 0; i < (int)s_backupFiles.size(); ++i) {
                                         bool selected = (i == s_selectedBackup);
+                                        // Push a unique ID for each backup file item in the dropdown
+                                        PushID(i);
                                         if (Selectable(s_backupFiles[i].c_str(), selected))
                                                 s_selectedBackup = i;
+                                        PopID();
                                         if (selected)
                                                 SetItemDefaultFocus();
                                 }

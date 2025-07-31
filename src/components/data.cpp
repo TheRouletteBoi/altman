@@ -405,14 +405,43 @@ namespace Data {
                 info.timestamp = j.value("timestamp", "");
                 info.version = j.value("version", "");
                 info.channel = j.value("channel", "");
+                info.userId = j.value("userId", "");
+                
+                // Load sessions if they exist
+                if (j.contains("sessions") && j["sessions"].is_array()) {
+                    for (auto &sessionJson : j["sessions"]) {
+                        GameSession session;
+                        session.timestamp = sessionJson.value("timestamp", "");
+                        session.jobId = sessionJson.value("jobId", "");
+                        session.placeId = sessionJson.value("placeId", "");
+                        session.universeId = sessionJson.value("universeId", "");
+                        session.serverIp = sessionJson.value("serverIp", "");
+                        session.serverPort = sessionJson.value("serverPort", "");
+                        info.sessions.push_back(session);
+                    }
+                }
+                
+                // For backward compatibility
                 info.joinTime = j.value("joinTime", "");
                 info.jobId = j.value("jobId", "");
                 info.placeId = j.value("placeId", "");
                 info.universeId = j.value("universeId", "");
                 info.serverIp = j.value("serverIp", "");
                 info.serverPort = j.value("serverPort", "");
-                info.userId = j.value("userId", "");
                 info.outputLines = j.value("outputLines", std::vector<std::string>{});
+                
+                // If we have backward compatibility data but no sessions, create a synthetic session
+                if (info.sessions.empty() && (!info.jobId.empty() || !info.placeId.empty())) {
+                    GameSession backwardCompatSession;
+                    backwardCompatSession.timestamp = info.timestamp;
+                    backwardCompatSession.jobId = info.jobId;
+                    backwardCompatSession.placeId = info.placeId;
+                    backwardCompatSession.universeId = info.universeId;
+                    backwardCompatSession.serverIp = info.serverIp;
+                    backwardCompatSession.serverPort = info.serverPort;
+                    info.sessions.push_back(backwardCompatSession);
+                }
+                
                 logs.push_back(std::move(info));
             }
             LOG_INFO("Loaded " + std::to_string(logs.size()) + " log entries");
@@ -433,19 +462,34 @@ namespace Data {
 
         json arr = json::array();
         for (const auto &log: logs) {
+            // Convert sessions to JSON array
+            json sessionsArr = json::array();
+            for (const auto &session : log.sessions) {
+                sessionsArr.push_back({
+                    {"timestamp", session.timestamp},
+                    {"jobId", session.jobId},
+                    {"placeId", session.placeId},
+                    {"universeId", session.universeId},
+                    {"serverIp", session.serverIp},
+                    {"serverPort", session.serverPort}
+                });
+            }
+            
             arr.push_back({
                 {"fileName", log.fileName},
                 {"fullPath", log.fullPath},
                 {"timestamp", log.timestamp},
                 {"version", log.version},
                 {"channel", log.channel},
+                {"userId", log.userId},
+                {"sessions", sessionsArr},
+                // For backward compatibility
                 {"joinTime", log.joinTime},
                 {"jobId", log.jobId},
                 {"placeId", log.placeId},
                 {"universeId", log.universeId},
                 {"serverIp", log.serverIp},
                 {"serverPort", log.serverPort},
-                {"userId", log.userId},
                 {"outputLines", log.outputLines}
             });
         }

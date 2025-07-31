@@ -168,4 +168,10 @@ void RenderJoinOptions() {
         doJoin();
 #endif
     }
+
+    SameLine(0, 10);
+    if (Button(" \xEF\x87\xB8  Clear Join Options ")) {
+        join_value_buf[0] = '\0';
+        join_jobid_buf[0] = '\0';
+    }
 }

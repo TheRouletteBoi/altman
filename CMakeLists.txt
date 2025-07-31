@@ -25,6 +25,11 @@ add_executable(altman WIN32 ${APP_SRC})
 
 target_compile_features(altman PRIVATE cxx_std_20)
 
+# Add /FS flag to fix PDB file access issues during parallel compilation
+if(MSVC)
+    target_compile_options(altman PRIVATE /FS)
+endif()
+
 target_include_directories(altman PRIVATE
         src/components
         src/utils
