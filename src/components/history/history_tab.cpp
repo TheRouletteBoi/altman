@@ -26,6 +26,7 @@
 #include "../../ui.h"
 #include "../data.h"
 #include "../accounts/accounts_join_ui.h"
+#include <Windows.h>
 
 namespace fs = filesystem;
 using namespace ImGui;
@@ -35,12 +36,22 @@ static int g_selected_log_idx = -1;
 
 static auto ICON_REFRESH = "\xEF\x8B\xB1 ";
 static auto ICON_TRASH = "\xEF\x87\xB8 ";
+static auto ICON_FOLDER = "\xEF\x81\xBB ";
 
 static vector<LogInfo> g_logs;
 static atomic_bool g_logs_loading{false};
 static atomic_bool g_stop_log_watcher{false};
 static once_flag g_start_log_watcher_once;
 static mutex g_logs_mtx;
+
+static void openLogsFolder() {
+	string dir = logsFolder();
+	if (!dir.empty() && fs::exists(dir)) {
+		ShellExecuteA(NULL, "open", dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
+	} else {
+		LOG_WARN("Logs folder not found.");
+	}
+}
 
 static void clearLogs() {
 	string dir = logsFolder();
@@ -220,6 +231,21 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 
 		addRow("File:", logInfo.fileName);
 
+		// Add options to open log file and copy name/path on file row right-click
+		if (BeginPopupContextItem("LogDetailsFileContextMenu")) {
+			if (MenuItem("Copy File Name")) {
+				SetClipboardText(logInfo.fileName.c_str());
+			}
+			if (MenuItem("Copy File Path")) {
+				SetClipboardText(logInfo.fullPath.c_str());
+			}
+			Separator();
+			if (MenuItem("Open File")) {
+				ShellExecuteA(NULL, "open", logInfo.fullPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+			}
+			EndPopup();
+		}
+
 		string timeStr = friendlyTimestamp(logInfo.timestamp);
 		addRow("Time:", timeStr);
 		addRow("Version:", logInfo.version);
@@ -245,6 +271,10 @@ void RenderHistoryTab() {
 		refreshLogs();
 	}
 	SameLine();
+	if (Button((string(ICON_FOLDER) + " Open Logs Folder").c_str())) {
+		openLogsFolder();
+	}
+	SameLine();
 	if (Button((string(ICON_TRASH) + " Clear Logs").c_str())) {
 		ConfirmPopup::Add("Clear all logs?", []() { clearLogs(); });
 	}
@@ -255,12 +285,12 @@ void RenderHistoryTab() {
 
 	Separator();
 
-	float listWidth = GetContentRegionAvail().x * 0.4f;
-	float detailWidth = GetContentRegionAvail().x * 0.6f - GetStyle().ItemSpacing.x;
+	float listWidth = GetContentRegionAvail().x * 0.25f; // Reduced from 0.4f to 0.25f
+	float detailWidth = GetContentRegionAvail().x * 0.75f - GetStyle().ItemSpacing.x; // Increased from 0.6f to 0.75f
 	if (detailWidth <= 0)
 		detailWidth = GetContentRegionAvail().x - listWidth - GetStyle().ItemSpacing.x;
 	if (listWidth <= 0)
-		listWidth = 200;
+		listWidth = 150; // Reduced minimum width from 200 to 150
 
 	BeginChild("##HistoryList", ImVec2(listWidth, 0), true); {
 		lock_guard<mutex> lk(g_logs_mtx);
@@ -278,7 +308,7 @@ void RenderHistoryTab() {
 					Unindent();
 				string header = thisDay;
 				SeparatorText(header.c_str());
-				Indent();
+				Indent(); // Back to default indentation
 				indented = true;
 				lastDay = thisDay;
 			}
@@ -286,6 +316,22 @@ void RenderHistoryTab() {
 			PushID(i);
 			if (Selectable(niceLabel(logInfo).c_str(), g_selected_log_idx == i))
 				g_selected_log_idx = i;
+			
+			// Add right-click context menu to open and manage log file
+			if (BeginPopupContextItem("LogEntryContextMenu")) {
+				if (MenuItem("Copy File Name")) {
+					SetClipboardText(logInfo.fileName.c_str());
+				}
+				if (MenuItem("Copy File Path")) {
+					SetClipboardText(logInfo.fullPath.c_str());
+				}
+				Separator();
+				if (MenuItem("Open File")) {
+					ShellExecuteA(NULL, "open", logInfo.fullPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+				}
+				EndPopup();
+			}
+			
 			PopID();
 		}
 
@@ -304,14 +350,31 @@ void RenderHistoryTab() {
 		lock_guard<mutex> lk(g_logs_mtx);
 		if (g_selected_log_idx < static_cast<int>(g_logs.size())) {
 			const auto &logInfo = g_logs[g_selected_log_idx];
+			
+			// Calculate space for buttons at bottom
+			float contentHeight = GetContentRegionAvail().y;
+			float buttonHeight = GetFrameHeightWithSpacing() + GetStyle().ItemSpacing.y * 2;
+			float detailsHeight = contentHeight - buttonHeight;
+			
+			// Details panel in a child window
+			BeginChild("##DetailsContent", ImVec2(0, detailsHeight), false);
 			DisplayLogDetails(logInfo);
-
+			EndChild();
+			
 			Separator();
-
-			Indent(desiredTextIndent / 2);
+			
+			// Buttons at bottom
 			bool canLaunch = !logInfo.placeId.empty() && !logInfo.jobId.empty() &&
 			                 !g_selectedAccountIds.empty();
+			
+			// Always show Open Log File button
+			if (Button("Open Log File")) {
+				ShellExecuteA(NULL, "open", logInfo.fullPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+			}
+			
+			// Show Launch button if session info available
 			if (canLaunch) {
+				SameLine();
 				bool clicked = Button("Launch this game session");
 				if (BeginPopupContextItem("LaunchButtonCtx", ImGuiPopupFlags_MouseButtonRight)) {
 					if (MenuItem("Fill Join Options")) {
@@ -392,14 +455,7 @@ void RenderHistoryTab() {
 				}
 			}
 
-			Separator();
-			TextUnformatted("Raw Log Output:");
-			BeginChild("##LogOutputScroll", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
-			for (const auto &line: logInfo.outputLines) {
-				TextUnformatted(line.c_str());
-			}
-			EndChild();
-			Unindent(desiredTextIndent / 2);
+			// Button to open log file directly if not already shown as part of another condition
 		}
 	} else {
 		Indent(desiredTextIndent);

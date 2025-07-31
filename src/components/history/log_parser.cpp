@@ -53,6 +53,7 @@ void parseLogFile(LogInfo &logInfo) {
 			}
 		}
 
+		// Still collect output lines for compatibility with data saving/loading
 		if (currentLineView.find("[FLog::Output]"sv) != string_view::npos) {
 			logInfo.outputLines.emplace_back(currentLineView);
 		}
