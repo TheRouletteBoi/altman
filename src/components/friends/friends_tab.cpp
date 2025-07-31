@@ -161,10 +161,14 @@ void RenderFriendsTab()
                     continue; // Skip banned and terminated accounts in the dropdown
                 const char *label = acc.displayName.empty() ? acc.username.c_str() : acc.displayName.c_str();
                 bool isSelected = (acc.id == g_viewAcctId);
+                // Push a unique ID for each account item in the dropdown
+                PushID(acc.id);
                 if (Selectable(label, isSelected))
                 {
                     g_viewAcctId = acc.id;
                 }
+                // Pop the unique ID
+                PopID();
                 if (isSelected)
                     SetItemDefaultFocus();
             }
