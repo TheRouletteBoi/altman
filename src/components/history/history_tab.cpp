@@ -354,7 +354,7 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 		// Display each game instance with alternating colors
 		ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 3.0f);
 		
-		for (int i = 0; i < logInfo.sessions.size(); i++) {
+		for (size_t i = 0; i < logInfo.sessions.size(); i++) {
 			const auto& session = logInfo.sessions[i];
 			
 			// Create a session title with timestamp
