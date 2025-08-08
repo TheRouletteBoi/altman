@@ -737,20 +737,29 @@ void RenderFriendsTab()
             OpenPopupOnItemClick("ProfileContext");
             if (BeginPopup("ProfileContext"))
             {
+                // Use the globally selected primary account for webview auth
+                string primaryCookie;
+                string primaryUserId;
+                if (!g_selectedAccountIds.empty()) {
+                    auto primaryId = *g_selectedAccountIds.begin();
+                    auto itp = find_if(g_accounts.begin(), g_accounts.end(),
+                        [primaryId](const AccountData &a) { return a.id == primaryId; });
+                    if (itp != g_accounts.end()) { primaryCookie = itp->cookie; primaryUserId = itp->userId; }
+                }
                 if (MenuItem("Profile"))
                     if (D.id)
                         LaunchWebview(
                             "https://www.roblox.com/users/" + to_string(D.id) + "/profile",
-                            "Roblox Profile", acct.cookie);
+                            "Roblox Profile", primaryCookie, primaryUserId);
                 if (MenuItem("Friends"))
                     LaunchWebview("https://www.roblox.com/users/" + to_string(D.id) + "/friends", "Friends",
-                                  acct.cookie);
+                                  primaryCookie, primaryUserId);
                 if (MenuItem("Favorites"))
                     LaunchWebview("https://www.roblox.com/users/" + to_string(D.id) + "/favorites", "Favorites",
-                                  acct.cookie);
+                                  primaryCookie, primaryUserId);
                 if (MenuItem("Inventory"))
                     LaunchWebview("https://www.roblox.com/users/" + to_string(D.id) + "/inventory/#!/accessories",
-                                  "Inventory", acct.cookie);
+                                  "Inventory", primaryCookie, primaryUserId);
                 if (MenuItem("Rolimons"))
                     LaunchWebview("https://www.rolimons.com/player/" + to_string(D.id), "Rolimons");
                 EndPopup();

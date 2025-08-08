@@ -17,6 +17,7 @@
 
 #include "network/roblox.h"
 #include "ui/webview.hpp"
+#include "../webview_helpers.h"
 #include "system/threading.h"
 #include "core/logging.hpp"
 #include "core/status.h"
@@ -57,8 +58,7 @@ void LaunchBrowserWithCookie(const AccountData &account) {
 
     LOG_INFO("Launching WebView2 browser for account: " + account.displayName);
 
-    LaunchWebview("https://www.roblox.com/home", account.username + " - " + account.userId,
-                  account.cookie);
+    LaunchWebview("https://www.roblox.com/home", account);
 }
 
 void RenderAccountContextMenu(AccountData &account, const string &unique_context_menu_id) {
@@ -162,33 +162,31 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
         if (BeginMenu("Open In Browser")) {
             if (MenuItem("Home Page")) {
                 if (!account.cookie.empty())
-                    LaunchWebview("https://www.roblox.com/home", account.username + " - " + account.userId,
-                                  account.cookie);
+                    LaunchWebview("https://www.roblox.com/home", account);
             }
             if (MenuItem("Profile")) {
                 if (!account.cookie.empty())
-                    LaunchWebview("https://www.roblox.com/users/" + account.userId + "/profile", account.username,
-                                  account.cookie);
+                    LaunchWebview("https://www.roblox.com/users/" + account.userId + "/profile", account);
             }
             if (MenuItem("Avatar")) {
                 if (!account.cookie.empty())
-                    LaunchWebview("https://www.roblox.com/my/avatar", account.username, account.cookie);
+                    LaunchWebview("https://www.roblox.com/my/avatar", account);
             }
             if (MenuItem("Friends")) {
                 if (!account.cookie.empty())
-                    LaunchWebview("https://www.roblox.com/users/friends", account.username, account.cookie);
+                    LaunchWebview("https://www.roblox.com/users/friends", account);
             }
             if (MenuItem("Messages")) {
                 if (!account.cookie.empty())
-                    LaunchWebview("https://www.roblox.com/my/messages", account.username, account.cookie);
+                    LaunchWebview("https://www.roblox.com/my/messages", account);
             }
             if (MenuItem("Catalog")) {
                 if (!account.cookie.empty())
-                    LaunchWebview("https://www.roblox.com/catalog", account.username, account.cookie);
+                    LaunchWebview("https://www.roblox.com/catalog", account);
             }
             if (MenuItem("Creator Hub")) {
                 if (!account.cookie.empty())
-                    LaunchWebview("https://create.roblox.com/", account.username, account.cookie);
+                    LaunchWebview("https://create.roblox.com/", account);
             }
             if (MenuItem("Custom URL")) {
                 g_openCustomUrlPopup = true;
@@ -342,7 +340,7 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
         PopItemWidth();
         Spacing();
         if (Button("Open", ImVec2(openWidth, 0)) && g_customUrlBuffer[0] != '\0') {
-            LaunchWebview(g_customUrlBuffer, account.username + " - " + account.userId, account.cookie);
+            LaunchWebview(g_customUrlBuffer, account);
             g_customUrlBuffer[0] = '\0';
             CloseCurrentPopup();
         }

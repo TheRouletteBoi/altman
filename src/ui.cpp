@@ -2,6 +2,8 @@
 
 #include <imgui.h>
 #include <string>
+#include <vector>
+#include <algorithm>
 
 #include "accounts/accounts.h"
 #include "components/components.h"
@@ -96,28 +98,33 @@ bool RenderUI()
 
         if (Begin("StatusBar", nullptr, flags))
         {
-            string selectedNames;
-            bool first = true;
+            std::vector<std::pair<std::string, ImVec4>> items;
             for (int id : g_selectedAccountIds)
             {
-                auto it = find_if(g_accounts.begin(), g_accounts.end(),
-                                  [&](const AccountData &a)
-                                  { return a.id == id; });
-                if (it == g_accounts.end())
-                    continue;
-                if (!first)
-                    selectedNames += ", ";
-                string name = it->displayName.empty() ? it->username : it->displayName;
-                if (first)
-                    name += "*";
-                selectedNames += name;
-                first = false;
+                auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id; });
+                if (it == g_accounts.end()) continue;
+                std::string label = it->displayName.empty() ? it->username : it->displayName;
+                items.emplace_back(std::move(label), getStatusColor(it->status));
             }
 
-            if (selectedNames.empty())
+            if (items.empty())
+            {
                 Text("Status: %s", Status::Get().c_str());
+            }
             else
-                Text("Selected: %s", selectedNames.c_str());
+            {
+                TextUnformatted("Selected: ");
+                SameLine(0, 0);
+                for (size_t i = 0; i < items.size(); ++i)
+                {
+                    if (i > 0) { TextUnformatted(", "); SameLine(0, 0); }
+                    PushStyleColor(ImGuiCol_Text, items[i].second);
+                    TextUnformatted(items[i].first.c_str());
+                    PopStyleColor();
+                    if (i == 0 && items.size() > 1) { SameLine(0, 0); TextUnformatted("*"); }
+                    if (i + 1 < items.size()) SameLine(0, 0);
+                }
+            }
         }
         End();
         PopStyleVar(2);

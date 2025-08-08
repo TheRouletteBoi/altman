@@ -14,6 +14,7 @@
 
 #include "main_thread.h"
 #include "webview.hpp"
+#include "../webview_helpers.h"
 
 #include "system/threading.h"
 #include "network/roblox.h"
@@ -320,8 +321,7 @@ void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *t
 			if (it != g_accounts.end())
 			{
 				string url = s_urlBuffer;
-				Threading::newThread([acc = *it, url]()
-									 { LaunchWebview(url, acc.username + " - " + acc.userId, acc.cookie); });
+				Threading::newThread([acc = *it, url]() { LaunchWebview(url, acc); });
 			}
 			s_urlBuffer[0] = '\0';
 			CloseCurrentPopup();
