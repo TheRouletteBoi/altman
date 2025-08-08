@@ -26,6 +26,7 @@
 #include "../../ui.h"
 #include "../data.h"
 #include "../accounts/accounts_join_ui.h"
+#include "../../utils/core/account_utils.h"
 #include <windows.h>
 
 namespace fs = filesystem;
@@ -485,12 +486,12 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 
 						if (place_id_val > 0) {
 							vector<pair<int, string> > accounts;
-							for (int id: g_selectedAccountIds) {
-									auto it = find_if(g_accounts.begin(), g_accounts.end(),
-													[&](const AccountData &a) { return a.id == id; });
-									if (it != g_accounts.end() && it->status != "Banned" && it->status != "Warned" && it->status != "Terminated")
-											accounts.emplace_back(it->id, it->cookie);
-							}
+			    for (int id: g_selectedAccountIds) {
+				    auto it = find_if(g_accounts.begin(), g_accounts.end(),
+						    [&](const AccountData &a) { return a.id == id; });
+				    if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
+					    accounts.emplace_back(it->id, it->cookie);
+			    }
 							if (!accounts.empty()) {
 								LOG_INFO("Launching game instance from history...");
 								thread([place_id_val, jobId = session.jobId, accounts]() {

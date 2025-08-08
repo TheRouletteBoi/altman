@@ -22,6 +22,7 @@
 #include "ui/modal_popup.h"
 #include "../../ui.h"
 #include "../accounts/accounts_join_ui.h"
+#include "../../utils/core/account_utils.h"
 
 using namespace ImGui;
 using namespace std;
@@ -294,7 +295,7 @@ void RenderServersTab()
                         auto it = find_if(g_accounts.begin(), g_accounts.end(),
                                           [&](const AccountData &a)
                                           { return a.id == id; });
-                        if (it != g_accounts.end() && it->status != "Banned" && it->status != "Warned" && it->status != "Terminated")
+                        if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
                             accounts.emplace_back(it->id, it->cookie);
                     }
                     if (!accounts.empty())
@@ -359,7 +360,7 @@ void RenderServersTab()
                             auto it = find_if(g_accounts.begin(), g_accounts.end(),
                                               [&](const AccountData &a)
                                               { return a.id == id; });
-                            if (it != g_accounts.end() && it->status != "Banned")
+                            if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
                                 accounts.emplace_back(it->id, it->cookie);
                         }
                         if (!accounts.empty())

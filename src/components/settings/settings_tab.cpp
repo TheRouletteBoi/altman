@@ -26,7 +26,7 @@ void RenderSettingsTab() {
                 SeparatorText("Accounts");
                 Text("Default Account:");
 
-                // Build a list of non-banned accounts for the dropdown
+                // Build a list of all accounts for the dropdown (including banned-like)
                 std::vector<std::string> accountLabels;
                 std::vector<const char *> names;
                 std::vector<size_t> idxMap;
@@ -36,9 +36,6 @@ void RenderSettingsTab() {
 
                 int current_default_idx = -1;
                 for (size_t i = 0; i < g_accounts.size(); ++i) {
-                        if (g_accounts[i].status == "Banned" || g_accounts[i].status == "Warned" || g_accounts[i].status == "Terminated")
-                                continue; // Skip banned and terminated accounts
-
                         std::string label;
                         if (g_accounts[i].displayName == g_accounts[i].username) {
                                 label = g_accounts[i].displayName;
@@ -68,7 +65,7 @@ void RenderSettingsTab() {
                                 }
                         }
                 } else {
-                        TextDisabled("No eligible accounts (non-banned) available.");
+                        TextDisabled("No accounts available.");
                 }
 
                 Spacing();

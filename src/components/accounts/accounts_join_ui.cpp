@@ -18,6 +18,7 @@
 #include "ui/modal_popup.h"
 #include "ui/confirm.h"
 #include "core/app_state.h"
+#include "../../utils/core/account_utils.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -196,7 +197,7 @@ void RenderJoinOptions() {
                 for (int id: g_selectedAccountIds) {
                     auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
                                            [id](auto &a) { return a.id == id; });
-                    if (it != g_accounts.end())
+                    if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
                         accounts.emplace_back(it->id, it->cookie);
                 }
                 if (accounts.empty())
@@ -256,7 +257,7 @@ void RenderJoinOptions() {
             for (int id: g_selectedAccountIds) {
                 auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
                                        [id](auto &a) { return a.id == id; });
-                if (it != g_accounts.end() && it->status != "Banned" && it->status != "Warned" && it->status != "Terminated")
+                if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
                     accounts.emplace_back(it->id, it->cookie);
             }
 

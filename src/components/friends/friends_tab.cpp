@@ -17,6 +17,7 @@
 #include "../games/games_utils.h"
 #include "ui/confirm.h"
 #include "../accounts/accounts_join_ui.h"
+#include "../../utils/core/account_utils.h"
 
 using namespace ImGui;
 using namespace std;
@@ -116,31 +117,31 @@ void RenderFriendsTab()
         return;
     }
 
-    // Ensure the currently viewed account is valid and not banned.
+    // Ensure the currently viewed account is valid and not banned-like.
     auto isCurrentViewAccount = [&](const AccountData &a)
     {
-        return a.id == g_viewAcctId && a.status != "Banned" && a.status != "Warned" && a.status != "Terminated";
+        return a.id == g_viewAcctId && AccountFilters::IsAccountUsable(a);
     };
 
     if (g_viewAcctId == -1 || std::none_of(g_accounts.begin(), g_accounts.end(), isCurrentViewAccount))
     {
-        // Prefer a selected, non-banned account if one exists
+    // Prefer a selected, non-banned-like account if one exists
         g_viewAcctId = -1;
         for (int id : g_selectedAccountIds)
         {
             auto itSel = std::find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a)
-                                      { return a.id == id && a.status != "Banned" && a.status != "Warned" && a.status != "Terminated"; });
+                      { return a.id == id && AccountFilters::IsAccountUsable(a); });
             if (itSel != g_accounts.end())
             {
                 g_viewAcctId = id;
                 break;
             }
         }
-        // Fallback to the first non-banned account in the list
+    // Fallback to the first non-banned-like account in the list
         if (g_viewAcctId == -1)
         {
             auto itFirst = std::find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a)
-                                        { return a.status != "Banned" && a.status != "Warned" && a.status != "Terminated"; });
+                    { return AccountFilters::IsAccountUsable(a); });
             if (itFirst != g_accounts.end())
                 g_viewAcctId = itFirst->id;
         }
@@ -179,10 +180,8 @@ void RenderFriendsTab()
     }
     {
         float maxLabelWidth = 0.0f;
-        for (const auto &acc : g_accounts)
-        {
-            if (acc.status == "Banned" || acc.status == "Warned" || acc.status == "Terminated")
-                continue; // Skip banned, warned and terminated accounts in the dropdown
+    for (const auto &acc : g_accounts)
+    {
             string labelStr;
             if (acc.displayName == acc.username || acc.displayName.empty()) {
                 labelStr = acc.username;
@@ -210,8 +209,6 @@ void RenderFriendsTab()
         {
             for (const auto &acc : g_accounts)
             {
-                if (acc.status == "Banned" || acc.status == "Warned" || acc.status == "Terminated")
-                    continue; // Skip banned, warned and terminated accounts in the dropdown
                 string labelStr;
                 if (acc.displayName == acc.username || acc.displayName.empty()) {
                     labelStr = acc.username;
@@ -221,10 +218,16 @@ void RenderFriendsTab()
                 bool isSelected = (acc.id == g_viewAcctId);
                 // Push a unique ID for each account item in the dropdown
                 PushID(acc.id);
+                bool disabled = !AccountFilters::IsAccountUsable(acc);
+                if (disabled)
+                    BeginDisabled(true);
                 if (Selectable(labelStr.c_str(), isSelected))
                 {
-                    g_viewAcctId = acc.id;
+                    if (!disabled)
+                        g_viewAcctId = acc.id;
                 }
+                if (disabled)
+                    EndDisabled();
                 // Pop the unique ID
                 PopID();
                 if (isSelected)
@@ -398,7 +401,7 @@ void RenderFriendsTab()
                         for (int id : g_selectedAccountIds)
                         {
                             auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a)
-                                               { return a.id == id && a.status != "Banned" && a.status != "Warned" && a.status != "Terminated"; });
+                                               { return a.id == id && AccountFilters::IsAccountUsable(a); });
                             if (itA != g_accounts.end())
                                 accounts.emplace_back(itA->id, itA->cookie);
                         }
@@ -719,7 +722,7 @@ void RenderFriendsTab()
                 {
                     auto it = find_if(g_accounts.begin(), g_accounts.end(),
                                       [&](const AccountData &a)
-                                      { return a.id == id && a.status != "Banned" && a.status != "Warned" && a.status != "Terminated"; });
+                                      { return a.id == id && AccountFilters::IsAccountUsable(a); });
                     if (it != g_accounts.end())
                         accounts.emplace_back(it->id, it->cookie);
                 }
