@@ -17,6 +17,7 @@
 #include "../games/games_utils.h"
 #include "ui/confirm.h"
 #include "../accounts/accounts_join_ui.h"
+#include "../context_menus.h"
 #include "../../utils/core/account_utils.h"
 
 using namespace ImGui;
@@ -395,58 +396,30 @@ void RenderFriendsTab()
                 if (inGame)
                 {
                     Separator();
-                    if (MenuItem("Join"))
-                    {
+                    StandardJoinMenuParams menu{};
+                    menu.placeId = f.placeId;
+                    menu.jobId = f.gameId;
+                    menu.onLaunchGame = [pid = f.placeId]() {
+                        if (g_selectedAccountIds.empty()) return;
                         vector<pair<int, string>> accounts;
-                        for (int id : g_selectedAccountIds)
-                        {
-                            auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a)
-                                               { return a.id == id && AccountFilters::IsAccountUsable(a); });
-                            if (itA != g_accounts.end())
-                                accounts.emplace_back(itA->id, itA->cookie);
+                        for (int id : g_selectedAccountIds) {
+                            auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
+                            if (itA != g_accounts.end()) accounts.emplace_back(itA->id, itA->cookie);
                         }
-                        if (!accounts.empty())
-                        {
-                            Threading::newThread([row = f, accounts]()
-                                                 { launchRobloxSequential(row.placeId, row.gameId, accounts); });
+                        if (!accounts.empty()) Threading::newThread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); });
+                    };
+                    menu.onLaunchInstance = [row = f]() {
+                        if (g_selectedAccountIds.empty()) return;
+                        vector<pair<int, string>> accounts;
+                        for (int id : g_selectedAccountIds) {
+                            auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
+                            if (itA != g_accounts.end()) accounts.emplace_back(itA->id, itA->cookie);
                         }
-                    }
-                    if (MenuItem("Fill Join Options"))
-                    {
-                        FillJoinOptions(f.placeId, f.gameId);
-                    }
-                    if (MenuItem("Copy Place ID"))
-                    {
-                        SetClipboardText(to_string(f.placeId).c_str());
-                    }
-                    if (MenuItem("Copy Job ID"))
-                    {
-                        SetClipboardText(f.gameId.c_str());
-                    }
-                    if (BeginMenu("Copy Launch Method"))
-                    {
-                        if (MenuItem("Browser Link"))
-                        {
-                            string link = "https://www.roblox.com/games/start?placeId=" + to_string(f.placeId) +
-                                          "&gameInstanceId=" + f.gameId;
-                            SetClipboardText(link.c_str());
-                        }
-
-                        char buf[256];
-                        snprintf(buf, sizeof(buf), "roblox://placeId=%llu&gameInstanceId=%s",
-                                 (unsigned long long)f.placeId, f.gameId.c_str());
-                        if (MenuItem("Deep Link"))
-                            SetClipboardText(buf);
-                        string js = "Roblox.GameLauncher.joinGameInstance(" + to_string(f.placeId) + ", \"" + f.gameId +
-                                    "\")";
-                        if (MenuItem("JavaScript"))
-                            SetClipboardText(js.c_str());
-                        string luau = "game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" +
-                                      to_string(f.placeId) + ", \"" + f.gameId + "\")";
-                        if (MenuItem("ROBLOX Luau"))
-                            SetClipboardText(luau.c_str());
-                        ImGui::EndMenu();
-                    }
+                        if (!accounts.empty()) Threading::newThread([row, accounts]() { launchRobloxSequential(row.placeId, row.gameId, accounts); });
+                    };
+                    menu.onFillGame = [pid = f.placeId]() { FillJoinOptions(pid, ""); };
+                    menu.onFillInstance = [row = f]() { FillJoinOptions(row.placeId, row.gameId); };
+                    RenderStandardJoinMenu(menu);
                 }
                 Separator();
                 PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.4f, 0.4f, 1.f));

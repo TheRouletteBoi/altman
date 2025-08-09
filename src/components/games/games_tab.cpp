@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "../components.h"
+#include "../context_menus.h"
 #include "system/launcher.hpp"
 #include "network/roblox.h"
 #include "core/status.h"
@@ -158,15 +159,24 @@ static void RenderFavoritesList(float listWidth, float availableHeight) {
             }
 
             if (BeginPopupContextItem("FavoriteContext")) {
-                if (MenuItem("Fill Join Options")) {
-                    FillJoinOptions(game.placeId, "");
+                {
+                    StandardJoinMenuParams menu{};
+                    menu.placeId = game.placeId;
+                    menu.universeId = game.universeId;
+                    menu.jobId = ""; // games have no instance context here
+                    menu.onLaunchGame = [pid = game.placeId]() {
+                        if (g_selectedAccountIds.empty()) return;
+                        vector<pair<int, string>> accounts;
+                        for (int id: g_selectedAccountIds) {
+                            auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
+                            if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
+                        }
+                        if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); }).detach();
+                    };
+                    menu.onFillGame = [pid = game.placeId]() { FillJoinOptions(pid, ""); };
+                    RenderStandardJoinMenu(menu);
                 }
-                if (MenuItem("Copy Place ID")) {
-                    SetClipboardText(to_string(game.placeId).c_str());
-                }
-                if (MenuItem("Copy Universe ID")) {
-                    SetClipboardText(to_string(game.universeId).c_str());
-                }
+                // Universe ID copy is now included in the standardized menu
                 
                 if (BeginMenu("Rename")) {
                     if (renamingUniverseId != game.universeId) {
@@ -246,10 +256,24 @@ static void RenderSearchResultsList(float listWidth, float availableHeight) {
             SetTooltip("Players: %s", formatWithCommas(game.playerCount).c_str());
 
         if (BeginPopupContextItem("GameContext")) {
-            if (MenuItem("Copy Place ID"))
-                SetClipboardText(to_string(game.placeId).c_str());
-            if (MenuItem("Copy Universe ID"))
-                SetClipboardText(to_string(game.universeId).c_str());
+            {
+                StandardJoinMenuParams menu{};
+                menu.placeId = game.placeId;
+                menu.universeId = game.universeId;
+                menu.jobId = "";
+                menu.onLaunchGame = [pid = game.placeId]() {
+                    if (g_selectedAccountIds.empty()) return;
+                    vector<pair<int, string>> accounts;
+                    for (int id: g_selectedAccountIds) {
+                        auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
+                        if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
+                    }
+                    if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); }).detach();
+                };
+                menu.onFillGame = [pid = game.placeId]() { FillJoinOptions(pid, ""); };
+                RenderStandardJoinMenu(menu);
+            }
+            // Universe ID copy is now included in the standardized menu
             if (MenuItem("Favorite") && favoriteGameIds.count(game.universeId) == 0) {
                 favoriteGameIds.insert(game.universeId);
                 GameInfo favoriteGameInfo = game;

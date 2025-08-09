@@ -14,17 +14,21 @@
 #include <atomic>
 #include <dwmapi.h>
 #include <memory>
+#include <algorithm>
 
 #include "network/roblox.h"
 #include "ui/webview.hpp"
 #include "../webview_helpers.h"
 #include "system/threading.h"
+#include "system/launcher.hpp"
 #include "core/logging.hpp"
 #include "core/status.h"
 #include "ui/confirm.h"
 #include "../../ui.h"
 #include "../data.h"
 #include "accounts_join_ui.h"
+#include "../context_menus.h"
+#include "../../utils/core/account_utils.h"
 
 #pragma comment(lib, "Dwmapi.lib")
 
@@ -49,6 +53,11 @@ static std::unordered_map<int, CachedGameInfo> g_cachedGameInfo;
 
 using namespace ImGui;
 using namespace std;
+
+template <typename Container, typename Pred>
+static inline void erase_if_local(Container &c, Pred p) {
+    c.erase(remove_if(c.begin(), c.end(), p), c.end());
+}
 
 void LaunchBrowserWithCookie(const AccountData &account) {
     if (account.cookie.empty()) {
@@ -82,7 +91,7 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
         }
 
         Text("Account: %s", account.displayName.c_str());
-        if (g_selectedAccountIds.contains(account.id)) {
+    if (g_selectedAccountIds.find(account.id) != g_selectedAccountIds.end()) {
             SameLine();
             TextDisabled("(Selected)");
         }
@@ -130,31 +139,24 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
                 jobId = itCache->second.jobId;
             }
 
-            if (placeId && !jobId.empty()) {
-                if (MenuItem("Fill Join Options")) {
-                    FillJoinOptions(placeId, jobId);
-                }
-                if (MenuItem("Copy Place ID"))
-                    SetClipboardText(to_string(placeId).c_str());
-                if (MenuItem("Copy Job ID"))
-                    SetClipboardText(jobId.c_str());
-                if (BeginMenu("Copy Launch Method")) {
-                    if (MenuItem("Browser Link")) {
-                        string link = "https://www.roblox.com/games/start?placeId=" + to_string(placeId) +
-                                      "&gameInstanceId=" + jobId;
-                        SetClipboardText(link.c_str());
-                    }
-                    char buf[256];
-                    snprintf(buf, sizeof(buf), "roblox://placeId=%llu&gameInstanceId=%s", (unsigned long long) placeId,
-                             jobId.c_str());
-                    if (MenuItem("Deep Link")) SetClipboardText(buf);
-                    string js = "Roblox.GameLauncher.joinGameInstance(" + to_string(placeId) + ", \"" + jobId + "\")";
-                    if (MenuItem("JavaScript")) SetClipboardText(js.c_str());
-                    string luau = "game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" + to_string(placeId) +
-                                  ", \"" + jobId + "\")";
-                    if (MenuItem("ROBLOX Luau")) SetClipboardText(luau.c_str());
-                    ImGui::EndMenu();
-                }
+            if (placeId) {
+                StandardJoinMenuParams menu{};
+                menu.placeId = placeId;
+                menu.jobId = jobId;
+                menu.onLaunchGame = [pid = placeId, &account]() {
+                    vector<pair<int, string>> accounts;
+                    if (AccountFilters::IsAccountUsable(account)) accounts.emplace_back(account.id, account.cookie);
+                    if (!accounts.empty()) Threading::newThread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); });
+                };
+                menu.onLaunchInstance = [pid = placeId, jid = jobId, &account]() {
+                    if (jid.empty()) return;
+                    vector<pair<int, string>> accounts;
+                    if (AccountFilters::IsAccountUsable(account)) accounts.emplace_back(account.id, account.cookie);
+                    if (!accounts.empty()) Threading::newThread([pid, jid, accounts]() { launchRobloxSequential(pid, jid, accounts); });
+                };
+                menu.onFillGame = [pid = placeId]() { FillJoinOptions(pid, ""); };
+                menu.onFillInstance = [pid = placeId, jid = jobId]() { if (!jid.empty()) FillJoinOptions(pid, jid); };
+                RenderStandardJoinMenu(menu);
                 Separator();
             }
         }
@@ -285,11 +287,7 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
             snprintf(buf, sizeof(buf), "Delete %s?", account.displayName.c_str());
             ConfirmPopup::Add(buf, [id = account.id, displayName = account.displayName]() {
                 LOG_INFO("Attempting to delete account: " + displayName + " (ID: " + to_string(id) + ")");
-                erase_if(
-                    g_accounts,
-                    [&](const AccountData &acc_data) {
-                        return acc_data.id == id;
-                    });
+                erase_if_local(g_accounts, [&](const AccountData &acc_data) { return acc_data.id == id; });
                 g_selectedAccountIds.erase(id);
                 Status::Set("Deleted account " + displayName);
                 Data::SaveAccounts();
@@ -298,19 +296,17 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
         }
         PopStyleColor();
 
-        if (!g_selectedAccountIds.empty() && g_selectedAccountIds.size() > 1 && g_selectedAccountIds.
-            contains(account.id)) {
+        if (!g_selectedAccountIds.empty() && g_selectedAccountIds.size() > 1 &&
+            g_selectedAccountIds.find(account.id) != g_selectedAccountIds.end()) {
             char buf[64];
             snprintf(buf, sizeof(buf), "Delete %zu Selected Account(s)", g_selectedAccountIds.size());
             PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.4f, 0.4f, 1.f));
             if (MenuItem(buf)) {
                 ConfirmPopup::Add("Delete selected accounts?", []() {
                     LOG_INFO("Attempting to delete " + to_string(g_selectedAccountIds.size()) + " selected accounts.");
-                    erase_if(
-                        g_accounts,
-                        [&](const AccountData &acc_data) {
-                            return g_selectedAccountIds.contains(acc_data.id);
-                        });
+                    erase_if_local(g_accounts, [&](const AccountData &acc_data) {
+                        return g_selectedAccountIds.find(acc_data.id) != g_selectedAccountIds.end();
+                    });
                     g_selectedAccountIds.clear();
                     Data::SaveAccounts();
                     Status::Set("Deleted selected accounts");

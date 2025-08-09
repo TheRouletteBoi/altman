@@ -22,6 +22,7 @@
 #include "ui/modal_popup.h"
 #include "../../ui.h"
 #include "../accounts/accounts_join_ui.h"
+#include "../context_menus.h"
 #include "../../utils/core/account_utils.h"
 
 using namespace ImGui;
@@ -320,72 +321,31 @@ void RenderServersTab()
 
             if (BeginPopupContextItem("ServerRowContextMenu"))
             {
-                if (MenuItem("Copy Job ID"))
-                {
-                    SetClipboardText(srv.jobId.c_str());
-                }
-                if (MenuItem("Copy Place ID"))
-                {
-                    SetClipboardText(to_string(g_current_placeId_servers).c_str());
-                }
-                if (BeginMenu("Copy Launch Method"))
-                {
-                    if (MenuItem("Browser Link"))
-                    {
-                        string link = "https://www.roblox.com/games/start?placeId=" + to_string(g_current_placeId_servers) +
-                                      "&gameInstanceId=" + srv.jobId;
-                        SetClipboardText(link.c_str());
+                StandardJoinMenuParams menu{};
+                menu.placeId = g_current_placeId_servers;
+                menu.universeId = g_targetUniverseId_ServersTab;
+                menu.jobId = srv.jobId;
+                menu.onLaunchGame = [pid = g_current_placeId_servers]() {
+                    if (g_selectedAccountIds.empty()) return;
+                    vector<pair<int, string>> accounts;
+                    for (int id : g_selectedAccountIds) {
+                        auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
+                        if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
                     }
-                    char buf[256];
-                    snprintf(buf, sizeof(buf), "roblox://placeId=%llu&gameInstanceId=%s",
-                             (unsigned long long)g_current_placeId_servers, srv.jobId.c_str());
-                    if (MenuItem("Deep Link"))
-                        SetClipboardText(buf);
-                    string js = "Roblox.GameLauncher.joinGameInstance(" + to_string(g_current_placeId_servers) + ", \"" + srv.jobId + "\")";
-                    if (MenuItem("JavaScript"))
-                        SetClipboardText(js.c_str());
-                    string luau = "game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" + to_string(g_current_placeId_servers) + ", \"" + srv.jobId + "\")";
-                    if (MenuItem("ROBLOX Luau"))
-                        SetClipboardText(luau.c_str());
-                    ImGui::EndMenu();
-                }
-                Separator();
-                if (MenuItem("Join Server"))
-                {
-                    if (!g_selectedAccountIds.empty())
-                    {
-                        vector<pair<int, string>> accounts;
-                        for (int id : g_selectedAccountIds)
-                        {
-                            auto it = find_if(g_accounts.begin(), g_accounts.end(),
-                                              [&](const AccountData &a)
-                                              { return a.id == id; });
-                            if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
-                                accounts.emplace_back(it->id, it->cookie);
-                        }
-                        if (!accounts.empty())
-                        {
-                            LOG_INFO("Joining server (context menu)...");
-                            thread([accounts, pId = g_current_placeId_servers, jId = srv.jobId]()
-                                   { launchRobloxSequential(pId, jId, accounts); })
-                                .detach();
-                        }
-                        else
-                        {
-                            LOG_INFO("Selected account not found.");
-                        }
+                    if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); }).detach();
+                };
+                menu.onLaunchInstance = [pid = g_current_placeId_servers, jid = srv.jobId]() {
+                    if (g_selectedAccountIds.empty()) return;
+                    vector<pair<int, string>> accounts;
+                    for (int id : g_selectedAccountIds) {
+                        auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
+                        if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
                     }
-                    else
-                    {
-                        LOG_INFO("No account selected to join server.");
-                        Status::Error("No account selected to join server.");
-                        ModalPopup::Add("Select an account first.");
-                    }
-                }
-                if (MenuItem("Fill Join Options"))
-                {
-                    FillJoinOptions(g_current_placeId_servers, srv.jobId);
-                }
+                    if (!accounts.empty()) thread([pid, jid, accounts]() { launchRobloxSequential(pid, jid, accounts); }).detach();
+                };
+                menu.onFillGame = [pid = g_current_placeId_servers]() { FillJoinOptions(pid, ""); };
+                menu.onFillInstance = [pid = g_current_placeId_servers, jid = srv.jobId]() { FillJoinOptions(pid, jid); };
+                RenderStandardJoinMenu(menu);
                 EndPopup();
             }
 

@@ -26,6 +26,7 @@
 #include "../../ui.h"
 #include "../data.h"
 #include "../accounts/accounts_join_ui.h"
+#include "../context_menus.h"
 #include "../../utils/core/account_utils.h"
 #include <windows.h>
 
@@ -508,40 +509,34 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 					
 					// Context menu for the launch button
 					if (BeginPopupContextItem(("LaunchButtonCtx##" + to_string(i)).c_str(), ImGuiPopupFlags_MouseButtonRight)) {
-						if (MenuItem("Fill Join Options")) {
-							uint64_t place_id_val = 0;
-							try {
-								place_id_val = stoull(session.placeId);
-								FillJoinOptions(place_id_val, session.jobId);
-							} catch (...) {
-								LOG_INFO("Invalid Place ID in instance.");
+						uint64_t pid = 0;
+						try { pid = stoull(session.placeId); } catch (...) { pid = 0; }
+						StandardJoinMenuParams menu{};
+						menu.placeId = pid;
+						// universeId is a string in logs; try to parse
+						try { menu.universeId = session.universeId.empty() ? 0ULL : stoull(session.universeId); } catch (...) { menu.universeId = 0; }
+						menu.jobId = session.jobId;
+						menu.onLaunchGame = [pid]() {
+							if (pid == 0 || g_selectedAccountIds.empty()) return;
+							vector<pair<int, string>> accounts;
+							for (int id: g_selectedAccountIds) {
+								auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
+								if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
 							}
-						}
-						if (MenuItem("Copy Place ID")) {
-							SetClipboardText(session.placeId.c_str());
-						}
-						if (MenuItem("Copy Job ID")) {
-							SetClipboardText(session.jobId.c_str());
-						}
-						if (BeginMenu("Copy Launch Method")) {
-							if (MenuItem("Browser Link")) {
-								string link = "https://www.roblox.com/games/start?placeId=" + session.placeId +
-											"&gameInstanceId=" + session.jobId;
-								SetClipboardText(link.c_str());
+							if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); }).detach();
+						};
+						menu.onLaunchInstance = [pid, jid = session.jobId]() {
+							if (pid == 0 || jid.empty() || g_selectedAccountIds.empty()) return;
+							vector<pair<int, string>> accounts;
+							for (int id: g_selectedAccountIds) {
+								auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
+								if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
 							}
-							char buf[256];
-							snprintf(buf, sizeof(buf), "roblox://placeId=%s&gameInstanceId=%s",
-									session.placeId.c_str(), session.jobId.c_str());
-							if (MenuItem("Deep Link")) SetClipboardText(buf);
-							string js = "Roblox.GameLauncher.joinGameInstance(" + session.placeId + ", \"" +
-										session.jobId + "\")";
-							if (MenuItem("JavaScript")) SetClipboardText(js.c_str());
-							string luau =
-									"game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" + session.placeId +
-									", \"" + session.jobId + "\")";
-							if (MenuItem("ROBLOX Luau")) SetClipboardText(luau.c_str());
-							ImGui::EndMenu();
-						}
+							if (!accounts.empty()) thread([pid, jid, accounts]() { launchRobloxSequential(pid, jid, accounts); }).detach();
+						};
+						menu.onFillGame = [pid]() { if (pid) FillJoinOptions(pid, ""); };
+						menu.onFillInstance = [pid, jid = session.jobId]() { if (pid) FillJoinOptions(pid, jid); };
+						RenderStandardJoinMenu(menu);
 						EndPopup();
 					}
 				}
