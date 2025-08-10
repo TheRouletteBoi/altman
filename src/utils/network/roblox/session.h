@@ -109,7 +109,7 @@ namespace Roblox {
 		std::string presence;
 		std::string lastLocation;
 		uint64_t placeId = 0;
-		std::string gameId;
+		std::string jobId;
 	};
 
 	static std::unordered_map<uint64_t, PresenceData>
@@ -140,8 +140,9 @@ namespace Roblox {
 				d.lastLocation = up.value("lastLocation", "");
 				if (up.contains("placeId") && up["placeId"].is_number_unsigned())
 					d.placeId = up["placeId"].get<uint64_t>();
+				// API uses field name 'gameId' for jobId; we store it as jobId internally
 				if (up.contains("gameId") && !up["gameId"].is_null())
-					d.gameId = up["gameId"].get<std::string>();
+					d.jobId = up["gameId"].get<std::string>();
 				if (up.contains("userId"))
 					out[up["userId"].get<uint64_t>()] = std::move(d);
 			}

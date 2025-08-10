@@ -273,7 +273,7 @@ int WINAPI WinMain(
                                     acct.status = it->second.presence;
                                     acct.lastLocation = it->second.lastLocation;
                                     acct.placeId = it->second.placeId;
-                                    acct.jobId = it->second.gameId;
+                                    acct.jobId = it->second.jobId;
                                 } else {
                                     acct.status = "Offline";
                                     acct.lastLocation = "";

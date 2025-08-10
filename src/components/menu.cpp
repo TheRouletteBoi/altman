@@ -97,7 +97,7 @@ bool RenderMainMenu() {
 									acct.status = it->second.presence;
 									acct.lastLocation = it->second.lastLocation;
 									acct.placeId = it->second.placeId;
-									acct.jobId = it->second.gameId; // API uses gameId, we store as jobId
+									acct.jobId = it->second.jobId;
 								} else {
 									acct.status = Roblox::getPresence(acct.cookie, uid);
 									acct.lastLocation.clear();

@@ -136,9 +136,7 @@ namespace Data {
             account.isFavorite = item.value("isFavorite", false);
             account.lastLocation = item.value("lastLocation", "");
             account.placeId = item.value("placeId", 0ULL);
-            // Read new key 'jobId' with fallback to legacy 'gameId'
-            if (item.contains("jobId")) account.jobId = item.value("jobId", "");
-            else account.jobId = item.value("gameId", "");
+            account.jobId = item.value("jobId", "");
 
             if (item.contains("encryptedCookie")) {
                 string b64EncryptedCookie = item.value("encryptedCookie", "");

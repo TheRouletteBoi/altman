@@ -85,7 +85,7 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
                                 for (auto &a : g_accounts) {
                                     if (a.id == acctId) {
                                         a.placeId = it->second.placeId;
-                                        a.jobId = it->second.gameId;
+                                        a.jobId = it->second.jobId;
                                         break;
                                     }
                                 }

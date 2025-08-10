@@ -219,12 +219,12 @@ void RenderJoinOptions() {
                         auto pres = Roblox::getPresences({uid}, accounts.front().second);
                         auto it = pres.find(uid);
                         if (it == pres.end() || it->second.presence != "InGame" ||
-                            it->second.placeId == 0 || it->second.gameId.empty()) {
+                            it->second.placeId == 0 || it->second.jobId.empty()) {
                             Status::Error("User is not joinable");
                             return;
                         }
 
-                        launchRobloxSequential(it->second.placeId, it->second.gameId, accounts);
+                        launchRobloxSequential(it->second.placeId, it->second.jobId, accounts);
                     } catch (const std::exception &e) {
                         LOG_ERROR(std::string("Join by username failed: ") + e.what());
                         Status::Error("Failed to join by username");
