@@ -185,7 +185,6 @@ static void clearLogs() {
 		lock_guard<mutex> lk(g_logs_mtx);
 		g_logs.clear();
 		g_selected_log_idx = -1;
-		Data::SaveLogHistory(g_logs);
 	}
 }
 
@@ -219,12 +218,9 @@ static void refreshLogs() {
 			return b.timestamp < a.timestamp;
 		}); {
 			lock_guard<mutex> lk(g_logs_mtx);
-			// Clear existing logs and replace with newly parsed logs
 			g_logs.clear();
-			g_logs = tempLogs;  // Replace with new logs
+			g_logs = tempLogs;
 			g_selected_log_idx = -1;
-			// Still save the logs for this session, but they'll be rebuilt next time
-			Data::SaveLogHistory(g_logs);
 		}
 
 		LOG_INFO("Log scan complete. Recreated logs cache with " + std::to_string(tempLogs.size()) + " logs.");

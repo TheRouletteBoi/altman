@@ -79,9 +79,6 @@ namespace Data {
 
 	void SaveFriends(const std::string &filename = "friends.json");
 
-	std::vector<LogInfo> LoadLogHistory(const std::string &filename = "log_history.json");
-
-	void SaveLogHistory(const std::vector<LogInfo> &logs, const std::string &filename = "log_history.json");
 
 	std::string StorageFilePath(const std::string &filename);
 }
