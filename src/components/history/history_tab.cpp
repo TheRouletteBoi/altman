@@ -39,6 +39,7 @@ static int g_selected_log_idx = -1;
 static auto ICON_REFRESH = "\xEF\x8B\xB1 ";
 static auto ICON_TRASH = "\xEF\x87\xB8 ";
 static auto ICON_FOLDER = "\xEF\x81\xBB ";
+static auto ICON_JOIN = "\xEF\x8B\xB6 ";
 
 static vector<LogInfo> g_logs;
 static atomic_bool g_logs_loading{false};
@@ -271,9 +272,22 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 	ImGuiTableFlags tableFlags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg |
 	                             ImGuiTableFlags_SizingFixedFit;
 
-	PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
-	if (BeginTable("HistoryInfoTable", 2, tableFlags)) {
-		TableSetupColumn("##historylabel", ImGuiTableColumnFlags_WidthFixed, GetFontSize() * 6.875f); // ~110px
+    PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
+    // Compute label column width for the summary table based on visible rows
+    float historyLabelColumnWidth = GetFontSize() * 6.875f; // sensible minimum
+    {
+        vector<const char*> labels;
+        labels.push_back("File:");
+        labels.push_back("Time:");
+        labels.push_back("Version:");
+        labels.push_back("Channel:");
+        labels.push_back("User ID:");
+        float mx = 0.0f;
+        for (const char* lbl : labels) mx = (std::max)(mx, CalcTextSize(lbl).x);
+        historyLabelColumnWidth = (std::max)(historyLabelColumnWidth, mx + GetFontSize() + GetFontSize());
+    }
+    if (BeginTable("HistoryInfoTable", 2, tableFlags)) {
+        TableSetupColumn("##historylabel", ImGuiTableColumnFlags_WidthFixed, historyLabelColumnWidth); // adaptive
 		TableSetupColumn("##historyvalue", ImGuiTableColumnFlags_WidthStretch);
 
 		auto addRow = [&](const char *label, const string &value) {
@@ -383,8 +397,21 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 				ImGui::PopStyleColor(3);
 				
 				// Using a table for aligned fields
-					if (BeginTable("InstanceDetailsTable", 2, ImGuiTableFlags_BordersInnerV)) {
-						TableSetupColumn("##field", ImGuiTableColumnFlags_WidthFixed, GetFontSize() * 7.5f); // ~120px
+                    if (BeginTable("InstanceDetailsTable", 2, ImGuiTableFlags_BordersInnerV)) {
+                        // Compute label width for per-instance rows shown below
+                        float instLabelWidth = GetFontSize() * 7.5f;
+                        {
+                            vector<const char*> ilabels;
+                            if (!session.placeId.empty()) ilabels.push_back("Place ID:");
+                            if (!session.jobId.empty()) ilabels.push_back("Job ID:");
+                            if (!session.universeId.empty()) ilabels.push_back("Universe ID:");
+                            if (!session.serverIp.empty()) ilabels.push_back("Server IP:");
+                            if (!session.serverPort.empty()) ilabels.push_back("Server Port:");
+                            float mx = 0.0f;
+                            for (const char* lbl : ilabels) mx = (std::max)(mx, CalcTextSize(lbl).x);
+                            instLabelWidth = (std::max)(instLabelWidth, mx + GetFontSize() + GetFontSize());
+                        }
+                        TableSetupColumn("##field", ImGuiTableColumnFlags_WidthFixed, instLabelWidth);
 					TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
 					
 					// Place ID
@@ -447,35 +474,54 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 						PopID();
 					}
 					
-					// Server IP:Port
-					if (!session.serverIp.empty()) {
-						TableNextRow();
-						TableSetColumnIndex(0);
-						TextUnformatted("Server IP:");
-						
-						TableSetColumnIndex(1);
-						string serverStr = session.serverIp + ":" + session.serverPort;
-						PushID("ServerInfo");
-						Indent(10.0f); // Add padding before the value
-						TextWrapped("%s", serverStr.c_str());
-						Unindent(10.0f);
-						if (BeginPopupContextItem("CopyServerInfo")) {
-							if (MenuItem("Copy")) {
-								SetClipboardText(serverStr.c_str());
-							}
-							EndPopup();
-						}
-						PopID();
-					}
+                    // Server IP
+                    if (!session.serverIp.empty()) {
+                        TableNextRow();
+                        TableSetColumnIndex(0);
+                        TextUnformatted("Server IP:");
+
+                        TableSetColumnIndex(1);
+                        PushID("ServerIP");
+                        Indent(10.0f);
+                        TextWrapped("%s", session.serverIp.c_str());
+                        Unindent(10.0f);
+                        if (BeginPopupContextItem("CopyServerIP")) {
+                            if (MenuItem("Copy")) {
+                                SetClipboardText(session.serverIp.c_str());
+                            }
+                            EndPopup();
+                        }
+                        PopID();
+                    }
+
+                    // Server Port
+                    if (!session.serverPort.empty()) {
+                        TableNextRow();
+                        TableSetColumnIndex(0);
+                        TextUnformatted("Server Port:");
+
+                        TableSetColumnIndex(1);
+                        PushID("ServerPort");
+                        Indent(10.0f);
+                        TextWrapped("%s", session.serverPort.c_str());
+                        Unindent(10.0f);
+                        if (BeginPopupContextItem("CopyServerPort")) {
+                            if (MenuItem("Copy")) {
+                                SetClipboardText(session.serverPort.c_str());
+                            }
+                            EndPopup();
+                        }
+                        PopID();
+                    }
 					
 					EndTable();
 				}
 				
 				// Launch button for this specific instance
 				bool canLaunch = !session.placeId.empty() && !session.jobId.empty() && !g_selectedAccountIds.empty();
-				if (canLaunch) {
+                if (canLaunch) {
 					Spacing();
-					if (Button(("Launch this instance##" + to_string(i)).c_str())) {
+                    if (Button((string(ICON_JOIN) + " Launch Instance##" + to_string(i)).c_str())) {
 						uint64_t place_id_val = 0;
 						try {
 							place_id_val = stoull(session.placeId);

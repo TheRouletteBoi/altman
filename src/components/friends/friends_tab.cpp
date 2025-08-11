@@ -1099,7 +1099,7 @@ void RenderFriendsTab()
 
             bool canJoin = (row.presence == "InGame" && row.placeId && !row.jobId.empty());
             BeginDisabled(!canJoin);
-            if (Button((string(ICON_JOIN) + " Join Game").c_str()) && canJoin)
+            if (Button((string(ICON_JOIN) + " Launch Instance").c_str()) && canJoin)
             {
                 vector<pair<int, string>> accounts;
                 for (int id : g_selectedAccountIds)

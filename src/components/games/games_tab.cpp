@@ -373,8 +373,25 @@ static void RenderGameDetailsPanel(float panelWidth, float availableHeight) {
                                      ImGuiTableFlags_SizingFixedFit;
 
         PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
+        // Compute label column width based on rows that will render for this game
+        float gameLabelColumnWidth = GetFontSize() * 8.75f; // sensible minimum
+        {
+            vector<const char*> labels;
+            labels.push_back("Name:");
+            labels.push_back("Place ID:");
+            labels.push_back("Universe ID:");
+            labels.push_back("Creator:");
+            labels.push_back("Players:");
+            labels.push_back("Max Players:");
+            labels.push_back("Visits:");
+            labels.push_back("Genre:");
+            if (serverCount > 0) labels.push_back("Est. Servers:");
+            float mx = 0.0f;
+            for (const char* lbl : labels) mx = (std::max)(mx, CalcTextSize(lbl).x);
+            gameLabelColumnWidth = (std::max)(gameLabelColumnWidth, mx + GetFontSize() + GetFontSize());
+        }
         if (BeginTable("GameInfoTable", 2, tableFlags)) {
-            TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, GetFontSize() * 8.75f); // ~140px at 16px
+            TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, gameLabelColumnWidth);
             TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
 
             auto addRow = [&](const char *label, const string &valueString,

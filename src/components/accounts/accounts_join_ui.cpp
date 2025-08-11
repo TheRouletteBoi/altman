@@ -184,7 +184,7 @@ void RenderJoinOptions() {
         if (pid.empty() || !std::all_of(pid.begin(), pid.end(), [](char c){ return c>='0' && c<='9'; })) allowJoin = false;
     }
     BeginDisabled(!allowJoin);
-    if (Button(" \xEF\x8B\xB6  Join ")) {
+    if (Button(" \xEF\x8B\xB6  Launch ")) {
         auto doJoin = [&]() {
             if (g_selectedAccountIds.empty()) {
                 ModalPopup::Add("Select an account first.");
@@ -242,7 +242,7 @@ void RenderJoinOptions() {
                 if (join_type_combo_index == 1) {
                     jobId_str = join_jobid_buf;
                 } else if (join_type_combo_index != 0) {
-                    LOG_ERROR("Error: Join type not supported for direct launch");
+            LOG_ERROR("Error: Join type not supported for direct launch");
                     return;
                 }
             } catch (const std::invalid_argument &ia) {
