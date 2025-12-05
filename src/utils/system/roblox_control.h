@@ -287,10 +287,10 @@ namespace RobloxControl {
         namespace fs = std::filesystem;
         
         // Roblox cache locations on macOS
-        // TODO: Missing Path /Library/Roblox
         std::vector<std::string> cachePaths = {
             std::string(home) + "/Library/Caches/com.roblox.RobloxPlayer",
-            std::string(home) + "/Library/Application Support/Roblox",
+            std::string(home) + "/Library/Roblox/LocalStorage",
+            std::string(home) + "/Library/Roblox/OTAPatchBackups",
             std::string(home) + "/Library/Saved Application State/com.roblox.RobloxPlayer.savedState"
         };
         
@@ -312,6 +312,27 @@ namespace RobloxControl {
                 }
             } catch (const fs::filesystem_error& e) {
                 LOG_ERROR("Failed to clear cache at " + path + ": " + e.what());
+            }
+        }
+
+        // Remove rbx-storage files from Roblox base directory
+        fs::path baseDir = std::string(home) + "/Library/Roblox/";
+        if (!fs::exists(baseDir) || !fs::is_directory(baseDir)) {
+            LOG_INFO("Roblox base directory not found. Skipping rbx-storage cleanup.");
+        } else {
+            for (const auto& entry : fs::directory_iterator(baseDir)) {
+                if (!entry.is_regular_file())
+                    continue;
+                    
+                std::string filename = entry.path().filename().string();
+                if (filename.rfind("rbx-storage", 0) == 0) {
+                    try {
+                        fs::remove(entry.path());
+                        LOG_INFO("Deleted: " + entry.path().string());
+                    } catch (const std::exception& e) {
+                        LOG_ERROR("Failed to delete: " + entry.path().string() + " (" + e.what() + ")");
+                    }
+                }
             }
         }
         

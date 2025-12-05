@@ -16,6 +16,7 @@
 #elif __APPLE__
     #include <Security/Security.h>
     #include <CoreFoundation/CoreFoundation.h>
+    #include <mach-o/dyld.h>
 #endif
 
 #include "core/base64.h"
@@ -103,6 +104,62 @@ string decryptData(const vector<BYTE> &encryptedText) {
     // Simple decryption (matches encryption above)
     return string(encryptedText.begin(), encryptedText.end());
 }
+
+std::string GetApplicationDir()
+{
+    char buffer[PATH_MAX];
+    uint32_t size = sizeof(buffer);
+
+    // Get executable path inside the bundle
+    if (_NSGetExecutablePath(buffer, &size) != 0)
+        return "";
+
+    char resolved[PATH_MAX];
+    realpath(buffer, resolved);
+
+    std::string exePath = resolved;
+
+    // Strip "/Contents/MacOS/<binary>"
+    const std::string marker = "/Contents/MacOS/";
+    size_t pos = exePath.rfind(marker);
+    if (pos == std::string::npos)
+        return "";  // not inside an .app bundle
+
+    return exePath.substr(0, pos); // path to .app
+}
+
+std::string GetApplicationName()
+{
+    CFBundleRef mainBundle = CFBundleGetMainBundle();
+    if (!mainBundle)
+        return "";
+
+    CFStringRef nameRef = (CFStringRef)CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey);
+
+    if (!nameRef)
+        return "";
+
+    char buffer[256];
+    if (!CFStringGetCString(nameRef, buffer, sizeof(buffer), kCFStringEncodingUTF8))
+        return "";
+
+    return std::string(buffer);
+}
+
+std::string GetExecutablePath()
+{
+    char buffer[PATH_MAX];
+    uint32_t size = sizeof(buffer);
+
+    if (_NSGetExecutablePath(buffer, &size) != 0)
+        return "";
+
+    char resolved[PATH_MAX];
+    realpath(buffer, resolved);
+
+    return std::string(resolved);
+}
+
 #endif
 
 static std::filesystem::path GetStorageDir() {
@@ -119,7 +176,7 @@ static std::filesystem::path GetStorageDir() {
         // On macOS, use Application Support directory
         const char* home = getenv("HOME");
         if (home) {
-            dir = std::filesystem::path(home) / "Library" / "Application Support" / "AltMan" / "storage";
+            dir = std::filesystem::path(home) / "Library" / "Application Support" / "Altman" / "storage";
         } else {
             dir = "storage";
         }

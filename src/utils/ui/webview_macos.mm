@@ -9,7 +9,7 @@
 static inline const std::string kUserDataFolder = [] {
     const char* home = getenv("HOME");
     if (!home) home = "/tmp";
-    std::filesystem::path p = std::filesystem::path(home) / "Library" / "Application Support" / "WebViewProfiles" / "Roblox";
+    std::filesystem::path p = std::filesystem::path(home) / "Library" / "Application Support" / "Altman" / "WebViewProfiles" / "Roblox";
     std::filesystem::create_directories(p);
     return p.string();
 }();
