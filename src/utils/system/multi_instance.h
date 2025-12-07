@@ -25,7 +25,7 @@ inline void Disable() {
 
 namespace MultiInstance {
 inline sem_t* g_semaphore = SEM_FAILED;
-inline const char* SEMAPHORE_NAME = "/roblox_singleton_event";
+inline const char* SEMAPHORE_NAME = "/RobloxPlayerUniq";
 
 inline void Enable() {
     if (g_semaphore == SEM_FAILED) {

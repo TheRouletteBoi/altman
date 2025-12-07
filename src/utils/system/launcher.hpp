@@ -122,8 +122,146 @@ inline HANDLE startRoblox(uint64_t placeId, const string &jobId, const string &c
 }
 
 #elif __APPLE__
+#include <random>
+
+inline bool patchRobloxBinary(const std::string& appPath) {
+    std::string binaryPath = appPath + "/Contents/MacOS/RobloxPlayer";
+    
+    // Read the binary
+    /*std::ifstream binary(binaryPath, std::ios::binary);
+    if (!binary) {
+        LOG_ERROR("Failed to open RobloxPlayer binary");
+        return false;
+    }
+    
+    std::vector<uint8_t> data(
+        (std::istreambuf_iterator<char>(binary)),
+        std::istreambuf_iterator<char>()
+    );
+    binary.close();
+    
+    // Find and replace semaphore names
+    const char* oldName1 = "/RobloxPlayerUniq";
+    const char* oldName2 = "/robloxPlayerStartedEvent";
+    
+    // Unique names
+    auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+    
+    std::string newName1 = "/RobloxPlayer" + std::to_string(nowMs);
+    std::string newName2 = "/robloxStarted" + std::to_string(nowMs);
+    
+    // Pad to same length
+    while (newName1.length() < std::strlen(oldName1)) newName1 += "\0";
+    while (newName2.length() < std::strlen(oldName2)) newName2 += "\0";
+    
+    bool found1 = false, found2 = false;
+    
+    for (size_t i = 0; i < data.size() - std::strlen(oldName1); i++) {
+        if (std::memcmp(&data[i], oldName1, std::strlen(oldName1)) == 0) {
+            std::memcpy(&data[i], newName1.c_str(), newName1.length());
+            found1 = true;
+            LOG_INFO("Patched semaphore name 1");
+        }
+        if (std::memcmp(&data[i], oldName2, std::strlen(oldName2)) == 0) {
+            std::memcpy(&data[i], newName2.c_str(), newName2.length());
+            found2 = true;
+            LOG_INFO("Patched semaphore name 2");
+        }
+    }
+    
+    if (!found1 || !found2) {
+        LOG_ERROR("Failed to find semaphore names in binary");
+        return false;
+    }
+    
+    // Write back
+    std::ofstream output(binaryPath, std::ios::binary);
+    output.write(reinterpret_cast<char*>(data.data()), data.size());
+    output.close();*/
+    
+    // Re-sign
+    std::string codesignCmd = "codesign --force --deep --sign - \"" + appPath + "\" 2>/dev/null";
+    std::system(codesignCmd.c_str());
+    
+    return true;
+}
+
+inline bool createMultiInstanceRoblox(const std::string& instanceNumText) {
+
+    std::string originalPath = "/Applications/Roblox.app";
+    std::string modifiedPath = "/Applications/Roblox" + instanceNumText + ".app";
+    
+    if (std::filesystem::exists(modifiedPath)) {
+        return true;
+    }
+    
+    LOG_INFO("Creating Roblox" + instanceNumText + ".app...");
+    
+    // Copy the app
+    std::filesystem::copy(
+        originalPath, 
+        modifiedPath,
+        std::filesystem::copy_options::recursive |
+        std::filesystem::copy_options::overwrite_existing
+    );
+    
+    // Modify Info.plist
+    std::string plistPath = modifiedPath + "/Contents/Info.plist";
+    std::ifstream plistIn(plistPath);
+    std::stringstream buffer;
+    buffer << plistIn.rdbuf();
+    std::string plistContent = buffer.str();
+    plistIn.close();
+    
+    // Change bundle ID
+    size_t pos = plistContent.find("<string>com.roblox.RobloxPlayer</string>");
+    if (pos != std::string::npos) {
+        plistContent.replace(
+            pos,
+            40,
+            "<string>com.roblox.RobloxPlayer" + instanceNumText + "</string>"
+        );
+    }
+    
+    // Change LSMultipleInstancesProhibited
+    pos = plistContent.find("<key>LSMultipleInstancesProhibited</key>");
+    if (pos != std::string::npos) {
+        size_t truePos = plistContent.find("<true/>", pos);
+        if (truePos != std::string::npos && truePos - pos < 100) {
+            plistContent.replace(truePos, 7, "<false/>");
+        }
+    }
+    
+    std::ofstream plistOut(plistPath);
+    plistOut << plistContent;
+    plistOut.close();
+    
+    // Patch binary
+    if (!patchRobloxBinary(modifiedPath)) {
+        LOG_ERROR("Failed to patch binary");
+        return false;
+    }
+    
+    LOG_INFO("Successfully created multi-instance Roblox");
+    return true;
+}
 
 inline bool startRoblox(uint64_t placeId, const string &jobId, const string &cookie) {
+
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    uint64_t rndNum = gen();
+
+    std::stringstream ss;
+    ss << std::hex << rndNum;
+    std::string instanceNumText = ss.str();
+
+    if (!createMultiInstanceRoblox(instanceNumText)) {
+        return false;
+    }
+
     LOG_INFO("Fetching x-csrf token");
     auto csrfResponse = HttpClient::post(
         "https://auth.roblox.com/v1/authentication-ticket",
@@ -183,8 +321,8 @@ inline bool startRoblox(uint64_t placeId, const string &jobId, const string &coo
                             jobId.empty() ? "" : " with Job ID: " + jobId);
     LOG_INFO(logMessage);
 
-    // Use 'open' command on macOS to open the Roblox protocol URL
-    string command = "open \"" + protocolLaunchCommand + "\"";
+    string appPath = "/Applications/Roblox" + instanceNumText + ".app";
+    string command = "open -a \"" + appPath + "\" \"" + protocolLaunchCommand + "\"";
     int result = system(command.c_str());
     
     if (result != 0) {
