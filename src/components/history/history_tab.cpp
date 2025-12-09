@@ -556,7 +556,7 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 							if (!accounts.empty()) {
 								LOG_INFO("Launching game instance from history...");
 								thread([place_id_val, jobId = session.jobId, accounts]() {
-											launchRobloxSequential(place_id_val, jobId, accounts);
+											launchRobloxSequential(LaunchParams::gameJob(place_id_val, jobId), accounts);
 										})
 										.detach();
 							} else {
@@ -583,7 +583,7 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 								auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
 								if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
 							}
-							if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); }).detach();
+							if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(LaunchParams::standard(pid), accounts); }).detach();
 						};
 						menu.onLaunchInstance = [pid, jid = session.jobId]() {
 							if (pid == 0 || jid.empty() || g_selectedAccountIds.empty()) return;
@@ -592,7 +592,7 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 								auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
 								if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
 							}
-							if (!accounts.empty()) thread([pid, jid, accounts]() { launchRobloxSequential(pid, jid, accounts); }).detach();
+							if (!accounts.empty()) thread([pid, jid, accounts]() { launchRobloxSequential(LaunchParams::gameJob(pid, jid), accounts); }).detach();
 						};
 						menu.onFillGame = [pid]() { if (pid) FillJoinOptions(pid, ""); };
 						menu.onFillInstance = [pid, jid = session.jobId]() { if (pid) FillJoinOptions(pid, jid); };

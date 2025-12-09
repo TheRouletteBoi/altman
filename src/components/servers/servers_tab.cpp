@@ -303,7 +303,7 @@ void RenderServersTab()
                     {
                         LOG_INFO("Joining server (double-click)...");
                         thread([accounts, pId = g_current_placeId_servers, jId = srv.jobId]()
-                               { launchRobloxSequential(pId, jId, accounts); })
+                               { launchRobloxSequential(LaunchParams::gameJob(pId, jId), accounts); })
                             .detach();
                     }
                     else
@@ -332,7 +332,7 @@ void RenderServersTab()
                         auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
                         if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
                     }
-                    if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); }).detach();
+                    if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(LaunchParams::standard(pid), accounts); }).detach();
                 };
                 menu.onLaunchInstance = [pid = g_current_placeId_servers, jid = srv.jobId]() {
                     if (g_selectedAccountIds.empty()) return;
@@ -341,7 +341,7 @@ void RenderServersTab()
                         auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
                         if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
                     }
-                    if (!accounts.empty()) thread([pid, jid, accounts]() { launchRobloxSequential(pid, jid, accounts); }).detach();
+                    if (!accounts.empty()) thread([pid, jid, accounts]() { launchRobloxSequential(LaunchParams::gameJob(pid, jid), accounts); }).detach();
                 };
                 menu.onFillGame = [pid = g_current_placeId_servers]() { FillJoinOptions(pid, ""); };
                 menu.onFillInstance = [pid = g_current_placeId_servers, jid = srv.jobId]() { FillJoinOptions(pid, jid); };

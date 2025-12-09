@@ -770,7 +770,7 @@ void RenderFriendsTab()
                             auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
                             if (itA != g_accounts.end()) accounts.emplace_back(itA->id, itA->cookie);
                         }
-                        if (!accounts.empty()) Threading::newThread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); });
+                        if (!accounts.empty()) Threading::newThread([pid, accounts]() { launchRobloxSequential(LaunchParams::standard(pid), accounts); });
                     };
                     menu.onLaunchInstance = [row = f]() {
                         if (g_selectedAccountIds.empty()) return;
@@ -779,7 +779,7 @@ void RenderFriendsTab()
                             auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
                             if (itA != g_accounts.end()) accounts.emplace_back(itA->id, itA->cookie);
                         }
-                        if (!accounts.empty()) Threading::newThread([row, accounts]() { launchRobloxSequential(row.placeId, row.jobId, accounts); });
+                        if (!accounts.empty()) Threading::newThread([row, accounts]() { launchRobloxSequential(LaunchParams::gameJob(row.placeId, row.jobId), accounts); });
                     };
                     menu.onFillGame = [pid = f.placeId]() { FillJoinOptions(pid, ""); };
                     menu.onFillInstance = [row = f]() { FillJoinOptions(row.placeId, row.jobId); };
@@ -1135,7 +1135,18 @@ void RenderFriendsTab()
                 if (!accounts.empty())
                 {
                     Threading::newThread([row, accounts]()
-                                         { launchRobloxSequential(row.placeId, row.jobId, accounts); });
+                                         {
+                                            uint64_t uid = row.id;
+                                            auto pres = Roblox::getPresences({uid}, accounts.front().second);
+                                            auto it = pres.find(uid);
+                                            if (it == pres.end() || it->second.presence != "InGame" ||
+                                                it->second.placeId == 0 || it->second.jobId.empty()) {
+                                                Status::Error("User is not joinable");
+                                                return;
+                                            }
+
+                                            launchRobloxSequential(LaunchParams::followUser(std::to_string(uid)), accounts); 
+                                        });
                 }
             }
             EndDisabled();

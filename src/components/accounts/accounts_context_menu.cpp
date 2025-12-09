@@ -467,13 +467,13 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
                 menu.onLaunchGame = [pid = placeId, &account]() {
                     vector<pair<int, string>> accounts;
                     if (AccountFilters::IsAccountUsable(account)) accounts.emplace_back(account.id, account.cookie);
-                    if (!accounts.empty()) Threading::newThread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); });
+                    if (!accounts.empty()) Threading::newThread([pid, accounts]() { launchRobloxSequential(LaunchParams::standard(pid), accounts); });
                 };
                 menu.onLaunchInstance = [pid = placeId, jid = jobId, &account]() {
                     if (jid.empty()) return;
                     vector<pair<int, string>> accounts;
                     if (AccountFilters::IsAccountUsable(account)) accounts.emplace_back(account.id, account.cookie);
-                    if (!accounts.empty()) Threading::newThread([pid, jid, accounts]() { launchRobloxSequential(pid, jid, accounts); });
+                    if (!accounts.empty()) Threading::newThread([pid, jid, accounts]() { launchRobloxSequential(LaunchParams::gameJob(pid, jid), accounts); });
                 };
                 menu.onFillGame = [pid = placeId]() { FillJoinOptions(pid, ""); };
                 menu.onFillInstance = [pid = placeId, jid = jobId]() { if (!jid.empty()) FillJoinOptions(pid, jid); };

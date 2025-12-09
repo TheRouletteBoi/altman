@@ -42,8 +42,9 @@ static void HelpMarker(const char *desc) {
 
 static const char *join_types_local[] = {
     "Game",
-    "Instance",
+    "Game Server",
     "User",
+    "Private Server"
 };
 
 static const char *GetJoinHintLocal(int idx) {
@@ -52,6 +53,8 @@ static const char *GetJoinHintLocal(int idx) {
             return "placeId";
         case 2:
             return "username or userId (id=000)";
+        case 3:
+            return "private server link";
         default:
             return "";
     }
@@ -224,10 +227,35 @@ void RenderJoinOptions() {
                             return;
                         }
 
-                        launchRobloxSequential(it->second.placeId, it->second.jobId, accounts);
+                        launchRobloxSequential(LaunchParams::gameJob(it->second.placeId, it->second.jobId), accounts);
+                        // does not work properly yet. It says "The Following user has left the experience." If they aren't your friend
+                        //launchRobloxSequential(LaunchParams::followUser(std::to_string(uid)), accounts);
                     } catch (const std::exception &e) {
                         LOG_ERROR(std::string("Join by username failed: ") + e.what());
                         Status::Error("Failed to join by username");
+                    }
+                });
+                return;
+            }
+
+            if (join_type_combo_index == 3) {
+                string userInput = join_value_buf;
+                vector<pair<int, string> > accounts;
+                for (int id: g_selectedAccountIds) {
+                    auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
+                                           [id](auto &a) { return a.id == id; });
+                    if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
+                        accounts.emplace_back(it->id, it->cookie);
+                }
+                if (accounts.empty())
+                    return;
+
+                Threading::newThread([userInput, accounts]() {
+                    try {
+                        launchRobloxSequential(LaunchParams::privateServer(userInput), accounts);
+                    } catch (const std::exception &e) {
+                        LOG_ERROR(std::string("Join by link: ") + e.what());
+                        Status::Error("Failed to join by link");
                     }
                 });
                 return;
@@ -262,7 +290,7 @@ void RenderJoinOptions() {
             }
 
             Threading::newThread([placeId_val, jobId_str, accounts]() {
-                launchRobloxSequential(placeId_val, jobId_str, accounts);
+                launchRobloxSequential(LaunchParams::gameJob(placeId_val, jobId_str), accounts);
             });
         };
 #ifdef _WIN32

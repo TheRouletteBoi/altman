@@ -123,6 +123,7 @@ inline HANDLE startRoblox(uint64_t placeId, const string &jobId, const string &c
 
 #elif __APPLE__
 #include <random>
+#include <regex>
 
 inline bool patchRobloxBinary(const std::string& appPath) {
     std::string binaryPath = appPath + "/Contents/MacOS/RobloxPlayer";
@@ -248,32 +249,154 @@ inline bool createMultiInstanceRoblox(const std::string& instanceNumText) {
     return true;
 }
 
-inline bool startRoblox(uint64_t placeId, const string &jobId, const string &cookie) {
+// Launch mode enum
+enum class LaunchMode {
+    Standard,        // Join any server
+    GameJob,         // Join specific server by JobID
+    PrivateServer,   // Join private server via share link
+    FollowUser       // Follow a user into their game
+};
 
+// Launch parameters struct - holds all possible launch options
+struct LaunchParams {
+    LaunchMode mode = LaunchMode::Standard;
+    uint64_t placeId = 0;
+    std::string value;  // Multi-purpose: jobId, shareLink, or userId depending on mode
+    
+    static LaunchParams standard(uint64_t placeId) {
+        return {LaunchMode::Standard, placeId, ""};
+    }
+    
+    static LaunchParams gameJob(uint64_t placeId, const std::string& jobId) {
+        return {LaunchMode::GameJob, placeId, jobId};
+    }
+    
+    static LaunchParams privateServer(const std::string& shareLink) {
+        return {LaunchMode::PrivateServer, 0, shareLink};
+    }
+    
+    static LaunchParams followUser(const std::string& userId) {
+        return {LaunchMode::FollowUser, 0, userId};
+    }
+};
+
+inline bool resolvePrivateServer(const std::string& shareLink, const std::string& cookie, 
+                                 const std::string& csrfToken, uint64_t& placeId, 
+                                 std::string& linkCode, std::string& accessCode) {
+    std::regex shareLinkRegex(R"(roblox\.com/share\?code=([^&]+)&type=Server)");
+    std::smatch match;
+    
+    if (!std::regex_search(shareLink, match, shareLinkRegex) || match.size() <= 1) {
+        LOG_ERROR("Invalid share link format");
+        return false;
+    }
+    
+    std::string shareCode = match[1].str();
+    LOG_INFO("Resolving share code: " + shareCode);
+    
+    // Call API to resolve share link
+    std::string apiUrl = "https://apis.roblox.com/sharelinks/v1/resolve-link";
+    std::string jsonBody = "{\"linkId\":\"" + shareCode + "\",\"linkType\":\"Server\"}";
+    
+    auto apiResponse = HttpClient::post(
+        apiUrl,
+        {
+            {"Cookie", ".ROBLOSECURITY=" + cookie},
+            {"X-CSRF-TOKEN", csrfToken},
+            {"Content-Type", "application/json;charset=UTF-8"},
+            {"Accept", "application/json, text/plain, */*"},
+            {"Origin", "https://www.roblox.com"},
+            {"Referer", "https://www.roblox.com/"},
+            {"User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+        },
+        jsonBody
+    );
+    
+    if (apiResponse.status_code != 200) {
+        LOG_ERROR("API request failed with status: " + std::to_string(apiResponse.status_code));
+        return false;
+    }
+    
+    try {
+        auto jsonResponse = HttpClient::decode(apiResponse);
+        
+        if (!jsonResponse.contains("privateServerInviteData") || 
+            jsonResponse["privateServerInviteData"].is_null()) {
+            LOG_ERROR("API response missing privateServerInviteData");
+            return false;
+        }
+        
+        auto invite = jsonResponse["privateServerInviteData"];
+        
+        if (!invite.contains("status") || invite["status"] != "Valid") {
+            std::string status = invite.contains("status") ? invite["status"].get<std::string>() : "Unknown";
+            LOG_ERROR("Private server status: " + status);
+            return false;
+        }
+        
+        placeId = invite["placeId"].get<uint64_t>();
+        linkCode = invite["linkCode"].get<std::string>();
+        
+        LOG_INFO("Got placeId: " + std::to_string(placeId) + ", linkCode: " + linkCode);
+        
+    } catch (const exception &e) {
+        LOG_ERROR("Failed to parse API response: " + std::string(e.what()));
+        return false;
+    }
+    
+    // Fetch game page to get access code
+    std::string gameUrl = "https://www.roblox.com/games/" + std::to_string(placeId) + 
+                    "/?privateServerLinkCode=" + linkCode;
+    
+    auto pageResponse = HttpClient::get(
+        gameUrl,
+        {
+            {"Cookie", ".ROBLOSECURITY=" + cookie},
+            {"X-CSRF-TOKEN", csrfToken},
+            {"User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+        },
+        {}, true, 10
+    );
+    
+    std::regex accessCodeRegex(R"(Roblox\.GameLauncher\.joinPrivateGame\(\d+,\s*'([a-f0-9\-]+)',\s*'(\d+)')");
+    std::smatch accessMatch;
+    
+    if (std::regex_search(pageResponse.text, accessMatch, accessCodeRegex) && 
+        accessMatch.size() == 3) {
+        accessCode = accessMatch[1].str();
+        LOG_INFO("Retrieved access code: " + accessCode);
+    } else {
+        LOG_ERROR("Could not find access code");
+        return false;
+    }
+    
+    return true;
+}
+
+inline bool startRoblox(const LaunchParams& params, const std::string& cookie) {
     std::random_device rd;
     std::mt19937_64 gen(rd());
     uint64_t rndNum = gen();
-
     std::stringstream ss;
     ss << std::hex << rndNum;
     std::string instanceNumText = ss.str();
-
+    
     if (!createMultiInstanceRoblox(instanceNumText)) {
         return false;
     }
-
+    
     LOG_INFO("Fetching x-csrf token");
     auto csrfResponse = HttpClient::post(
         "https://auth.roblox.com/v1/authentication-ticket",
         {{"Cookie", ".ROBLOSECURITY=" + cookie}});
-
+    
     auto csrfToken = csrfResponse.headers.find("x-csrf-token");
     if (csrfToken == csrfResponse.headers.end()) {
         cerr << "failed to get CSRF token\n";
         LOG_ERROR("Failed to get CSRF token");
         return false;
     }
-
+    
     LOG_INFO("Fetching authentication ticket");
     auto ticketResponse = HttpClient::post(
         "https://auth.roblox.com/v1/authentication-ticket",
@@ -283,56 +406,113 @@ inline bool startRoblox(uint64_t placeId, const string &jobId, const string &coo
             {"Referer", "https://www.roblox.com/"},
             {"X-CSRF-TOKEN", csrfToken->second}
         });
-
+    
     auto ticket = ticketResponse.headers.find("rbx-authentication-ticket");
     if (ticket == ticketResponse.headers.end()) {
         cerr << "failed to get authentication ticket\n";
         LOG_ERROR("Failed to get authentication ticket");
         return false;
     }
-
-    auto nowMs = duration_cast<milliseconds>(
-                system_clock::now().time_since_epoch())
-            .count();
-    ostringstream ts;
-    ts << nowMs;
-
-    string placeLauncherUrl =
-            "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
-            "request=RequestGameJob"
-            "&browserTrackerId=147062882894"
-            "&placeId=" +
-            to_string(placeId) +
-            "&gameId=" + jobId +
-            "&isPlayTogetherGame=false"
-            "+browsertrackerid:147062882894"
-            "+robloxLocale:en_us"
-            "+gameLocale:en_us"
-            "+channel:";
-
-    string protocolLaunchCommand =
-            "roblox-player:1+launchmode:play"
-            "+gameinfo:" +
-            ticket->second +
-            "+launchtime:" + ts.str() +
-            "+placelauncherurl:" + urlEncode(placeLauncherUrl);
-
-    string logMessage = "Attempting to launch Roblox for place ID: " + to_string(placeId) + (
-                            jobId.empty() ? "" : " with Job ID: " + jobId);
-    LOG_INFO(logMessage);
-
-    string appPath = "/Applications/Roblox" + instanceNumText + ".app";
-    string command = "open -a \"" + appPath + "\" \"" + protocolLaunchCommand + "\"";
-    int result = system(command.c_str());
     
+    // Generate browser tracker ID
+    std::random_device trackerRd;
+    std::mt19937 trackerGen(trackerRd());
+    std::uniform_int_distribution<> dis1(100000, 175000);
+    std::uniform_int_distribution<> dis2(100000, 900000);
+    std::string browserTrackerId = std::to_string(dis1(trackerGen)) + std::to_string(dis2(trackerGen));
+    
+    auto nowMs = duration_cast<milliseconds>(
+        system_clock::now().time_since_epoch()).count();
+    std::ostringstream ts;
+    ts << nowMs;
+    
+    // Build place launcher URL based on mode
+    std::string placeLauncherUrl;
+    uint64_t placeId = params.placeId;
+    
+    switch (params.mode) {
+        case LaunchMode::PrivateServer: {
+            // Resolve share link to get private server details
+            std::string linkCode;
+            std::string accessCode;
+            
+            if (!resolvePrivateServer(params.value, cookie, csrfToken->second, 
+                                     placeId, linkCode, accessCode)) {
+                return false;
+            }
+            
+            if (!accessCode.empty()) {
+                placeLauncherUrl = 
+                    "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
+                    "request=RequestPrivateGame"
+                    "&placeId=" + std::to_string(placeId) +
+                    "&accessCode=" + accessCode +
+                    "&linkCode=" + linkCode;
+            }
+
+            LOG_INFO("Launching private server for place " + std::to_string(placeId));
+            break;
+        }
+        
+        case LaunchMode::FollowUser: {
+            placeLauncherUrl = 
+                "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
+                "request=RequestFollowUser"
+                "&userId=" + params.value;
+            
+            LOG_INFO("Following user " + params.value);
+            break;
+        }
+        
+        case LaunchMode::GameJob: {
+            placeLauncherUrl = 
+                "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
+                "request=RequestGameJob"
+                "&browserTrackerId=" + browserTrackerId +
+                "&placeId=" + std::to_string(placeId) +
+                "&gameId=" + params.value +
+                "&isPlayTogetherGame=false"
+                "&isTeleport=true";
+
+            LOG_INFO("Joining specific server for place " + std::to_string(placeId));
+            break;
+        }
+        
+        case LaunchMode::Standard:
+        default: {
+            placeLauncherUrl = 
+                "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
+                "request=RequestGame"
+                "&browserTrackerId=" + browserTrackerId +
+                "&placeId=" + std::to_string(placeId) +
+                "&isPlayTogetherGame=false";
+            
+            LOG_INFO("Launching standard join for place " + std::to_string(placeId));
+            break;
+        }
+    }
+    
+    string protocolLaunchCommand =
+        "roblox-player:1+launchmode:play"
+        "+gameinfo:" + ticket->second +
+        "+launchtime:" + ts.str() +
+        "+placelauncherurl:" + urlEncode(placeLauncherUrl) +
+        "+browsertrackerid:" + browserTrackerId +
+        "+robloxLocale:en_us"
+        "+gameLocale:en_us"
+        "+channel:"
+        "+LaunchExp:InApp";
+    
+    std::string appPath = "/Applications/Roblox" + instanceNumText + ".app";
+    std::string command = "open -a \"" + appPath + "\" \"" + protocolLaunchCommand + "\"";
+    
+    int result = system(command.c_str());
     if (result != 0) {
-        LOG_ERROR("Failed to launch Roblox. system() returned: " + to_string(result));
+        LOG_ERROR("Failed to launch Roblox. system() returned: " + std::to_string(result));
         return false;
     }
-
-    LOG_INFO("Roblox process started successfully for place ID: " + to_string(placeId));
     
-    // Sleep briefly to allow Roblox to initialize before next launch
+    LOG_INFO("Roblox process started successfully");
     usleep(500000); // 500ms
     
     return true;
@@ -340,8 +520,7 @@ inline bool startRoblox(uint64_t placeId, const string &jobId, const string &coo
 
 #endif
 
-inline void launchRobloxSequential(uint64_t placeId, const std::string &jobId,
-                                   const std::vector<std::pair<int, std::string>> &accounts) {
+inline void launchRobloxSequential(const LaunchParams& params, const std::vector<std::pair<int, std::string>> &accounts) {
     if (g_killRobloxOnLaunch)
         RobloxControl::KillRobloxProcesses();
 
@@ -350,8 +529,8 @@ inline void launchRobloxSequential(uint64_t placeId, const std::string &jobId,
 
     for (const auto &[accountId, cookie]: accounts) {
         LOG_INFO("Launching Roblox for account ID: " + std::to_string(accountId) +
-            " PlaceID: " + std::to_string(placeId) +
-            (jobId.empty() ? "" : " JobID: " + jobId));
+            " PlaceID: " + std::to_string(params.placeId) +
+            (params.value.empty() ? "" : " JobID: " + params.value));
         
 #ifdef _WIN32
         HANDLE proc = startRoblox(placeId, jobId, cookie);
@@ -365,7 +544,7 @@ inline void launchRobloxSequential(uint64_t placeId, const std::string &jobId,
                 std::to_string(accountId));
         }
 #elif __APPLE__
-        bool success = startRoblox(placeId, jobId, cookie);
+        bool success = startRoblox(params, cookie);
         if (success) {
             LOG_INFO("Roblox launched successfully for account ID: " +
                 std::to_string(accountId));

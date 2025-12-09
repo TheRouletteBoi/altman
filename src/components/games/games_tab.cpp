@@ -171,7 +171,7 @@ static void RenderFavoritesList(float listWidth, float availableHeight) {
                             auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
                             if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
                         }
-                        if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); }).detach();
+                        if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(LaunchParams::standard(pid), accounts); }).detach();
                     };
                     menu.onFillGame = [pid = game.placeId]() { FillJoinOptions(pid, ""); };
                     RenderStandardJoinMenu(menu);
@@ -268,7 +268,7 @@ static void RenderSearchResultsList(float listWidth, float availableHeight) {
                         auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
                         if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
                     }
-                    if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(pid, "", accounts); }).detach();
+                    if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(LaunchParams::standard(pid), accounts); }).detach();
                 };
                 menu.onFillGame = [pid = game.placeId]() { FillJoinOptions(pid, ""); };
                 RenderStandardJoinMenu(menu);
@@ -532,7 +532,7 @@ static void RenderGameDetailsPanel(float panelWidth, float availableHeight) {
                 }
                 if (!accounts.empty()) {
                     thread([placeId = gameInfo.placeId, accounts]() {
-                                launchRobloxSequential(placeId, "", accounts);
+                                launchRobloxSequential(LaunchParams::standard(placeId), accounts);
                             })
                             .detach();
                 } else {
