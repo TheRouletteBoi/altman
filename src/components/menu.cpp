@@ -27,6 +27,7 @@ using namespace ImGui;
 using namespace std;
 
 bool g_multiRobloxEnabled = false;
+bool g_bCreateSeparateRobloxInstance = false;
 
 // Global state for duplicate account modal
 static struct {

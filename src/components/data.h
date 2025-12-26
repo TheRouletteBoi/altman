@@ -41,6 +41,9 @@ struct AccountData {
 	// Cached presence details for join menu
 	uint64_t placeId = 0;
 	std::string jobId;
+
+	bool usesCustomInstance = false;
+	std::string instanceName;   // e.g. "Roblox_cooker_0001"
 };
 
 struct FavoriteGame {
@@ -62,6 +65,7 @@ struct FriendInfo {
 
 extern std::vector<FavoriteGame> g_favorites;
 extern std::vector<AccountData> g_accounts;
+extern std::unordered_map<int, size_t> g_accountIndexById;
 extern std::vector<FriendInfo> g_friends;
 extern std::unordered_map<int, std::vector<FriendInfo> > g_accountFriends;
 extern std::unordered_map<int, std::vector<FriendInfo> > g_unfriendedFriends;
@@ -101,6 +105,9 @@ namespace Data {
 
 
 	std::string StorageFilePath(std::string_view filename);
+
+	void rebuildAccountIndexCache();
+	void refreshAllInstanceStates();
 }
 
 #endif

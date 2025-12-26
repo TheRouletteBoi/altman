@@ -17,6 +17,7 @@
 
 std::vector<AccountData> g_accounts;
 std::set<int> g_selectedAccountIds;
+std::unordered_map<int, size_t> g_accountIndexById;
 std::vector<FavoriteGame> g_favorites;
 std::vector<FriendInfo> g_friends;
 std::unordered_map<int, std::vector<FriendInfo>> g_accountFriends;
@@ -230,6 +231,11 @@ namespace {
         account.lastLocation = safeGet<std::string>(item, "lastLocation", "");
         account.placeId = safeGet(item, "placeId", 0ULL);
         account.jobId = safeGet<std::string>(item, "jobId", "");
+    	account.usesCustomInstance = safeGet<bool>(item, "usesCustomInstance", false);
+    	account.instanceName = safeGet<std::string>(item, "instanceName", "");
+
+    	// failsafe override usesCustomInstance
+    	account.usesCustomInstance = std::filesystem::exists("/Applications/" + account.instanceName + ".app");
 
         if (item.contains("encryptedCookie")) {
             const auto encrypted = safeGet<std::string>(item, "encryptedCookie", "");
@@ -264,7 +270,9 @@ namespace {
             {"isFavorite", account.isFavorite},
             {"lastLocation", account.lastLocation},
             {"placeId", account.placeId},
-            {"jobId", account.jobId}
+            {"jobId", account.jobId},
+			{"usesCustomInstance", account.usesCustomInstance},
+			{"instanceName", account.instanceName}
         };
     }
 
@@ -323,6 +331,16 @@ namespace {
 } 
 
 namespace Data {
+
+	void rebuildAccountIndexCache() {
+		g_accountIndexById.clear();
+		g_accountIndexById.reserve(g_accounts.size());
+
+		for (size_t i = 0; i < g_accounts.size(); ++i) {
+			g_accountIndexById[g_accounts[i].id] = i;
+		}
+	}
+
     void LoadAccounts(std::string_view filename) {
         const auto path = makePath(filename);
         std::ifstream fileStream{path};
@@ -342,6 +360,8 @@ namespace Data {
             for (const auto& item : dataArray) {
                 g_accounts.push_back(parseAccount(item));
             }
+
+        	rebuildAccountIndexCache();
             
             LOG_INFO(std::format("Loaded {} accounts", g_accounts.size()));
         } catch (const nlohmann::json::parse_error& e) {
@@ -438,6 +458,7 @@ namespace Data {
             g_killRobloxOnLaunch = safeGet(j, "killRobloxOnLaunch", false);
             g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
             g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
+        	g_bCreateSeparateRobloxInstance = safeGet(j, "createSeparateRobloxInstance", false);
             
             LOG_INFO(std::format("Default account ID = {}", g_defaultAccountId));
             LOG_INFO(std::format("Status refresh interval = {}", g_statusRefreshInterval));
@@ -453,7 +474,8 @@ namespace Data {
             {"checkUpdatesOnStartup", g_checkUpdatesOnStartup},
             {"killRobloxOnLaunch", g_killRobloxOnLaunch},
             {"clearCacheOnLaunch", g_clearCacheOnLaunch},
-            {"multiRobloxEnabled", g_multiRobloxEnabled}
+            {"multiRobloxEnabled", g_multiRobloxEnabled},
+		    {"createSeparateRobloxInstance", g_bCreateSeparateRobloxInstance}
         };
         
         const auto path = makePath(filename);

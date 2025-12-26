@@ -146,15 +146,15 @@ namespace {
     }
 
     const AccountData* findAccount(int accountId) {
-        const auto it = std::ranges::find_if(g_accounts, 
+        const auto it = std::ranges::find_if(g_accounts,
             [accountId](const auto& a) { return a.id == accountId; });
         return it != g_accounts.end() ? &(*it) : nullptr;
     }
 
     const AccountData* findUsableAccount(int accountId) {
-        const auto it = std::ranges::find_if(g_accounts, 
-            [accountId](const auto& a) { 
-                return a.id == accountId && AccountFilters::IsAccountUsable(a); 
+        const auto it = std::ranges::find_if(g_accounts,
+            [accountId](const auto& a) {
+                return a.id == accountId && AccountFilters::IsAccountUsable(a);
             });
         return it != g_accounts.end() ? &(*it) : nullptr;
     }

@@ -5,7 +5,7 @@
 #include <array>
 #include <vector>
 #include <string>
-#include <stdexcept>
+#include <string_view>
 #include <imgui.h>
 #include "imgui_internal.h"
 #include <unordered_map>
@@ -14,6 +14,9 @@
 #include <thread>
 #include <utility>
 #include <cstdio>
+#include <ranges>
+#include <format>
+#include <expected>
 
 #include "../components.h"
 #include "network/roblox.h"
@@ -25,360 +28,858 @@
 #include "../context_menus.h"
 #include "../../utils/core/account_utils.h"
 
-using namespace ImGui;
-using namespace std;
+namespace {
+	void renderPublicServers();
+	void renderPrivateServers();
 
-enum class ServerSortMode
-{
-    None = 0,
-    PingAsc,
-    PingDesc,
-    PlayersAsc,
-    PlayersDesc
-};
+	constexpr float MIN_INPUT_WIDTH = 100.0f;
+	constexpr float DEFAULT_ROW_HEIGHT = 19.0f;
+	constexpr int COLUMN_COUNT = 4;
 
-static ServerSortMode g_serverSortMode = ServerSortMode::None;
-static int g_serverSortComboIndex = 0;
+	enum class ServerSortMode {
+		None = 0,
+		PingAsc,
+		PingDesc,
+		PlayersAsc,
+		PlayersDesc
+	};
 
-static vector<PublicServerInfo> s_cachedServers;
-static unordered_map<string, Roblox::ServerPage> g_pageCache;
+	enum class ServerTab {
+		Public,
+		Private
+	};
 
-static string g_currCursor_servers;
-static string g_nextCursor_servers;
-static string g_prevCursor_servers;
+	struct SeverTabInfo {
+		const char* title;
+		ServerTab tabId;
+		void (*renderFunction)();
+	};
 
-static char s_searchBuffer[64]{};
-static char s_placeIdBuffer[32]{};
+	struct ServersViewState {
+		int viewAccountId{-1};
+	};
 
-static uint64_t g_current_placeId_servers = 0;
+	static ServersViewState g_serversView;
 
-static bool matchesQuery(const PublicServerInfo &srv, const string &qLower)
-{
-    string hay = srv.jobId + ' ' + to_string(srv.currentPlayers) + '/' +
-                 to_string(srv.maximumPlayers) + ' ' +
-                 to_string(static_cast<int>(srv.averagePing + 0.5)) + "ms " +
-                 to_string(static_cast<int>(srv.averageFps + 0.5));
-    string lowerHay = toLower(hay);
-    return lowerHay.find(qLower) != string::npos;
+	constexpr std::array serverTabs = {
+		SeverTabInfo{"Public Servers", ServerTab::Public, renderPublicServers},
+		SeverTabInfo{"Private Server", ServerTab::Private, renderPrivateServers}
+	};
+
+	// Single unified private server struct
+	struct PrivateServer {
+		std::string name;
+		std::string ownerName;
+		std::string ownerDisplayName;
+		std::string universeName;
+		uint64_t vipServerId;
+		uint64_t placeId;
+		uint64_t universeId;
+		uint64_t ownerId;
+		int maxPlayers;
+		bool active;
+		std::string expirationDate;
+		bool willRenew;
+		std::optional<int> priceInRobux;
+
+		int playing;
+		double fps;
+		int ping;
+	};
+
+	struct ServerState {
+		ServerSortMode sortMode{ServerSortMode::None};
+		int sortComboIndex{0};
+		std::vector<PublicServerInfo> cachedServers;
+		std::unordered_map<std::string, Roblox::ServerPage> pageCache;
+		std::string currentCursor;
+		std::string nextCursor;
+		std::string prevCursor;
+		char searchBuffer[64]{};
+		char placeIdBuffer[32]{};
+		uint64_t currentPlaceId{0};
+	};
+
+	ServerState g_state;
+	int g_activeServersTab = static_cast<int>(ServerTab::Public);
+
+	std::string toLowerCase(std::string_view sv) {
+		std::string result;
+		result.reserve(sv.size());
+		std::ranges::transform(sv, std::back_inserter(result),
+			[](unsigned char c) { return std::tolower(c); });
+		return result;
+	}
+
+	bool matchesQuery(const PublicServerInfo& server, std::string_view queryLower) {
+		const auto haystack = std::format("{} {}/{} {}ms {}",
+			server.jobId,
+			server.currentPlayers, server.maximumPlayers,
+			static_cast<int>(server.averagePing + 0.5),
+			static_cast<int>(server.averageFps + 0.5));
+
+		return toLowerCase(haystack).find(queryLower) != std::string::npos;
+	}
+
+	std::expected<uint64_t, std::string> parsePlaceId(std::string_view input) {
+		std::string cleaned;
+		std::ranges::copy_if(input, std::back_inserter(cleaned),
+			[](char c) { return !std::isspace(static_cast<unsigned char>(c)); });
+
+		if (cleaned.empty() || !std::ranges::all_of(cleaned,
+			[](char c) { return std::isdigit(static_cast<unsigned char>(c)); })) {
+			return std::unexpected("Place ID must contain only digits");
+		}
+
+		char* end = nullptr;
+		errno = 0;
+		const uint64_t value = std::strtoull(cleaned.c_str(), &end, 10);
+
+		if (errno == ERANGE) {
+			return std::unexpected("Place ID is too large");
+		}
+		if (end == cleaned.c_str() || *end != '\0') {
+			return std::unexpected("Invalid Place ID format");
+		}
+
+		return value;
+	}
+
+	void fetchPageServers(uint64_t placeId, std::string_view cursor = {}) {
+		if (placeId != g_state.currentPlaceId) {
+			g_state.pageCache.clear();
+			g_state.currentPlaceId = placeId;
+		}
+
+		const std::string cursorStr(cursor);
+
+		if (const auto it = g_state.pageCache.find(cursorStr); it != g_state.pageCache.end()) {
+			const auto& page = it->second;
+			g_state.cachedServers = page.data;
+			g_state.nextCursor = page.nextCursor;
+			g_state.prevCursor = page.prevCursor;
+			g_state.currentCursor = cursorStr;
+			LOG_INFO(page.data.empty() ? "No servers found for this page" : "Fetched servers");
+			return;
+		}
+
+		try {
+			const auto page = Roblox::getPublicServersPage(placeId, cursorStr);
+			g_state.pageCache.emplace(cursorStr, page);
+			g_state.cachedServers = page.data;
+			g_state.nextCursor = page.nextCursor;
+			g_state.prevCursor = page.prevCursor;
+			g_state.currentCursor = cursorStr;
+			LOG_INFO(page.data.empty() ? "No servers found for this page" : "Fetched servers");
+		} catch (const std::exception& ex) {
+			LOG_INFO(std::format("Fetch error: {}", ex.what()));
+			g_state.cachedServers.clear();
+			g_state.nextCursor.clear();
+			g_state.prevCursor.clear();
+		}
+	}
+
+	std::vector<std::pair<int, std::string>> getUsableSelectedAccounts() {
+		std::vector<std::pair<int, std::string>> accounts;
+		accounts.reserve(g_selectedAccountIds.size());
+
+		for (const int id : g_selectedAccountIds) {
+			const auto it = std::ranges::find_if(g_accounts,
+				[id](const auto& a) { return a.id == id; });
+
+			if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it)) {
+				accounts.emplace_back(it->id, it->cookie);
+			}
+		}
+		return accounts;
+	}
+
+	void sortServers(std::vector<PublicServerInfo>& servers, ServerSortMode mode) {
+		switch (mode) {
+		case ServerSortMode::PingAsc:
+			std::ranges::sort(servers, {}, &PublicServerInfo::averagePing);
+			break;
+		case ServerSortMode::PingDesc:
+			std::ranges::sort(servers, std::ranges::greater{}, &PublicServerInfo::averagePing);
+			break;
+		case ServerSortMode::PlayersAsc:
+			std::ranges::sort(servers, {}, &PublicServerInfo::currentPlayers);
+			break;
+		case ServerSortMode::PlayersDesc:
+			std::ranges::sort(servers, std::ranges::greater{}, &PublicServerInfo::currentPlayers);
+			break;
+		case ServerSortMode::None:
+		default:
+			break;
+		}
+	}
+
+	std::vector<PublicServerInfo> getFilteredServers() {
+		const std::string queryLower = toLowerCase(g_state.searchBuffer);
+		const bool isSearching = !queryLower.empty();
+
+		std::vector<PublicServerInfo> displayList;
+
+		if (isSearching) {
+			for (const auto& [cursor, page] : g_state.pageCache) {
+				for (const auto& server : page.data) {
+					if (matchesQuery(server, queryLower)) {
+						displayList.push_back(server);
+					}
+				}
+			}
+		} else {
+			displayList = g_state.cachedServers;
+		}
+
+		if (g_state.sortMode == ServerSortMode::None && isSearching) {
+			std::ranges::sort(displayList, {}, &PublicServerInfo::jobId);
+		} else {
+			sortServers(displayList, g_state.sortMode);
+		}
+
+		return displayList;
+	}
+
+	struct RowMetrics {
+		float height;
+		float verticalPadding;
+	};
+
+	RowMetrics calculateRowMetrics() {
+		float height = ImGui::GetFrameHeight();
+		if (height <= 0.0f) height = ImGui::GetTextLineHeightWithSpacing();
+		if (height <= 0.0f) height = DEFAULT_ROW_HEIGHT;
+
+		const float textHeight = ImGui::GetTextLineHeight();
+		const float padding = std::max(0.0f, (height - textHeight) * 0.5f);
+
+		return {height, padding};
+	}
+
+	void renderSearchControls() {
+		const auto& style = ImGui::GetStyle();
+
+		const float fetchWidth = ImGui::CalcTextSize("Fetch Servers").x + style.FramePadding.x * 2.0f;
+		const float prevWidth = ImGui::CalcTextSize("\xEF\x81\x93 Prev Page").x + style.FramePadding.x * 2.0f;
+		const float nextWidth = ImGui::CalcTextSize("Next Page \xEF\x81\x94").x + style.FramePadding.x * 2.0f;
+		const float totalButtons = fetchWidth + prevWidth + nextWidth + style.ItemSpacing.x * 2;
+
+		const float inputWidth = std::max(MIN_INPUT_WIDTH,
+			ImGui::GetContentRegionAvail().x - totalButtons - style.ItemSpacing.x);
+
+		ImGui::PushItemWidth(inputWidth);
+		ImGui::InputTextWithHint("##placeid_servers", "Place Id",
+			g_state.placeIdBuffer, sizeof(g_state.placeIdBuffer));
+		ImGui::PopItemWidth();
+
+		ImGui::SameLine(0, style.ItemSpacing.x);
+		if (ImGui::Button("Fetch Servers", ImVec2(fetchWidth, 0))) {
+			if (auto result = parsePlaceId(g_state.placeIdBuffer)) {
+				g_state.currentCursor.clear();
+				fetchPageServers(*result);
+			} else {
+				LOG_INFO(result.error());
+			}
+		}
+
+		ImGui::SameLine(0, style.ItemSpacing.x);
+		ImGui::BeginDisabled(g_state.prevCursor.empty());
+		if (ImGui::Button("\xEF\x81\x93 Prev Page", ImVec2(prevWidth, 0))) {
+			fetchPageServers(g_state.currentPlaceId, g_state.prevCursor);
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine(0, style.ItemSpacing.x);
+		ImGui::BeginDisabled(g_state.nextCursor.empty());
+		if (ImGui::Button("Next Page \xEF\x81\x94", ImVec2(nextWidth, 0))) {
+			fetchPageServers(g_state.currentPlaceId, g_state.nextCursor);
+		}
+		ImGui::EndDisabled();
+	}
+
+	void renderFilterControls() {
+		constexpr const char* SORT_OPTIONS[] = {
+			"None", "Ping (Asc)", "Ping (Desc)", "Players (Asc)", "Players (Desc)"
+		};
+
+		const auto& style = ImGui::GetStyle();
+		const float comboWidth = ImGui::CalcTextSize("Players (Desc)").x + style.FramePadding.x * 7.0f;
+		const float searchWidth = std::max(MIN_INPUT_WIDTH,
+			ImGui::GetContentRegionAvail().x - comboWidth - style.ItemSpacing.x);
+
+		ImGui::PushItemWidth(searchWidth);
+		ImGui::InputTextWithHint("##search_servers", "Search...",
+			g_state.searchBuffer, sizeof(g_state.searchBuffer));
+		ImGui::PopItemWidth();
+
+		ImGui::SameLine(0, style.ItemSpacing.x);
+		ImGui::PushItemWidth(comboWidth);
+		if (ImGui::Combo("##server_filter", &g_state.sortComboIndex,
+			SORT_OPTIONS, IM_ARRAYSIZE(SORT_OPTIONS))) {
+			g_state.sortMode = static_cast<ServerSortMode>(g_state.sortComboIndex);
+		}
+		ImGui::PopItemWidth();
+	}
+
+	void renderServerRow(const PublicServerInfo& server, const RowMetrics& metrics) {
+		ImGui::TableNextRow();
+		ImGui::PushID(server.jobId.c_str());
+
+		ImGui::TableNextColumn();
+		const float cellStartY = ImGui::GetCursorPosY();
+
+		const auto selectableId = std::format("##JobIDSelectable_{}", server.jobId);
+		if (ImGui::Selectable(selectableId.c_str(), false,
+			ImGuiSelectableFlags_SpanAllColumns |
+			ImGuiSelectableFlags_AllowOverlap |
+			ImGuiSelectableFlags_AllowDoubleClick,
+			ImVec2(0, metrics.height)) &&
+			ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+
+			auto accounts = getUsableSelectedAccounts();
+			if (accounts.empty()) {
+				LOG_INFO("No account selected to join server.");
+				Status::Error("No account selected to join server.");
+				ModalPopup::Add("Select an account first.");
+			} else {
+				LOG_INFO("Joining server (double-click)...");
+				std::thread([accounts, placeId = g_state.currentPlaceId, jobId = server.jobId]() {
+					launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
+					}).detach();
+			}
+		}
+
+		if (ImGui::BeginPopupContextItem("ServerRowContextMenu")) {
+			StandardJoinMenuParams menu{};
+			menu.placeId = g_state.currentPlaceId;
+			menu.universeId = g_targetUniverseId_ServersTab;
+			menu.jobId = server.jobId;
+
+			menu.onLaunchGame = [placeId = g_state.currentPlaceId]() {
+				auto accounts = getUsableSelectedAccounts();
+				if (!accounts.empty()) {
+					std::thread([placeId, accounts]() {
+						launchRobloxSequential(LaunchParams::standard(placeId), accounts);
+						}).detach();
+				}
+			};
+
+			menu.onLaunchInstance = [placeId = g_state.currentPlaceId, jobId = server.jobId]() {
+				auto accounts = getUsableSelectedAccounts();
+				if (!accounts.empty()) {
+					std::thread([placeId, jobId, accounts]() {
+						launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
+						}).detach();
+				}
+			};
+
+			menu.onFillGame = [placeId = g_state.currentPlaceId]() {
+				FillJoinOptions(placeId, "");
+			};
+			menu.onFillInstance = [placeId = g_state.currentPlaceId, jobId = server.jobId]() {
+				FillJoinOptions(placeId, jobId);
+			};
+
+			RenderStandardJoinMenu(menu);
+			ImGui::EndPopup();
+		}
+
+		ImGui::SetCursorPosY(cellStartY + metrics.verticalPadding);
+		ImGui::TextUnformatted(server.jobId.c_str());
+		ImGui::SetCursorPosY(cellStartY + metrics.height);
+
+		ImGui::TableNextColumn();
+		float colStartY = ImGui::GetCursorPosY();
+		ImGui::SetCursorPosY(colStartY + metrics.verticalPadding);
+		const auto playersText = std::format("{}/{}", server.currentPlayers, server.maximumPlayers);
+		ImGui::TextUnformatted(playersText.c_str());
+		ImGui::SetCursorPosY(colStartY + metrics.height);
+
+		ImGui::TableNextColumn();
+		colStartY = ImGui::GetCursorPosY();
+		ImGui::SetCursorPosY(colStartY + metrics.verticalPadding);
+		const auto pingText = std::format("{:.0f} ms", server.averagePing);
+		ImGui::TextUnformatted(pingText.c_str());
+		ImGui::SetCursorPosY(colStartY + metrics.height);
+
+		ImGui::TableNextColumn();
+		colStartY = ImGui::GetCursorPosY();
+		ImGui::SetCursorPosY(colStartY + metrics.verticalPadding);
+		const auto fpsText = std::format("{:.0f}", server.averageFps);
+		ImGui::TextUnformatted(fpsText.c_str());
+		ImGui::SetCursorPosY(colStartY + metrics.height);
+
+		ImGui::PopID();
+	}
+
+	void renderServerTable(const std::vector<PublicServerInfo>& servers) {
+		constexpr ImGuiTableFlags tableFlags =
+			ImGuiTableFlags_Borders |
+			ImGuiTableFlags_RowBg |
+			ImGuiTableFlags_Resizable |
+			ImGuiTableFlags_ScrollY |
+			ImGuiTableFlags_Hideable |
+			ImGuiTableFlags_Reorderable;
+
+		if (!ImGui::BeginTable("ServersTable", COLUMN_COUNT, tableFlags,
+			ImVec2(0, ImGui::GetContentRegionAvail().y))) {
+			return;
+		}
+
+		const float baseFontSize = ImGui::GetFontSize();
+		ImGui::TableSetupColumn("Job ID", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("Players", ImGuiTableColumnFlags_WidthFixed, baseFontSize * 5.0f);
+		ImGui::TableSetupColumn("Ping", ImGuiTableColumnFlags_WidthFixed, baseFontSize * 4.375f);
+		ImGui::TableSetupColumn("FPS", ImGuiTableColumnFlags_WidthFixed, baseFontSize * 4.375f);
+		ImGui::TableSetupScrollFreeze(0, 1);
+
+		ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+		ImGui::TableNextColumn(); ImGui::TextUnformatted("Job ID");
+		ImGui::TableNextColumn(); ImGui::TextUnformatted("Players");
+		ImGui::TableNextColumn(); ImGui::TextUnformatted("Ping");
+		ImGui::TableNextColumn(); ImGui::TextUnformatted("FPS");
+
+		const auto metrics = calculateRowMetrics();
+		for (const auto& server : servers) {
+			renderServerRow(server, metrics);
+		}
+
+		ImGui::EndTable();
+	}
+
+	void renderPublicServers() {
+		renderSearchControls();
+		ImGui::Separator();
+		renderFilterControls();
+
+		const auto displayList = getFilteredServers();
+		renderServerTable(displayList);
+	}
+
+	// ========== PRIVATE SERVERS ==========
+
+	class PrivateServerUI {
+		public:
+			int selectedTab = 0;
+	private:
+		std::vector<PrivateServer> servers;
+		char searchFilter[256] = "";
+		bool isLoading = false;
+		std::string errorMessage;
+		std::optional<std::string> nextPageCursor;
+		std::optional<std::string> prevPageCursor;
+
+	public:
+		void loadServers(int tabType, const AccountData& account) {
+			isLoading = true;
+			errorMessage.clear();
+
+			std::thread([this, tabType, cookie = account.cookie]() {
+				try {
+					auto page = Roblox::getAllPrivateServers(tabType, cookie);
+
+					servers.clear();
+					for (const auto& info : page.data) {
+						PrivateServer server;
+						server.name = info.name;
+						server.ownerName = info.ownerName;
+						server.universeName = info.universeName;
+						server.vipServerId = info.privateServerId;
+						server.placeId = info.placeId;
+						server.universeId = info.universeId;
+						server.ownerId = info.ownerId;
+						server.active = info.active;
+						server.expirationDate = info.expirationDate;
+						server.willRenew = info.willRenew;
+						server.priceInRobux = info.priceInRobux;
+						server.ownerDisplayName = info.ownerName;
+						server.maxPlayers = 0;
+						server.playing = 0;
+						server.fps = 0.0f;
+						server.ping = 0.0;
+
+						/*auto page2 = Roblox::getPrivateServersForGame(server.placeId, cookie);
+						for (const auto& gameServer : page2.data) {
+							if (gameServer.vipServerId == server.vipServerId) {
+								server.playing = gameServer.playing;
+								server.fps = gameServer.fps;
+								server.ping = gameServer.ping;
+								server.ownerDisplayName = gameServer.ownerDisplayName;
+								server.maxPlayers = gameServer.maxPlayers;
+								break;
+							}
+						}*/
+
+						servers.push_back(std::move(server));
+					}
+
+					nextPageCursor = page.nextCursor;
+					prevPageCursor = page.prevCursor;
+
+					LOG_INFO(std::format("Loaded {} private servers", servers.size()));
+				}
+				catch (const std::exception& ex) {
+					errorMessage = std::format("Error loading servers: {}", ex.what());
+					LOG_ERROR(errorMessage);
+				}
+
+				isLoading = false;
+				}).detach();
+		}
+
+		void joinServer(const PrivateServer& server, const std::string& cookie) {
+			if (g_selectedAccountIds.empty()) {
+				LOG_INFO("No account selected to join server");
+				Status::Error("No account selected to join server");
+				ModalPopup::Add("Select an account first.");
+				return;
+			}
+
+			auto accounts = getUsableSelectedAccounts();
+			if (accounts.empty()) {
+				LOG_INFO("Selected account not usable");
+				return;
+			}
+
+			LOG_INFO(std::format("Joining private server: {}", server.name));
+
+			// Launch in background thread to fetch access code
+			std::thread([server, accounts, cookie]() {
+				try {
+					// Fetch access code from game-specific API
+					auto page = Roblox::getPrivateServersForGame(server.placeId, cookie);
+
+					// Find our server in the results
+					std::string accessCode;
+					for (const auto& gameServer : page.data) {
+
+						if (gameServer.vipServerId == server.vipServerId) {
+							accessCode = gameServer.accessCode;
+							break;
+						}
+					}
+
+					if (accessCode.empty()) {
+						LOG_ERROR("Failed to get access code for private server");
+						Status::Error("Failed to get access code");
+						return;
+					}
+
+					LaunchParams params = LaunchParams::privateServerDirect(server.placeId, accessCode);
+					launchRobloxSequential(params, accounts);
+				}
+				catch (const std::exception& ex) {
+					LOG_ERROR(std::format("Failed to join private server: {}", ex.what()));
+					Status::Error("Failed to join server");
+				}
+				}).detach();
+		}
+
+		void render(const AccountData& account) {
+			const auto& style = ImGui::GetStyle();
+
+			// Error display
+			if (!errorMessage.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+				ImGui::TextWrapped("%s", errorMessage.c_str());
+				ImGui::PopStyleColor();
+				ImGui::Separator();
+			}
+
+			// Tab selection
+			if (ImGui::BeginTabBar("PrivateServerTabs")) {
+				if (ImGui::BeginTabItem("Joinable Servers")) {
+					if (selectedTab != 1) {
+						selectedTab = 1;
+						loadServers(1, account);
+					}
+					ImGui::EndTabItem();
+				}
+
+				if (ImGui::BeginTabItem("My Servers")) {
+					if (selectedTab != 0) {
+						selectedTab = 0;
+						loadServers(0, account);
+					}
+					ImGui::EndTabItem();
+				}
+				ImGui::EndTabBar();
+			}
+
+			ImGui::Spacing();
+
+			// Controls
+			const float refreshWidth = ImGui::CalcTextSize("Refresh").x + style.FramePadding.x * 2.0f;
+			const float prevWidth = ImGui::CalcTextSize("\xEF\x81\x93 Prev").x + style.FramePadding.x * 2.0f;
+			const float nextWidth = ImGui::CalcTextSize("Next \xEF\x81\x94").x + style.FramePadding.x * 2.0f;
+			const float buttonsWidth = refreshWidth + prevWidth + nextWidth + style.ItemSpacing.x * 2;
+			const float searchWidth = std::max(MIN_INPUT_WIDTH,
+				ImGui::GetContentRegionAvail().x - buttonsWidth - style.ItemSpacing.x);
+
+			ImGui::PushItemWidth(searchWidth);
+			ImGui::InputTextWithHint("##private_search", "Search servers...",
+				searchFilter, sizeof(searchFilter));
+			ImGui::PopItemWidth();
+
+			ImGui::SameLine(0, style.ItemSpacing.x);
+			if (ImGui::Button("Refresh", ImVec2(refreshWidth, 0))) {
+				loadServers(selectedTab, account);
+			}
+
+			ImGui::SameLine(0, style.ItemSpacing.x);
+			ImGui::BeginDisabled(!prevPageCursor.has_value() || isLoading);
+			if (ImGui::Button("\xEF\x81\x93 Prev", ImVec2(prevWidth, 0))) {
+				// TODO: Implement pagination with cursor
+			}
+			ImGui::EndDisabled();
+
+			ImGui::SameLine(0, style.ItemSpacing.x);
+			ImGui::BeginDisabled(!nextPageCursor.has_value() || isLoading);
+			if (ImGui::Button("Next \xEF\x81\x94", ImVec2(nextWidth, 0))) {
+				// TODO: Implement pagination with cursor
+			}
+			ImGui::EndDisabled();
+
+			ImGui::Separator();
+
+			// Loading state
+			if (isLoading) {
+				ImGui::Text("Loading servers...");
+				return;
+			}
+
+			// Empty state
+			if (servers.empty() && errorMessage.empty()) {
+				ImGui::Text("No servers found");
+				return;
+			}
+
+			// Filter servers
+			const std::string filterLower = toLowerCase(searchFilter);
+			std::vector<PrivateServer> displayList;
+
+			for (const auto& server : servers) {
+				if (!filterLower.empty()) {
+					const std::string name = toLowerCase(server.name);
+					const std::string game = toLowerCase(server.universeName);
+					const std::string owner = toLowerCase(server.ownerDisplayName);
+
+					if (name.find(filterLower) == std::string::npos &&
+						game.find(filterLower) == std::string::npos &&
+						owner.find(filterLower) == std::string::npos) {
+						continue;
+					}
+				}
+				displayList.push_back(server);
+			}
+
+			// Render table
+			renderTable(displayList, account.cookie);
+		}
+
+	private:
+		void renderTable(const std::vector<PrivateServer>& displayList, const std::string& cookie) {
+			const int columnCount = selectedTab == 1 ? 4 : 5;
+			constexpr ImGuiTableFlags flags =
+				ImGuiTableFlags_Borders |
+				ImGuiTableFlags_RowBg |
+				ImGuiTableFlags_ScrollY |
+				ImGuiTableFlags_Resizable;
+
+			if (!ImGui::BeginTable("PrivateServersTable", columnCount, flags,
+				ImVec2(0, ImGui::GetContentRegionAvail().y - 30))) {
+				return;
+			}
+
+			const float base = ImGui::GetFontSize();
+
+			ImGui::TableSetupColumn("Server Name", ImGuiTableColumnFlags_WidthFixed, base * 11.25f);
+			ImGui::TableSetupColumn("Game", ImGuiTableColumnFlags_WidthStretch);
+
+			if (selectedTab == 0) {
+				ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, base * 4.375f);
+				ImGui::TableSetupColumn("Renew", ImGuiTableColumnFlags_WidthFixed, base * 3.75f);
+			} else {
+				ImGui::TableSetupColumn("Owner", ImGuiTableColumnFlags_WidthFixed, base * 8.125f);
+			}
+
+			ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, base * 5.0f);
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableHeadersRow();
+
+			for (const auto& server : displayList) {
+				ImGui::TableNextRow();
+				ImGui::PushID(static_cast<int>(server.vipServerId));
+
+				// Server name
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(server.name.c_str());
+
+				// Game name
+				ImGui::TableNextColumn();
+				ImGui::TextWrapped("%s", server.universeName.c_str());
+
+				if (selectedTab == 0) {
+					// Status
+					ImGui::TableNextColumn();
+					if (server.active) {
+						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 1.0f, 0.3f, 1.0f));
+						ImGui::TextUnformatted("Active");
+						ImGui::PopStyleColor();
+					} else {
+						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+						ImGui::TextUnformatted("Inactive");
+						ImGui::PopStyleColor();
+					}
+
+					// Renew
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(server.willRenew ? "Yes" : "No");
+				} else {
+					// Owner
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(server.ownerDisplayName.c_str());
+					if (ImGui::IsItemHovered() && !server.ownerName.empty()) {
+						ImGui::BeginTooltip();
+						ImGui::Text("Username: %s", server.ownerName.c_str());
+						ImGui::EndTooltip();
+					}
+				}
+
+				// Actions
+				ImGui::TableNextColumn();
+				if (ImGui::Button("Join", ImVec2(-1, 0))) {
+					joinServer(server, cookie);
+				}
+
+				// Tooltip with additional info
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("Server ID: %llu", server.vipServerId);
+					ImGui::Text("Place ID: %llu", server.placeId);
+					if (selectedTab == 0) {
+						if (!server.expirationDate.empty()) {
+							ImGui::Text("Expires: %s", server.expirationDate.c_str());
+						}
+						if (server.priceInRobux.has_value()) {
+							ImGui::Text("Price: %d Robux", server.priceInRobux.value());
+						}
+					}
+					ImGui::EndTooltip();
+				}
+
+				ImGui::PopID();
+			}
+
+			ImGui::EndTable();
+
+			// Status bar
+			ImGui::Separator();
+			ImGui::Text("Total servers: %zu", displayList.size());
+			if (nextPageCursor.has_value()) {
+				ImGui::SameLine();
+				ImGui::TextUnformatted("| More results available");
+			}
+		}
+	};
+
+	const AccountData* findAccount(int accountId) {
+		const auto it = std::ranges::find_if(g_accounts,
+			[accountId](const auto& a) { return a.id == accountId; });
+		return it != g_accounts.end() ? &(*it) : nullptr;
+	}
+
+	const AccountData* findUsableAccount(int accountId) {
+		const auto it = std::ranges::find_if(g_accounts,
+			[accountId](const auto& a) {
+				return a.id == accountId && AccountFilters::IsAccountUsable(a);
+			});
+		return it != g_accounts.end() ? &(*it) : nullptr;
+	}
+
+	int getPrimaryAccountCredentialsId() {
+		if (g_selectedAccountIds.empty())
+			return -1;
+
+		const auto primaryId = *g_selectedAccountIds.begin();
+		if (const auto* acc = findAccount(primaryId)) {
+			return acc->id;
+		}
+		return -1;
+	}
+
+	void renderPrivateServers() {
+		if (g_selectedAccountIds.empty()) {
+			ImGui::TextDisabled("Select an account in the Accounts tab to view private servers.");
+			return;
+		}
+
+		int primaryId = getPrimaryAccountCredentialsId();
+
+		if (primaryId == -1) {
+			ImGui::TextDisabled("Selected account not found.");
+			return;
+		}
+
+		const auto* account = findAccount(primaryId);
+		if (!account || !AccountFilters::IsAccountUsable(*account)) {
+			ImGui::TextDisabled("Selected account is not usable.");
+			return;
+		}
+
+		static PrivateServerUI ui;
+		static int lastAccountId = -1;
+
+		// Auto-reload when account changes
+		if (lastAccountId != primaryId) {
+			lastAccountId = primaryId;
+			ui.loadServers(ui.selectedTab == 1 ? 1 : 0, *account);
+		}
+
+		ui.render(*account);
+	}
 }
 
-static void fetchPageServers(uint64_t placeId, const string &cursor = {})
-{
-    try
-    {
-        if (placeId != g_current_placeId_servers)
-        {
-            g_pageCache.clear();
-            g_current_placeId_servers = placeId;
-        }
-        Roblox::ServerPage page;
-        auto it_cache = g_pageCache.find(cursor);
-        if (it_cache != g_pageCache.end())
-        {
-            page = it_cache->second;
-        }
-        else
-        {
-            page = Roblox::getPublicServersPage(placeId, cursor);
-            g_pageCache.emplace(cursor, page);
-        }
-        s_cachedServers = page.data;
-        g_nextCursor_servers = page.nextCursor;
-        g_prevCursor_servers = page.prevCursor;
-        g_currCursor_servers = cursor;
-        LOG_INFO(s_cachedServers.empty() ? "No servers found for this page" : "Fetched servers");
-    }
-    catch (const exception &ex)
-    {
-        LOG_INFO(string("Fetch error: ") + ex.what());
-        s_cachedServers.clear();
-        g_nextCursor_servers.clear();
-        g_prevCursor_servers.clear();
-    }
+void ServerTab_SearchPlace(uint64_t placeId) {
+	std::snprintf(g_state.placeIdBuffer, sizeof(g_state.placeIdBuffer),
+				  "%llu", static_cast<unsigned long long>(placeId));
+	fetchPageServers(placeId);
 }
 
-void ServerTab_SearchPlace(uint64_t placeId)
-{
-    snprintf(s_placeIdBuffer, sizeof(s_placeIdBuffer), "%llu", placeId);
-    fetchPageServers(placeId);
-}
+void RenderServersTab() {
+	if (g_targetPlaceId_ServersTab != 0) {
+		std::snprintf(g_state.placeIdBuffer, sizeof(g_state.placeIdBuffer),
+					 "%llu", static_cast<unsigned long long>(g_targetPlaceId_ServersTab));
+		fetchPageServers(g_targetPlaceId_ServersTab);
+		g_targetPlaceId_ServersTab = 0;
+	}
 
-void RenderServersTab()
-{
-    if (g_targetPlaceId_ServersTab != 0)
-    {
-        snprintf(s_placeIdBuffer, sizeof(s_placeIdBuffer), "%llu", g_targetPlaceId_ServersTab);
-        fetchPageServers(g_targetPlaceId_ServersTab);
-        g_targetPlaceId_ServersTab = 0;
-    }
+	auto& style = ImGui::GetStyle();
+	style.FrameRounding = 2.5f;
+	style.ChildRounding = 2.5f;
 
-    ImGuiStyle &style = GetStyle();
-    float fetchButtonWidth = CalcTextSize("Fetch Servers").x + style.FramePadding.x * 2.0f;
-    float prevButtonWidth = CalcTextSize("\xEF\x81\x93 Prev Page").x + style.FramePadding.x * 2.0f;
-    float nextButtonWidth = CalcTextSize("Next Page \xEF\x81\x94").x + style.FramePadding.x * 2.0f;
-    float buttons_total_width = fetchButtonWidth + prevButtonWidth + nextButtonWidth + style.ItemSpacing.x * 2;
-    float inputWidth = GetContentRegionAvail().x - buttons_total_width - style.ItemSpacing.x;
-    float minField = GetFontSize() * 6.25f; // ~100px at 16px base
-    if (inputWidth < minField)
-        inputWidth = minField;
-    PushItemWidth(inputWidth);
-    InputTextWithHint("##placeid_servers", "Place Id", s_placeIdBuffer, sizeof(s_placeIdBuffer));
-    PopItemWidth();
-    SameLine(0, style.ItemSpacing.x);
-    if (Button("Fetch Servers", ImVec2(fetchButtonWidth, 0)))
-    {
-        string raw_pid{s_placeIdBuffer};
-        erase_if(raw_pid, ::isspace);
-        if (raw_pid.empty() || !all_of(raw_pid.begin(), raw_pid.end(), ::isdigit))
-        {
-            LOG_INFO("Place ID must be all digits.");
-        }
-        else
-        {
-            try
-            {
-                uint64_t pid_val = stoull(raw_pid);
-                g_currCursor_servers.clear();
-                fetchPageServers(pid_val);
-            }
-            catch (const out_of_range &oor)
-            {
-                LOG_INFO(string("Place ID is too large: ") + oor.what());
-            }
-            catch (const invalid_argument &ia)
-            {
-                LOG_INFO(string("Invalid Place ID format: ") + ia.what());
-            }
-        }
-    }
-    SameLine(0, style.ItemSpacing.x);
-    BeginDisabled(g_prevCursor_servers.empty());
-    if (Button("\xEF\x81\x93 Prev Page", ImVec2(prevButtonWidth, 0)))
-        fetchPageServers(g_current_placeId_servers, g_prevCursor_servers);
-    EndDisabled();
-    SameLine(0, style.ItemSpacing.x);
-    BeginDisabled(g_nextCursor_servers.empty());
-    if (Button("Next Page \xEF\x81\x94", ImVec2(nextButtonWidth, 0)))
-        fetchPageServers(g_current_placeId_servers, g_nextCursor_servers);
-    EndDisabled();
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+		ImVec2(style.FramePadding.x + 2.0f, style.FramePadding.y + 2.0f));
 
-    Separator();
-    const char *sortOptions[] = {
-        "None",
-        "Ping (Asc)",
-        "Ping (Desc)",
-        "Players (Asc)",
-        "Players (Desc)"};
+	if (ImGui::BeginTabBar("ServersTitlebar", ImGuiTabBarFlags_Reorderable)) {
+		for (const auto& tab : serverTabs) {
+			const ImGuiTabItemFlags flags = (g_activeServersTab == static_cast<int>(tab.tabId))
+				? ImGuiTabItemFlags_SetSelected
+				: ImGuiTabItemFlags_None;
 
-    float comboWidth = CalcTextSize("Players (Desc)").x + style.FramePadding.x * 7.0f;
-    float searchInputWidth = GetContentRegionAvail().x - comboWidth - style.ItemSpacing.x;
-    float minSearch = GetFontSize() * 6.25f;
-    if (searchInputWidth < minSearch)
-        searchInputWidth = minSearch;
-    PushItemWidth(searchInputWidth);
-    InputTextWithHint("##search_servers", "Search...", s_searchBuffer, sizeof(s_searchBuffer));
-    PopItemWidth();
-    SameLine(0, style.ItemSpacing.x);
-    PushItemWidth(comboWidth);
-    if (Combo("##server_filter", &g_serverSortComboIndex, sortOptions, IM_ARRAYSIZE(sortOptions)))
-    {
-        g_serverSortMode = static_cast<ServerSortMode>(g_serverSortComboIndex);
-    }
-    PopItemWidth();
+			bool opened = ImGui::BeginTabItem(tab.title, nullptr, flags);
 
-    string qLower = toLower(s_searchBuffer);
-    bool isSearching = !qLower.empty();
-    vector<PublicServerInfo> displayList;
-    if (isSearching)
-    {
-        for (const auto &pair_cache : g_pageCache)
-        {
-            for (const auto &srv : pair_cache.second.data)
-            {
-                if (matchesQuery(srv, qLower))
-                    displayList.push_back(srv);
-            }
-        }
-    }
-    else
-    {
-        displayList = s_cachedServers;
-    }
+			if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+				g_activeServersTab = static_cast<int>(tab.tabId);
 
-    auto sortServers = [&](ServerSortMode mode)
-    {
-        switch (mode)
-        {
-        case ServerSortMode::PingAsc:
-            sort(displayList.begin(), displayList.end(), [](const PublicServerInfo &a, const PublicServerInfo &b)
-                 { return a.averagePing < b.averagePing; });
-            break;
-        case ServerSortMode::PingDesc:
-            sort(displayList.begin(), displayList.end(), [](const PublicServerInfo &a, const PublicServerInfo &b)
-                 { return a.averagePing > b.averagePing; });
-            break;
-        case ServerSortMode::PlayersAsc:
-            sort(displayList.begin(), displayList.end(), [](const PublicServerInfo &a, const PublicServerInfo &b)
-                 { return a.currentPlayers < b.currentPlayers; });
-            break;
-        case ServerSortMode::PlayersDesc:
-            sort(displayList.begin(), displayList.end(), [](const PublicServerInfo &a, const PublicServerInfo &b)
-                 { return a.currentPlayers > b.currentPlayers; });
-            break;
-        case ServerSortMode::None:
-        default:
-            break;
-        }
-    };
+			if (opened) {
+				tab.renderFunction();
+				ImGui::EndTabItem();
+			}
+		}
+		ImGui::EndTabBar();
+	}
 
-    if (g_serverSortMode == ServerSortMode::None && isSearching)
-    {
-        sort(displayList.begin(), displayList.end(), [](const PublicServerInfo &a, const PublicServerInfo &b)
-             { return a.jobId < b.jobId; });
-    }
-    else
-    {
-        sortServers(g_serverSortMode);
-    }
-
-    constexpr int columnCount = 4;
-    ImGuiTableFlags table_flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
-                                  ImGuiTableFlags_ScrollY | ImGuiTableFlags_Hideable | ImGuiTableFlags_Reorderable;
-
-    if (BeginTable("ServersTable", columnCount, table_flags, ImVec2(0, GetContentRegionAvail().y)))
-    {
-        TableSetupColumn("Job ID", ImGuiTableColumnFlags_WidthStretch);
-    float base = GetFontSize();
-    TableSetupColumn("Players", ImGuiTableColumnFlags_WidthFixed, base * 5.0f); // ~80px at 16px
-    TableSetupColumn("Ping", ImGuiTableColumnFlags_WidthFixed, base * 4.375f);  // ~70px at 16px
-    TableSetupColumn("FPS", ImGuiTableColumnFlags_WidthFixed, base * 4.375f);
-        TableSetupScrollFreeze(0, 1);
-        TableNextRow(ImGuiTableRowFlags_Headers);
-        TableNextColumn();
-        TextUnformatted("Job ID");
-        TableNextColumn();
-        TextUnformatted("Players");
-        TableNextColumn();
-        TextUnformatted("Ping");
-        TableNextColumn();
-        TextUnformatted("FPS");
-
-        float row_interaction_height = GetFrameHeight();
-        if (row_interaction_height <= 0)
-            row_interaction_height = GetTextLineHeightWithSpacing();
-        if (row_interaction_height <= 0)
-            row_interaction_height = 19.0f;
-        float text_visual_height = GetTextLineHeight();
-        float vertical_padding = (row_interaction_height - text_visual_height) * 0.5f;
-        vertical_padding = ImMax(0.0f, vertical_padding);
-
-        for (const auto &srv : displayList)
-        {
-            TableNextRow();
-            PushID(srv.jobId.c_str());
-
-            TableNextColumn();
-            float cell1_start_y = GetCursorPosY();
-
-            char selectable_widget_id[128];
-            snprintf(selectable_widget_id, sizeof(selectable_widget_id), "##JobIDSelectable_%s", srv.jobId.c_str());
-
-            if (Selectable(selectable_widget_id, false,
-                           ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap | ImGuiSelectableFlags_AllowDoubleClick,
-                           ImVec2(0, row_interaction_height)) &&
-                IsMouseDoubleClicked(0))
-            {
-                if (!g_selectedAccountIds.empty())
-                {
-                    vector<pair<int, string>> accounts;
-                    for (int id : g_selectedAccountIds)
-                    {
-                        auto it = find_if(g_accounts.begin(), g_accounts.end(),
-                                          [&](const AccountData &a)
-                                          { return a.id == id; });
-                        if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
-                            accounts.emplace_back(it->id, it->cookie);
-                    }
-                    if (!accounts.empty())
-                    {
-                        LOG_INFO("Joining server (double-click)...");
-                        thread([accounts, pId = g_current_placeId_servers, jId = srv.jobId]()
-                               { launchRobloxSequential(LaunchParams::gameJob(pId, jId), accounts); })
-                            .detach();
-                    }
-                    else
-                    {
-                        LOG_INFO("Selected account not found.");
-                    }
-                }
-                else
-                {
-                    LOG_INFO("No account selected to join server.");
-                    Status::Error("No account selected to join server.");
-                    ModalPopup::Add("Select an account first.");
-                }
-            }
-
-            if (BeginPopupContextItem("ServerRowContextMenu"))
-            {
-                StandardJoinMenuParams menu{};
-                menu.placeId = g_current_placeId_servers;
-                menu.universeId = g_targetUniverseId_ServersTab;
-                menu.jobId = srv.jobId;
-                menu.onLaunchGame = [pid = g_current_placeId_servers]() {
-                    if (g_selectedAccountIds.empty()) return;
-                    vector<pair<int, string>> accounts;
-                    for (int id : g_selectedAccountIds) {
-                        auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
-                        if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
-                    }
-                    if (!accounts.empty()) thread([pid, accounts]() { launchRobloxSequential(LaunchParams::standard(pid), accounts); }).detach();
-                };
-                menu.onLaunchInstance = [pid = g_current_placeId_servers, jid = srv.jobId]() {
-                    if (g_selectedAccountIds.empty()) return;
-                    vector<pair<int, string>> accounts;
-                    for (int id : g_selectedAccountIds) {
-                        auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
-                        if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
-                    }
-                    if (!accounts.empty()) thread([pid, jid, accounts]() { launchRobloxSequential(LaunchParams::gameJob(pid, jid), accounts); }).detach();
-                };
-                menu.onFillGame = [pid = g_current_placeId_servers]() { FillJoinOptions(pid, ""); };
-                menu.onFillInstance = [pid = g_current_placeId_servers, jid = srv.jobId]() { FillJoinOptions(pid, jid); };
-                RenderStandardJoinMenu(menu);
-                EndPopup();
-            }
-
-            SetCursorPosY(cell1_start_y + vertical_padding);
-            TextUnformatted(srv.jobId.c_str());
-            SetCursorPosY(cell1_start_y + row_interaction_height);
-
-            TableNextColumn();
-            float cell2_start_y = GetCursorPosY();
-            SetCursorPosY(cell2_start_y + vertical_padding);
-            char playersBuf[16];
-            snprintf(playersBuf, sizeof(playersBuf), "%d/%d", srv.currentPlayers, srv.maximumPlayers);
-            TextUnformatted(playersBuf);
-            SetCursorPosY(cell2_start_y + row_interaction_height);
-
-            TableNextColumn();
-            float cell3_start_y = GetCursorPosY();
-            SetCursorPosY(cell3_start_y + vertical_padding);
-            char pingBuf[16];
-            snprintf(pingBuf, sizeof(pingBuf), "%.0f ms", srv.averagePing);
-            TextUnformatted(pingBuf);
-            SetCursorPosY(cell3_start_y + row_interaction_height);
-
-            TableNextColumn();
-            float cell4_start_y = GetCursorPosY();
-            SetCursorPosY(cell4_start_y + vertical_padding);
-            char fpsBuf[16];
-            snprintf(fpsBuf, sizeof(fpsBuf), "%.0f", srv.averageFps);
-            TextUnformatted(fpsBuf);
-            SetCursorPosY(cell4_start_y + row_interaction_height);
-
-            PopID();
-        }
-        EndTable();
-    }
+	ImGui::PopStyleVar();
 }

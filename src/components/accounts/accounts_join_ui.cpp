@@ -39,7 +39,7 @@ namespace {
 
     enum JoinType {
         Game = 0,
-        Instance = 1,
+        GameServer = 1,
         User = 2,
         PrivateServer = 3
     };
@@ -100,7 +100,7 @@ namespace {
         switch (joinType) {
             case JoinType::Game: return "placeId (e.g., 606849621)";
             case JoinType::User: return "username or userId (id=000)";
-            case JoinType::PrivateServer: return "private server link";
+            case JoinType::PrivateServer: return "private server link (e.g., https://www.roblox.com/share?code=...)";
             default: return "";
         }
     }
@@ -235,7 +235,6 @@ namespace {
                     return;
                 }
 
-                // Assumes Roblox::getUserIdFromUsername and Roblox::getPresences exist
                 const uint64_t uid = spec.isId ? spec.id : Roblox::getUserIdFromUsername(spec.username);
                 const auto presenceMap = Roblox::getPresences({uid}, accounts.front().second);
                 
@@ -306,6 +305,8 @@ namespace {
             showError = validateUserInput(join_value_buf).showError;
         } else if (joinType == JoinType::Game) {
             showError = validatePlaceId(join_value_buf).showError;
+        } else if (joinType == JoinType::GameServer) {
+        	//showError = validateJobId(join_value_buf).showError;
         } else if (joinType == JoinType::PrivateServer) { 
             showError = validatePrivateServerLink(join_value_buf).showError;
         }
@@ -325,7 +326,7 @@ namespace {
                 UserSpecifier tmp{};
                 return parseUserSpecifier(trimmed, tmp);
             }
-            case JoinType::Instance: {
+            case JoinType::GameServer: {
                 const auto placeId = trim(join_value_buf);
                 const auto jobId = trim(join_jobid_buf);
                 return !placeId.empty() && isNumericString(placeId) && validateUUID(jobId);
@@ -359,7 +360,7 @@ namespace {
                 break;
                 
             case JoinType::Game:
-            case JoinType::Instance: {
+            case JoinType::GameServer: {
                 try {
                     std::stringstream ss(join_value_buf);
                     uint64_t placeId;
@@ -367,7 +368,7 @@ namespace {
                         throw std::invalid_argument("Failed to parse Place ID");
                     }
 
-                    const std::string jobId = (joinType == JoinType::Instance) 
+                    const std::string jobId = (joinType == JoinType::GameServer)
                         ? join_jobid_buf : std::string();
                         
                     handleJoinByPlaceId(placeId, jobId);
@@ -395,7 +396,7 @@ void FillJoinOptions(uint64_t placeId, const std::string& jobId) {
         join_type_combo_index = JoinType::Game;
     } else {
         std::snprintf(join_jobid_buf, sizeof(join_jobid_buf), "%s", jobId.c_str());
-        join_type_combo_index = JoinType::Instance;
+        join_type_combo_index = JoinType::GameServer;
     }
     g_activeTab = Tab_Accounts;
 }
@@ -407,17 +408,18 @@ void RenderJoinOptions() {
     renderHelpMarker(
         "Join Options:\n"
         "- Game: joins a game with its placeId\n"
-        "- Instance: joins the instance of a game with its placeId & jobId\n"
+        "- GameServer: joins the instance of a game with its placeId & jobId\n"
         "- User: joins the instance a user is in with their username or userId (formatted as id=000)\n"
-        "\t- User option is NOT a sniper, it only works for users who have joins on!"
+        "\t- User option is NOT a sniper, it only works for users who have joins on!\n"
+        "- Private server: joins private server by share link\n"
     );
     ImGui::Spacing();
 
-    ImGui::Combo(" Join Type", &join_type_combo_index, 
+    ImGui::Combo(" Join Type", &join_type_combo_index,
                 JOIN_TYPE_NAMES.data(), static_cast<int>(JOIN_TYPE_NAMES.size()));
 
     // Render appropriate inputs based on join type
-    if (join_type_combo_index == JoinType::Instance) {
+    if (join_type_combo_index == JoinType::GameServer) {
         renderInstanceInputs();
     } else {
         renderSingleInput(join_type_combo_index);
@@ -428,10 +430,10 @@ void RenderJoinOptions() {
     // Launch button
     const bool allowJoin = canJoin(join_type_combo_index);
     ImGui::BeginDisabled(!allowJoin);
-    
+
     if (ImGui::Button(std::format(" {}  Launch ", ICON_LAUNCH).c_str())) {
         auto doJoin = [&]() { performJoin(); };
-        
+
 #ifdef _WIN32
         if (!g_multiRobloxEnabled && RobloxControl::IsRobloxRunning()) {
             ConfirmPopup::Add("Roblox is already running. Launch anyway?", doJoin);
