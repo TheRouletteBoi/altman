@@ -17,6 +17,9 @@
 #include "system/main_thread.h"
 #include "system/update.h"
 
+#include "assets/fonts/embedded_rubik.h"
+#include "assets/fonts/embedded_fa_solid.h"
+
 #include <cstdio>
 #include <thread>
 #include <chrono>
@@ -43,7 +46,16 @@ void ReloadFonts(float dpiScale) {
     float iconFontSize = 13.0f * dpiScale;
 
     // Load main font
-    g_rubikFont = io.Fonts->AddFontFromFileTTF("assets/fonts/rubik-regular.ttf", baseFontSize);
+    //g_rubikFont = io.Fonts->AddFontFromFileTTF("assets/fonts/rubik-regular.ttf", baseFontSize);
+    ImFontConfig rubikCfg;
+    rubikCfg.FontDataOwnedByAtlas = false;
+    g_rubikFont = io.Fonts->AddFontFromMemoryTTF(
+        (void*)EmbeddedFonts::rubik_regular_ttf,
+        EmbeddedFonts::rubik_regular_ttf_len,
+        baseFontSize,
+        &rubikCfg
+    );
+
     if (!g_rubikFont) {
         LOG_ERROR("Failed to load rubik-regular.ttf font.");
         g_rubikFont = io.Fonts->AddFontDefault();
@@ -53,12 +65,16 @@ void ReloadFonts(float dpiScale) {
     ImFontConfig iconCfg;
     iconCfg.MergeMode = true;
     iconCfg.PixelSnapH = true;
+    iconCfg.FontDataOwnedByAtlas = false;
     static constexpr ImWchar fa_solid_ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
-    g_iconFont = io.Fonts->AddFontFromFileTTF(
-        "assets/fonts/fa-solid.ttf",
+    //g_iconFont = io.Fonts->AddFontFromFileTTF("assets/fonts/fa-solid.ttf", iconFontSize, &iconCfg, fa_solid_ranges);*/
+    g_iconFont = io.Fonts->AddFontFromMemoryTTF(
+        (void*)EmbeddedFonts::fa_solid_ttf,
+        EmbeddedFonts::fa_solid_ttf_len,
         iconFontSize,
         &iconCfg,
-        fa_solid_ranges);
+        fa_solid_ranges
+    );
     
     if (!g_iconFont && g_rubikFont) {
         LOG_ERROR("Failed to load fa-solid.ttf font for icons.");
