@@ -47,6 +47,14 @@ namespace {
     constexpr ImVec4 COLOR_VOICE_BANNED{1.0f, 0.7f, 0.7f, 1.0f};    // Pastel red
     constexpr ImVec4 COLOR_VOICE_NA{0.7f, 0.7f, 0.7f, 1.0f};        // Gray
 
+	struct DragDropState {
+		int draggedIndex = -1;
+		bool isDragging = false;
+		ImVec4 dragIndicatorColor = ImVec4(0.4f, 0.6f, 1.0f, 0.8f);
+	};
+
+	DragDropState g_dragDropState;
+
     struct UrlPopupState {
         bool open{false};
         int accountId{-1};
@@ -217,17 +225,80 @@ namespace {
         ImGui::SetCursorPosY(currentY + rowHeight);
     }
 
+	void renderDragDropTarget(int targetIndex, const std::vector<AccountData>& accounts) {
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ACCOUNT_ROW_REORDER")) {
+                const int sourceIndex = *(const int*)payload->Data;
+
+                if (sourceIndex != targetIndex &&
+                    sourceIndex >= 0 && sourceIndex < accounts.size() &&
+                    targetIndex >= 0 && targetIndex < accounts.size()) {
+
+                    // Perform the reorder
+                    auto accountCopy = g_accounts[sourceIndex];
+                    g_accounts.erase(g_accounts.begin() + sourceIndex);
+
+                    // Adjust target index if source was before target
+                    int insertIndex = targetIndex;
+                    if (sourceIndex < targetIndex) {
+                        insertIndex--;
+                    }
+
+                    g_accounts.insert(g_accounts.begin() + insertIndex, accountCopy);
+                    Data::SaveAccounts();
+
+                    LOG_INFO(std::format("Reordered account from index {} to {}",
+                                        sourceIndex, insertIndex));
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+    }
+
+    void renderDragDropIndicator(int currentIndex, int draggedIndex) {
+        if (!g_dragDropState.isDragging || draggedIndex < 0) return;
+
+        // Draw a line indicator where the item will be dropped
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+            const ImVec2 min = ImGui::GetItemRectMin();
+            const ImVec2 max = ImGui::GetItemRectMax();
+
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            const ImU32 color = ImGui::GetColorU32(g_dragDropState.dragIndicatorColor);
+
+            // Draw horizontal line at the top or bottom depending on relative position
+            const float lineThickness = 3.0f;
+            const float y = (currentIndex < draggedIndex) ? min.y : max.y;
+
+            drawList->AddLine(
+                ImVec2(min.x, y),
+                ImVec2(max.x, y),
+                color,
+                lineThickness
+            );
+        }
+    }
+
     void renderAccountRow(AccountData& account, const RowMetrics& metrics) {
         ImGui::TableNextRow();
         ImGui::PushID(account.id);
 
+        const auto it = std::ranges::find_if(g_accounts,
+            [&account](const auto& a) { return a.id == account.id; });
+        const int currentIndex = (it != g_accounts.end()) ?
+            std::distance(g_accounts.begin(), it) : -1;
+
         const bool isSelected = g_selectedAccountIds.contains(account.id);
         if (isSelected) {
-            ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, 
+            ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
                                   ImGui::GetColorU32(ImGuiCol_Header));
         }
 
-        // First column: Display Name with selectable
+        if (g_dragDropState.isDragging && currentIndex == g_dragDropState.draggedIndex) {
+            ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.3f)));
+        }
+
         ImGui::TableNextColumn();
         const float cellStartY = ImGui::GetCursorPosY();
 
@@ -236,6 +307,27 @@ namespace {
                              ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
                              ImVec2(0, metrics.height))) {
             handleAccountSelection(account.id, isSelected);
+        }
+
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
+            ImGui::SetDragDropPayload("ACCOUNT_ROW_REORDER", &currentIndex, sizeof(int));
+            g_dragDropState.isDragging = true;
+            g_dragDropState.draggedIndex = currentIndex;
+
+            // Show preview
+            ImGui::Text("Moving: %s", account.displayName.c_str());
+            ImGui::EndDragDropSource();
+        }
+
+        // Reset drag state when not dragging
+        if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+            g_dragDropState.isDragging = false;
+            g_dragDropState.draggedIndex = -1;
+        }
+
+        if (currentIndex >= 0) {
+            renderDragDropTarget(currentIndex, g_accounts);
+            renderDragDropIndicator(currentIndex, g_dragDropState.draggedIndex);
         }
 
         // Handle hold gesture
@@ -264,7 +356,6 @@ namespace {
             handleHoldAction(account);
         }
 
-        // Context menu
         const auto contextMenuId = std::format("AccountsTable_ContextMenu_{}", account.id);
         RenderAccountContextMenu(account, contextMenuId);
 
@@ -375,7 +466,6 @@ void RenderAccountsTable(std::vector<AccountData>& accountsToDisplay,
 
     const ImVec2 tableSize(0.0f, tableHeight > 0.0f ? tableHeight - 2.0f : 0.0f);
     if (!ImGui::BeginTable(tableId, COLUMN_COUNT, tableFlags, tableSize)) {
-        renderUrlPopup();
         return;
     }
 
@@ -404,7 +494,6 @@ void RenderAccountsTable(std::vector<AccountData>& accountsToDisplay,
     }
 
     ImGui::EndTable();
-    renderUrlPopup();
 }
 
 void RenderFullAccountsTabContent() {
