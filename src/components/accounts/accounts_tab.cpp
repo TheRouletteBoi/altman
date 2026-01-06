@@ -1,4 +1,5 @@
 #include "accounts_context_menu.h"
+#include "accounts_context_menu.h"
 #include "accounts_join_ui.h"
 #include "imgui_internal.h"
 #include "accounts.h"
@@ -41,7 +42,6 @@ namespace {
     constexpr float COL_VOICE_WEIGHT = 0.4500f;
     constexpr float COL_NOTE_WEIGHT = 2.0000f;
 
-    // Voice status colors (pastel palette)
     constexpr ImVec4 COLOR_VOICE_ENABLED{0.7f, 1.0f, 0.7f, 1.0f};   // Pastel green
     constexpr ImVec4 COLOR_VOICE_DISABLED{1.0f, 1.0f, 0.7f, 1.0f};  // Pastel yellow
     constexpr ImVec4 COLOR_VOICE_BANNED{1.0f, 0.7f, 0.7f, 1.0f};    // Pastel red
@@ -347,7 +347,6 @@ namespace {
             g_holdStartTimes.erase(account.id);
         }
 
-        // Handle double-click
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
             handleDoubleClick(account);
         }
@@ -359,13 +358,11 @@ namespace {
         const auto contextMenuId = std::format("AccountsTable_ContextMenu_{}", account.id);
         RenderAccountContextMenu(account, contextMenuId);
 
-        // Display name text
         ImGui::SetNextItemAllowOverlap();
         ImGui::SetCursorPosY(cellStartY + metrics.verticalPadding);
         ImGui::TextUnformatted(account.displayName.c_str());
         ImGui::SetCursorPosY(cellStartY + metrics.height);
 
-        // Remaining columns
         renderCenteredTextCell(account.username, cellStartY, metrics.height, metrics.verticalPadding);
         renderCenteredTextCell(account.userId, cellStartY, metrics.height, metrics.verticalPadding);
         renderStatusCell(account, cellStartY, metrics.height, metrics.verticalPadding);
@@ -418,7 +415,7 @@ namespace {
         ImGui::EndPopup();
     }
 
-    float calculateJoinOptionsHeight(int joinTypeIndex) {
+    float calculateJoinOptionsHeight(JoinType joinType) {
         const auto& style = ImGui::GetStyle();
         float height = 0.0f;
 
@@ -429,7 +426,7 @@ namespace {
         height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
         
         // Input fields
-        if (joinTypeIndex == 1) {  // Instance type has two inputs
+        if (joinType == JoinType::GameServer) {
             height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
             height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
         } else {
@@ -438,7 +435,7 @@ namespace {
         
         // Separator
         height += 1.0f + style.ItemSpacing.y;
-        
+
         // Buttons
         height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
         height += style.ItemSpacing.y;
@@ -469,7 +466,6 @@ void RenderAccountsTable(std::vector<AccountData>& accountsToDisplay,
         return;
     }
 
-    // Setup columns
     ImGui::TableSetupColumn("Display Name", ImGuiTableColumnFlags_WidthStretch, COL_DISPLAY_NAME_WEIGHT);
     ImGui::TableSetupColumn("Username", ImGuiTableColumnFlags_WidthStretch, COL_USERNAME_WEIGHT);
     ImGui::TableSetupColumn("UserID", ImGuiTableColumnFlags_WidthStretch, COL_USERID_WEIGHT);
@@ -478,7 +474,6 @@ void RenderAccountsTable(std::vector<AccountData>& accountsToDisplay,
     ImGui::TableSetupColumn("Note", ImGuiTableColumnFlags_WidthStretch, COL_NOTE_WEIGHT);
     ImGui::TableSetupScrollFreeze(0, 1);
 
-    // Render header
     ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
     ImGui::TableNextColumn(); ImGui::TextUnformatted("Display Name");
     ImGui::TableNextColumn(); ImGui::TextUnformatted("Username");
@@ -487,7 +482,6 @@ void RenderAccountsTable(std::vector<AccountData>& accountsToDisplay,
     ImGui::TableNextColumn(); ImGui::TextUnformatted("Voice");
     ImGui::TableNextColumn(); ImGui::TextUnformatted("Note");
 
-    // Render rows
     const auto metrics = calculateRowMetrics();
     for (auto& account : accountsToDisplay) {
         renderAccountRow(account, metrics);
@@ -500,7 +494,7 @@ void RenderFullAccountsTabContent() {
     const float availHeight = ImGui::GetContentRegionAvail().y;
     const auto& style = ImGui::GetStyle();
 
-    const float joinOptionsHeight = calculateJoinOptionsHeight(join_type_combo_index);
+    const float joinOptionsHeight = calculateJoinOptionsHeight(static_cast<JoinType>(join_type_combo_index));
     const float separatorHeight = 1.0f + style.ItemSpacing.y;
     const float totalReserved = separatorHeight + joinOptionsHeight;
 

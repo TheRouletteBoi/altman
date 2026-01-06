@@ -499,7 +499,6 @@ namespace {
     }
 
     void renderUrlPopups(const AccountData& account) {
-        // Single account custom URL popup
         if (g_customUrl.open && g_customUrl.accountId == account.id) {
             ImGui::OpenPopup(std::format("Custom URL##Acct{}", account.id).c_str());
             g_customUrl.open = false;
@@ -530,8 +529,7 @@ namespace {
             }
             ImGui::EndPopup();
         }
-        
-        // Multi-account custom URL popup
+
         if (g_multiUrl.open && g_multiUrl.anchorAccountId == account.id) {
             ImGui::OpenPopup("Custom URL##Multiple");
             g_multiUrl.open = false;
@@ -586,15 +584,13 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
     
     const bool isMultiSelection = (g_selectedAccountIds.size() > 1) && 
                                   g_selectedAccountIds.contains(account.id);
-    
-    // Async presence fetch if needed
+
     if (ImGui::IsWindowAppearing()) {
         if (account.status == "InGame" && account.placeId == 0 && !account.userId.empty()) {
             asyncFetchPresence(account.id, account.userId, account.cookie);
         }
     }
-    
-    // Header
+
     if (isMultiSelection) {
         ImGui::TextUnformatted("Multiple Accounts");
         ImGui::Separator();
@@ -612,8 +608,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
         }
         ImGui::Separator();
     }
-    
-    // Copy Info submenu
+
     if (ImGui::BeginMenu("Copy Info")) {
         if (isMultiSelection) {
             renderCopyInfoMenuMulti(getSelectedAccountsOrdered());
@@ -622,8 +617,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
         }
         ImGui::EndMenu();
     }
-    
-    // Note submenu
+
     if (ImGui::BeginMenu("Note")) {
         if (isMultiSelection) {
             auto selectedAccounts = getSelectedAccountsOrderedMutable();
@@ -633,8 +627,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
         }
         ImGui::EndMenu();
     }
-    
-    // Browser submenu
+
     if (ImGui::BeginMenu("Browser")) {
         if (isMultiSelection) {
             renderBrowserMenuMulti(getSelectedAccountsOrdered(), account.id);
@@ -643,15 +636,13 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
         }
         ImGui::EndMenu();
     }
-    
-    // In-game section (single account only)
+
     if (!isMultiSelection && account.status == "InGame") {
         renderInGameMenuSingle(account);
     }
     
     ImGui::Separator();
-    
-    // Set default account (single only)
+
     if (!isMultiSelection) {
         if (ImGui::MenuItem("Set as Default Account")) {
             g_defaultAccountId = account.id;
@@ -660,8 +651,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
             Data::SaveSettings("settings.json");
         }
     }
-    
-    // Removal
+
     if (isMultiSelection) {
         const int removeCount = static_cast<int>(g_selectedAccountIds.size());
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
@@ -672,6 +662,13 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
                 std::format("Delete {} accounts?", removeCount),
                 [idsToRemove]() {
                     const std::unordered_set<int> toRemove(idsToRemove.begin(), idsToRemove.end());
+
+                	for (const auto& acc : g_accounts) {
+						if (toRemove.contains(acc.id)) {
+							MultiInstance::cleanupUserEnvironment(acc.username);
+						}
+					}
+
                     std::erase_if(g_accounts, [&toRemove](const auto& acc) {
                         return toRemove.contains(acc.id);
                     });
@@ -689,8 +686,11 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
         if (ImGui::MenuItem("Remove Account")) {
             ConfirmPopup::Add(
                 std::format("Delete {}?", account.displayName),
-                [id = account.id, displayName = account.displayName]() {
+                [id = account.id, displayName = account.displayName, username = account.username]() {
                     LOG_INFO(std::format("Attempting to delete account: {} (ID: {})", displayName, id));
+                	if (!MultiInstance::cleanupUserEnvironment(username)) {
+						LOG_WARN("Environment cleanup failed for " + username);
+					}
                     std::erase_if(g_accounts, [id](const auto& acc) { return acc.id == id; });
                     g_selectedAccountIds.erase(id);
                     Status::Set("Deleted account " + displayName);

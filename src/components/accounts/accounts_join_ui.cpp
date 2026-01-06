@@ -37,18 +37,11 @@ namespace {
     constexpr float MIN_FIELD_WIDTH = 100.0f;  // ~100px at 16px font
     constexpr float MIN_WIDE_WIDTH = 420.0f;   // ~420px
 
-    enum JoinType {
-        Game = 0,
-        GameServer = 1,
-        User = 2,
-        PrivateServer = 3
-    };
-
     constexpr std::array<const char*, 4> JOIN_TYPE_NAMES = {
-        "Game",
+        "Private Server",
+    	"Game",
         "Game Server",
-        "User",
-        "Private Server"
+        "User"
     };
 
     // UUID validation parts for jobId
@@ -98,9 +91,9 @@ namespace {
 
     constexpr const char* getJoinHint(JoinType joinType) noexcept {
         switch (joinType) {
+			case JoinType::PrivateServer: return "private server link (e.g., https://www.roblox.com/share?code=...)";
             case JoinType::Game: return "placeId (e.g., 606849621)";
             case JoinType::User: return "username or userId (id=000)";
-            case JoinType::PrivateServer: return "private server link (e.g., https://www.roblox.com/share?code=...)";
             default: return "";
         }
     }
@@ -236,6 +229,7 @@ namespace {
                 }
 
                 const uint64_t uid = spec.isId ? spec.id : Roblox::getUserIdFromUsername(spec.username);
+
                 const auto presenceMap = Roblox::getPresences({uid}, accounts.front().second);
                 
                 const auto it = presenceMap.find(uid);
@@ -301,14 +295,14 @@ namespace {
         ImGui::PushItemWidth(width);
 
         bool showError = false;
-        if (joinType == JoinType::User) {
-            showError = validateUserInput(join_value_buf).showError;
+    	if (joinType == JoinType::PrivateServer) {
+    		showError = validatePrivateServerLink(join_value_buf).showError;
         } else if (joinType == JoinType::Game) {
             showError = validatePlaceId(join_value_buf).showError;
         } else if (joinType == JoinType::GameServer) {
         	//showError = validateJobId(join_value_buf).showError;
-        } else if (joinType == JoinType::PrivateServer) { 
-            showError = validatePrivateServerLink(join_value_buf).showError;
+        } else if (joinType == JoinType::User) {
+	        showError = validateUserInput(join_value_buf).showError;
         }
 
         if (showError) renderErrorBorder();
@@ -320,23 +314,23 @@ namespace {
 
     bool canJoin(int joinType) {
         switch (joinType) {
-            case JoinType::User: {
-                const auto trimmed = trim(join_value_buf);
-                if (trimmed.empty()) return false;
-                UserSpecifier tmp{};
-                return parseUserSpecifier(trimmed, tmp);
-            }
+	        case JoinType::PrivateServer:
+        		return validatePrivateServerLink(join_value_buf).isValid;
+	        case JoinType::Game: {
+        		const auto placeId = trim(join_value_buf);
+        		return !placeId.empty() && isNumericString(placeId);
+	        }
             case JoinType::GameServer: {
                 const auto placeId = trim(join_value_buf);
                 const auto jobId = trim(join_jobid_buf);
                 return !placeId.empty() && isNumericString(placeId) && validateUUID(jobId);
             }
-            case JoinType::Game: {
-                const auto placeId = trim(join_value_buf);
-                return !placeId.empty() && isNumericString(placeId);
-            }
-            case JoinType::PrivateServer:
-                return validatePrivateServerLink(join_value_buf).isValid;
+	        case JoinType::User: {
+            		const auto trimmed = trim(join_value_buf);
+            		if (trimmed.empty()) return false;
+            		UserSpecifier tmp{};
+            		return parseUserSpecifier(trimmed, tmp);
+	        }
             default:
                 return false;
         }
@@ -351,14 +345,9 @@ namespace {
         const auto joinType = static_cast<JoinType>(join_type_combo_index);
 
         switch (joinType) {
-            case JoinType::User:
-                handleJoinByUser(join_value_buf);
-                break;
-                
-            case JoinType::PrivateServer:
-                handleJoinByPrivateServer(join_value_buf);
-                break;
-                
+	        case JoinType::PrivateServer:
+        		handleJoinByPrivateServer(join_value_buf);
+        		break;
             case JoinType::Game:
             case JoinType::GameServer: {
                 try {
@@ -379,6 +368,9 @@ namespace {
                 }
                 break;
             }
+	        case JoinType::User:
+        		handleJoinByUser(join_value_buf);
+        		break;
             default:
                 LOG_ERROR("Unsupported join type");
                 break;
@@ -388,7 +380,7 @@ namespace {
 } 
 
 void FillJoinOptions(uint64_t placeId, const std::string& jobId) {
-    std::snprintf(join_value_buf, sizeof(join_value_buf), "%llu", 
+    std::snprintf(join_value_buf, sizeof(join_value_buf), "%llu",
                   static_cast<unsigned long long>(placeId));
     
     if (jobId.empty()) {
@@ -446,11 +438,9 @@ void RenderJoinOptions() {
     }
     ImGui::EndDisabled();
 
-    // Clear button
     ImGui::SameLine(0, 10);
     if (ImGui::Button(std::format(" {}  Clear Join Options ", ICON_CLEAR).c_str())) {
         join_value_buf[0] = '\0';
         join_jobid_buf[0] = '\0';
-        join_type_combo_index = JoinType::Game;
     }
 }

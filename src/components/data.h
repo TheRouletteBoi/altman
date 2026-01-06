@@ -41,9 +41,9 @@ struct AccountData {
 	// Cached presence details for join menu
 	uint64_t placeId = 0;
 	std::string jobId;
-
-	bool usesCustomInstance = false;
-	std::string instanceName;   // e.g. "Roblox_cooker_0001"
+	bool isUsingCustomClient = false;
+	std::string clientName;
+	std::string customClientBase;
 };
 
 struct FavoriteGame {
@@ -77,6 +77,7 @@ extern int g_statusRefreshInterval;
 extern bool g_checkUpdatesOnStartup;
 extern bool g_killRobloxOnLaunch;
 extern bool g_clearCacheOnLaunch;
+extern std::unordered_map<std::string, std::string> g_clientKeys;
 extern std::array<char, 128> s_jobIdBuffer;
 extern std::array<char, 128> s_playerBuffer;
 

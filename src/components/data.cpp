@@ -26,10 +26,11 @@ std::unordered_map<int, std::vector<FriendInfo>> g_unfriendedFriends;
 int g_defaultAccountId = -1;
 std::array<char, 128> s_jobIdBuffer = {};
 std::array<char, 128> s_playerBuffer = {};
-int g_statusRefreshInterval = 1;
+int g_statusRefreshInterval = 3;
 bool g_checkUpdatesOnStartup = true;
 bool g_killRobloxOnLaunch = false;
 bool g_clearCacheOnLaunch = false;
+std::unordered_map<std::string, std::string> g_clientKeys;
 
 namespace {
 #ifdef _WIN32
@@ -231,11 +232,9 @@ namespace {
         account.lastLocation = safeGet<std::string>(item, "lastLocation", "");
         account.placeId = safeGet(item, "placeId", 0ULL);
         account.jobId = safeGet<std::string>(item, "jobId", "");
-    	account.usesCustomInstance = safeGet<bool>(item, "usesCustomInstance", false);
-    	account.instanceName = safeGet<std::string>(item, "instanceName", "");
-
-    	// failsafe override usesCustomInstance
-    	account.usesCustomInstance = std::filesystem::exists("/Applications/" + account.instanceName + ".app");
+    	account.isUsingCustomClient = safeGet<bool>(item, "isUsingCustomClient", false);
+    	account.clientName = safeGet<std::string>(item, "clientName", "");
+    	account.customClientBase = safeGet<std::string>(item, "customClientBase", "");
 
         if (item.contains("encryptedCookie")) {
             const auto encrypted = safeGet<std::string>(item, "encryptedCookie", "");
@@ -271,8 +270,9 @@ namespace {
             {"lastLocation", account.lastLocation},
             {"placeId", account.placeId},
             {"jobId", account.jobId},
-			{"usesCustomInstance", account.usesCustomInstance},
-			{"instanceName", account.instanceName}
+			{"isUsingCustomClient", account.isUsingCustomClient},
+			{"clientName", account.clientName},
+        	{"customClientBase", account.customClientBase}
         };
     }
 
@@ -439,56 +439,66 @@ namespace Data {
         LOG_INFO(std::format("Saved {} favourites", g_favorites.size()));
     }
 
-    void LoadSettings(std::string_view filename) {
-        const auto path = makePath(filename);
-        std::ifstream fin{path};
-        
-        if (!fin.is_open()) {
-            LOG_INFO(std::format("No {}, using default settings", path));
-            return;
-        }
+	void LoadSettings(std::string_view filename) {
+		const auto path = makePath(filename);
+		std::ifstream fin{path};
 
-        try {
-            nlohmann::json j;
-            fin >> j;
-            
-            g_defaultAccountId = safeGet(j, "defaultAccountId", -1);
-            g_statusRefreshInterval = safeGet(j, "statusRefreshInterval", 1);
-            g_checkUpdatesOnStartup = safeGet(j, "checkUpdatesOnStartup", true);
-            g_killRobloxOnLaunch = safeGet(j, "killRobloxOnLaunch", false);
-            g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
-            g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
-        	g_bCreateSeparateRobloxInstance = safeGet(j, "createSeparateRobloxInstance", false);
-            
-            LOG_INFO(std::format("Default account ID = {}", g_defaultAccountId));
-            LOG_INFO(std::format("Status refresh interval = {}", g_statusRefreshInterval));
-        } catch (const std::exception& e) {
-            LOG_ERROR(std::format("Failed to parse {}: {}", filename, e.what()));
-        }
-    }
+		if (!fin.is_open()) {
+			LOG_INFO(std::format("No {}, using default settings", path));
+			return;
+		}
 
-    void SaveSettings(std::string_view filename) {
-        const nlohmann::json j = {
-            {"defaultAccountId", g_defaultAccountId},
-            {"statusRefreshInterval", g_statusRefreshInterval},
-            {"checkUpdatesOnStartup", g_checkUpdatesOnStartup},
-            {"killRobloxOnLaunch", g_killRobloxOnLaunch},
-            {"clearCacheOnLaunch", g_clearCacheOnLaunch},
-            {"multiRobloxEnabled", g_multiRobloxEnabled},
-		    {"createSeparateRobloxInstance", g_bCreateSeparateRobloxInstance}
-        };
-        
-        const auto path = makePath(filename);
-        std::ofstream out{path};
-        
-        if (!out.is_open()) {
-            LOG_ERROR(std::format("Could not open {} for writing", path));
-            return;
-        }
-        
-        out << j.dump(4);
-        LOG_INFO("Saved settings");
-    }
+		try {
+			nlohmann::json j;
+			fin >> j;
+
+			g_defaultAccountId = safeGet(j, "defaultAccountId", -1);
+			g_statusRefreshInterval = safeGet(j, "statusRefreshInterval", 3);
+			g_checkUpdatesOnStartup = safeGet(j, "checkUpdatesOnStartup", true);
+			g_killRobloxOnLaunch = safeGet(j, "killRobloxOnLaunch", false);
+			g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
+			g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
+
+			// Load client keys
+			if (j.contains("clientKeys") && j["clientKeys"].is_object()) {
+				g_clientKeys.clear();
+				for (auto& [key, value] : j["clientKeys"].items()) {
+					if (value.is_string()) {
+						g_clientKeys[key] = value.get<std::string>();
+					}
+				}
+				LOG_INFO(std::format("Loaded {} client keys", g_clientKeys.size()));
+			}
+
+			LOG_INFO(std::format("Default account ID = {}", g_defaultAccountId));
+			LOG_INFO(std::format("Status refresh interval = {}", g_statusRefreshInterval));
+		} catch (const std::exception& e) {
+			LOG_ERROR(std::format("Failed to parse {}: {}", filename, e.what()));
+		}
+	}
+
+	void SaveSettings(std::string_view filename) {
+		const nlohmann::json j = {
+			{"defaultAccountId", g_defaultAccountId},
+			{"statusRefreshInterval", g_statusRefreshInterval},
+			{"checkUpdatesOnStartup", g_checkUpdatesOnStartup},
+			{"killRobloxOnLaunch", g_killRobloxOnLaunch},
+			{"clearCacheOnLaunch", g_clearCacheOnLaunch},
+			{"multiRobloxEnabled", g_multiRobloxEnabled},
+			{"clientKeys", g_clientKeys}
+		};
+
+		const auto path = makePath(filename);
+		std::ofstream out{path};
+
+		if (!out.is_open()) {
+			LOG_ERROR(std::format("Could not open {} for writing", path));
+			return;
+		}
+
+		out << j.dump(4);
+		LOG_INFO("Saved settings");
+	}
 
     void LoadFriends(std::string_view filename) {
         const auto path = makePath(filename);

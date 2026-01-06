@@ -34,7 +34,7 @@ namespace {
 
 	constexpr float MIN_INPUT_WIDTH = 100.0f;
 	constexpr float DEFAULT_ROW_HEIGHT = 19.0f;
-	constexpr int COLUMN_COUNT = 4;
+	constexpr int COLUMN_COUNT = 5;
 
 	enum class ServerSortMode {
 		None = 0,
@@ -66,7 +66,6 @@ namespace {
 		SeverTabInfo{"Private Server", ServerTab::Private, renderPrivateServers}
 	};
 
-	// Single unified private server struct
 	struct PrivateServer {
 		std::string name;
 		std::string ownerName;
@@ -348,7 +347,7 @@ namespace {
 					launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
 					}).detach();
 			}
-		}
+			}
 
 		if (ImGui::BeginPopupContextItem("ServerRowContextMenu")) {
 			StandardJoinMenuParams menu{};
@@ -410,6 +409,24 @@ namespace {
 		ImGui::TextUnformatted(fpsText.c_str());
 		ImGui::SetCursorPosY(colStartY + metrics.height);
 
+		ImGui::TableNextColumn();
+		colStartY = ImGui::GetCursorPosY();
+		ImGui::SetCursorPosY(colStartY + metrics.verticalPadding);
+		if (ImGui::Button("Join", ImVec2(-1, 0))) {
+			auto accounts = getUsableSelectedAccounts();
+			if (accounts.empty()) {
+				LOG_INFO("No account selected to join server.");
+				Status::Error("No account selected to join server.");
+				ModalPopup::Add("Select an account first.");
+			} else {
+				LOG_INFO("Joining server via Join button...");
+				std::thread([accounts, placeId = g_state.currentPlaceId, jobId = server.jobId]() {
+					launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
+					}).detach();
+			}
+		}
+		ImGui::SetCursorPosY(colStartY + metrics.height);
+
 		ImGui::PopID();
 	}
 
@@ -425,13 +442,14 @@ namespace {
 		if (!ImGui::BeginTable("ServersTable", COLUMN_COUNT, tableFlags,
 			ImVec2(0, ImGui::GetContentRegionAvail().y))) {
 			return;
-		}
+			}
 
 		const float baseFontSize = ImGui::GetFontSize();
 		ImGui::TableSetupColumn("Job ID", ImGuiTableColumnFlags_WidthStretch);
 		ImGui::TableSetupColumn("Players", ImGuiTableColumnFlags_WidthFixed, baseFontSize * 5.0f);
 		ImGui::TableSetupColumn("Ping", ImGuiTableColumnFlags_WidthFixed, baseFontSize * 4.375f);
 		ImGui::TableSetupColumn("FPS", ImGuiTableColumnFlags_WidthFixed, baseFontSize * 4.375f);
+		ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, baseFontSize * 5.0f);
 		ImGui::TableSetupScrollFreeze(0, 1);
 
 		ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
@@ -439,6 +457,7 @@ namespace {
 		ImGui::TableNextColumn(); ImGui::TextUnformatted("Players");
 		ImGui::TableNextColumn(); ImGui::TextUnformatted("Ping");
 		ImGui::TableNextColumn(); ImGui::TextUnformatted("FPS");
+		ImGui::TableNextColumn(); ImGui::TextUnformatted("Actions");
 
 		const auto metrics = calculateRowMetrics();
 		for (const auto& server : servers) {
@@ -456,8 +475,6 @@ namespace {
 		const auto displayList = getFilteredServers();
 		renderServerTable(displayList);
 	}
-
-	// ========== PRIVATE SERVERS ==========
 
 	class PrivateServerUI {
 		public:
@@ -544,13 +561,10 @@ namespace {
 
 			LOG_INFO(std::format("Joining private server: {}", server.name));
 
-			// Launch in background thread to fetch access code
 			std::thread([server, accounts, cookie]() {
 				try {
-					// Fetch access code from game-specific API
 					auto page = Roblox::getPrivateServersForGame(server.placeId, cookie);
 
-					// Find our server in the results
 					std::string accessCode;
 					for (const auto& gameServer : page.data) {
 
@@ -579,7 +593,6 @@ namespace {
 		void render(const AccountData& account) {
 			const auto& style = ImGui::GetStyle();
 
-			// Error display
 			if (!errorMessage.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
 				ImGui::TextWrapped("%s", errorMessage.c_str());
@@ -587,7 +600,6 @@ namespace {
 				ImGui::Separator();
 			}
 
-			// Tab selection
 			if (ImGui::BeginTabBar("PrivateServerTabs")) {
 				if (ImGui::BeginTabItem("Joinable Servers")) {
 					if (selectedTab != 1) {
@@ -609,7 +621,6 @@ namespace {
 
 			ImGui::Spacing();
 
-			// Controls
 			const float refreshWidth = ImGui::CalcTextSize("Refresh").x + style.FramePadding.x * 2.0f;
 			const float prevWidth = ImGui::CalcTextSize("\xEF\x81\x93 Prev").x + style.FramePadding.x * 2.0f;
 			const float nextWidth = ImGui::CalcTextSize("Next \xEF\x81\x94").x + style.FramePadding.x * 2.0f;
@@ -643,19 +654,16 @@ namespace {
 
 			ImGui::Separator();
 
-			// Loading state
 			if (isLoading) {
 				ImGui::Text("Loading servers...");
 				return;
 			}
 
-			// Empty state
 			if (servers.empty() && errorMessage.empty()) {
 				ImGui::Text("No servers found");
 				return;
 			}
 
-			// Filter servers
 			const std::string filterLower = toLowerCase(searchFilter);
 			std::vector<PrivateServer> displayList;
 
@@ -674,12 +682,12 @@ namespace {
 				displayList.push_back(server);
 			}
 
-			// Render table
 			renderTable(displayList, account.cookie);
 		}
 
 	private:
 		void renderTable(const std::vector<PrivateServer>& displayList, const std::string& cookie) {
+			RowMetrics metrics = calculateRowMetrics();
 			const int columnCount = selectedTab == 1 ? 4 : 5;
 			constexpr ImGuiTableFlags flags =
 				ImGuiTableFlags_Borders |
@@ -712,16 +720,13 @@ namespace {
 				ImGui::TableNextRow();
 				ImGui::PushID(static_cast<int>(server.vipServerId));
 
-				// Server name
 				ImGui::TableNextColumn();
 				ImGui::TextUnformatted(server.name.c_str());
 
-				// Game name
 				ImGui::TableNextColumn();
 				ImGui::TextWrapped("%s", server.universeName.c_str());
 
 				if (selectedTab == 0) {
-					// Status
 					ImGui::TableNextColumn();
 					if (server.active) {
 						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 1.0f, 0.3f, 1.0f));
@@ -733,11 +738,9 @@ namespace {
 						ImGui::PopStyleColor();
 					}
 
-					// Renew
 					ImGui::TableNextColumn();
 					ImGui::TextUnformatted(server.willRenew ? "Yes" : "No");
 				} else {
-					// Owner
 					ImGui::TableNextColumn();
 					ImGui::TextUnformatted(server.ownerDisplayName.c_str());
 					if (ImGui::IsItemHovered() && !server.ownerName.empty()) {
@@ -747,13 +750,11 @@ namespace {
 					}
 				}
 
-				// Actions
 				ImGui::TableNextColumn();
 				if (ImGui::Button("Join", ImVec2(-1, 0))) {
 					joinServer(server, cookie);
 				}
 
-				// Tooltip with additional info
 				if (ImGui::IsItemHovered()) {
 					ImGui::BeginTooltip();
 					ImGui::Text("Server ID: %llu", server.vipServerId);
@@ -774,7 +775,6 @@ namespace {
 
 			ImGui::EndTable();
 
-			// Status bar
 			ImGui::Separator();
 			ImGui::Text("Total servers: %zu", displayList.size());
 			if (nextPageCursor.has_value()) {
@@ -831,7 +831,6 @@ namespace {
 		static PrivateServerUI ui;
 		static int lastAccountId = -1;
 
-		// Auto-reload when account changes
 		if (lastAccountId != primaryId) {
 			lastAccountId = primaryId;
 			ui.loadServers(ui.selectedTab == 1 ? 1 : 0, *account);
