@@ -1,104 +1,117 @@
 cmake_minimum_required(VERSION 3.5...3.27)
 project(AltMan LANGUAGES C CXX OBJC OBJCXX)
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_OBJCXX_STANDARD 23)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3")
 
 include(FetchContent)
 
-# --- ImGui via FetchContent
 FetchContent_Declare(
-  imgui
-  GIT_REPOSITORY https://github.com/ocornut/imgui.git
-  GIT_TAG docking
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG docking
 )
 FetchContent_MakeAvailable(imgui)
 
-# Define ImGui core sources
 set(IMGUI_CORE_SRC
-    ${imgui_SOURCE_DIR}/imgui.cpp
-    ${imgui_SOURCE_DIR}/imgui_draw.cpp
-    ${imgui_SOURCE_DIR}/imgui_tables.cpp
-    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    ${imgui_SOURCE_DIR}/imgui_demo.cpp
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/imgui_demo.cpp
 )
 
-# Define ImGui backend sources for macOS
 set(IMGUI_BACKEND_SRC
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_osx.mm
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_osx.mm
 )
 
-# --- Add nlohmann/json via FetchContent
-FetchContent_Declare(
-  nlohmann_json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG v3.11.2
-)
-FetchContent_MakeAvailable(nlohmann_json)
-
-# --- Add cpr via FetchContent
-FetchContent_Declare(
-  cpr
-  GIT_REPOSITORY https://github.com/libcpr/cpr.git
-  GIT_TAG 1.11.0
-)
-set(CPR_BUILD_CURL OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(cpr)
-
-# --- Source files
-file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS src/*.cpp src/*.mm src/*.h)
-
-if(APPLE)
-    # Remove Windows-specific files
-    list(REMOVE_ITEM SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
-    list(REMOVE_ITEM SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/utils/ui/webview_windows.cpp)
-endif()
-
-# Create ImGui as a static library first
 add_library(imgui_lib STATIC
-    ${IMGUI_CORE_SRC}
-    ${IMGUI_BACKEND_SRC}
+        ${IMGUI_CORE_SRC}
+        ${IMGUI_BACKEND_SRC}
 )
 
 target_include_directories(imgui_lib PUBLIC
-    ${imgui_SOURCE_DIR}
-    ${imgui_SOURCE_DIR}/backends
+        ${imgui_SOURCE_DIR}
+        ${imgui_SOURCE_DIR}/backends
 )
 
-# Create executable with project sources
+FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.2
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
+set(CPR_FORCE_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
+set(CURL_USE_STATIC_LIBS OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+        cpr
+        GIT_REPOSITORY https://github.com/libcpr/cpr.git
+        GIT_TAG 1.11.0
+)
+set(CPR_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
+set(CPR_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(CPR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(cpr)
+
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS src/*.cpp src/*.mm src/*.h)
+
+if(APPLE)
+    list(REMOVE_ITEM SRC_FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/utils/ui/webview_windows.cpp
+    )
+endif()
+
+
 add_executable(AltMan MACOSX_BUNDLE ${SRC_FILES})
 
 target_include_directories(AltMan PRIVATE
-    src
-    src/components
-    src/utils
-    src/utils/core
-    src/utils/network
-    src/utils/system
-    src/utils/ui
-    ${imgui_SOURCE_DIR}
-    ${imgui_SOURCE_DIR}/backends
+        src
+        src/components
+        src/utils
+        src/utils/core
+        src/utils/network
+        src/utils/system
+        src/utils/ui
+        ${imgui_SOURCE_DIR}
+        ${imgui_SOURCE_DIR}/backends
 )
 
-# --- macOS frameworks
-find_library(COCOA_FRAMEWORK Cocoa)
-find_library(METAL_FRAMEWORK Metal)
-find_library(QUARTZCORE_FRAMEWORK QuartzCore)
-find_library(METALKIT_FRAMEWORK MetalKit)
-find_library(WEBKIT_FRAMEWORK WebKit)
-find_library(GAMECONTROLLER_FRAMEWORK GameController)
+set(MACOSX_BUNDLE_ICON_FILE AltMan.icns)
+
+set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/assets/images/AltMan.icns
+        PROPERTIES
+        MACOSX_PACKAGE_LOCATION Resources
+)
+
+target_sources(AltMan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/assets/images/AltMan.icns
+)
+
+find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
+find_library(METAL_FRAMEWORK Metal REQUIRED)
+find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+find_library(METALKIT_FRAMEWORK MetalKit REQUIRED)
+find_library(WEBKIT_FRAMEWORK WebKit REQUIRED)
+find_library(GAMECONTROLLER_FRAMEWORK GameController REQUIRED)
 
 target_link_libraries(AltMan PRIVATE
-    imgui_lib
-    ${COCOA_FRAMEWORK}
-    ${METAL_FRAMEWORK}
-    ${QUARTZCORE_FRAMEWORK}
-    ${METALKIT_FRAMEWORK}
-    ${WEBKIT_FRAMEWORK}
-    ${GAMECONTROLLER_FRAMEWORK}
-    nlohmann_json::nlohmann_json
-    cpr::cpr
+        imgui_lib
+        nlohmann_json::nlohmann_json
+        cpr::cpr
+        ${COCOA_FRAMEWORK}
+        ${METAL_FRAMEWORK}
+        ${QUARTZCORE_FRAMEWORK}
+        ${METALKIT_FRAMEWORK}
+        ${WEBKIT_FRAMEWORK}
+        ${GAMECONTROLLER_FRAMEWORK}
 )
