@@ -149,7 +149,7 @@ namespace Roblox {
 
 		auto csrfToken = csrfResponse.headers.find("x-csrf-token");
 		if (csrfToken == csrfResponse.headers.end()) {
-			std::cerr << "failed to get CSRF token\n";
+			std::println("failed to get CSRF token");
 
 			LOG_INFO("Failed to get CSRF token");
 			return "";
@@ -172,7 +172,7 @@ namespace Roblox {
 
 		auto ticket = ticketResponse.headers.find("rbx-authentication-ticket");
 		if (ticket == ticketResponse.headers.end()) {
-			std::cerr << "failed to get authentication ticket\n";
+			std::println("failed to get authentication ticket");
 			LOG_INFO("Failed to get authentication ticket");
 			return "";
 		}
