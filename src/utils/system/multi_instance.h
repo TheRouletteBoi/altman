@@ -75,6 +75,7 @@ namespace MultiInstance {
 	std::string getAppDataDirectory();
 	std::string getUserClientPath(const std::string& username, const std::string& clientName);
 	std::string getBaseClientPath(const std::string& clientName);
+	void saveSourceHash(const std::string& destPath);
 	bool needsClientUpdate(const std::string& sourcePath, const std::string& destPath);
 	bool cleanupUserEnvironment(const std::string& username);
 	bool isClientInstalled(const std::string& username, const std::string& clientName);

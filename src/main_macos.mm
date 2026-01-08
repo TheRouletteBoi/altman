@@ -16,6 +16,7 @@
 #include "ui/confirm.h"
 #include "system/main_thread.h"
 #include "system/update.h"
+#include "system/update_client_checker.h"
 
 #include "assets/fonts/embedded_rubik.h"
 #include "assets/fonts/embedded_fa_solid.h"
@@ -294,6 +295,7 @@ int main(int argc, const char * argv[]) {
             AutoUpdater::SetShowNotifications(true);
             AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
             AutoUpdater::SetAutoUpdate(true, true, false);
+            ClientUpdateChecker::UpdateChecker::Initialize();
         }
         Data::LoadAccounts("accounts.json");
         Data::LoadFriends("friends.json");

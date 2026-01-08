@@ -13,6 +13,8 @@
 #include <cctype>
 #include <sys/sysctl.h>
 #include "http.hpp"
+#include "multi_instance.h"
+#include "../network/ipa_installer.h"
 
 namespace ClientManager {
 
@@ -81,7 +83,7 @@ enum class Architecture {
 	Unknown
 };
 
-Architecture DetectArchitecture() {
+inline Architecture DetectArchitecture() {
 	if (IsRunningUnderRosetta())
 		return Architecture::X86_64_Rosetta;
 
@@ -742,6 +744,11 @@ inline void InstallClientAsync(const std::string& clientName,
         LOG_INFO(std::format("Successfully installed {}", clientName));
         
         if (completionCb) completionCb(true, "Installation successful");
+
+    	/*std::string version = ClientUpdateChecker::UpdateChecker::GetClientVersion(clientName);
+		if (!version.empty()) {
+			ClientUpdateChecker::UpdateChecker::MarkClientAsInstalled(clientName, version);
+		}*/
     }).detach();
 }
 

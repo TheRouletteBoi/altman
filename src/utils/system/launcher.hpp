@@ -311,6 +311,7 @@ inline bool copyClientToUserEnvironment(const std::string& username, const std::
 	}
 
 	std::println("Client copied successfully");
+	MultiInstance::saveSourceHash(destPath);
 	return true;
 }
 

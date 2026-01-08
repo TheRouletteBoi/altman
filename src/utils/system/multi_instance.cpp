@@ -137,8 +137,121 @@ namespace MultiInstance {
 		return std::nullopt;
 	}
 
-	// Note: This checks the UNMODIFIED source against destination to avoid false positives
-	// from codesigning changes. Use this BEFORE any bundle modifications.
+	struct mach_header_64 {
+	    uint32_t magic;
+	    uint32_t cputype;
+	    uint32_t cpusubtype;
+	    uint32_t filetype;
+	    uint32_t ncmds;
+	    uint32_t sizeofcmds;
+	    uint32_t flags;
+	    uint32_t reserved;
+	};
+
+	struct load_command {
+	    uint32_t cmd;
+	    uint32_t cmdsize;
+	};
+
+	struct segment_command_64 {
+	    uint32_t cmd;
+	    uint32_t cmdsize;
+	    char segname[16];
+	    uint64_t vmaddr;
+	    uint64_t vmsize;
+	    uint64_t fileoff;
+	    uint64_t filesize;
+	    uint32_t maxprot;
+	    uint32_t initprot;
+	    uint32_t nsects;
+	    uint32_t flags;
+	};
+
+	constexpr uint32_t MH_MAGIC_64 = 0xfeedfacf;
+	constexpr uint32_t LC_SEGMENT_64 = 0x19;
+
+	uint64_t computeCodeHash(const std::filesystem::path& filePath) {
+		std::ifstream file(filePath, std::ios::binary);
+		if (!file) {
+			throw std::runtime_error("Cannot open file for hashing");
+		}
+
+		mach_header_64 header;
+		file.read(reinterpret_cast<char*>(&header), sizeof(header));
+
+		if (header.magic != MH_MAGIC_64) {
+			throw std::runtime_error("Not a 64-bit Mach-O file");
+		}
+
+		uint64_t hash = 14695981039346656037ULL;
+		const uint64_t prime = 1099511628211ULL;
+
+		for (uint32_t i = 0; i < header.ncmds; ++i) {
+			load_command cmd;
+			auto cmdPos = file.tellg();
+			file.read(reinterpret_cast<char*>(&cmd), sizeof(cmd));
+
+			if (cmd.cmd == LC_SEGMENT_64) {
+				file.seekg(cmdPos);
+				segment_command_64 segment;
+				file.read(reinterpret_cast<char*>(&segment), sizeof(segment));
+
+				if (std::string(segment.segname, 16).find("__TEXT") == 0) {
+					auto currentPos = file.tellg();
+					file.seekg(segment.fileoff);
+
+					constexpr size_t BUFFER_SIZE = 64 * 1024;
+					std::vector<char> buffer(BUFFER_SIZE);
+					uint64_t remaining = segment.filesize;
+
+					while (remaining > 0) {
+						size_t toRead = std::min(remaining, static_cast<uint64_t>(BUFFER_SIZE));
+						file.read(buffer.data(), toRead);
+						size_t bytesRead = file.gcount();
+
+						for (size_t j = 0; j < bytesRead; ++j) {
+							hash ^= static_cast<uint8_t>(buffer[j]);
+							hash *= prime;
+						}
+
+						remaining -= bytesRead;
+					}
+
+					file.seekg(currentPos);
+					break;
+				}
+			}
+
+			file.seekg(static_cast<std::streamoff>(cmdPos) + cmd.cmdsize);
+		}
+
+		return hash;
+	}
+
+	void saveSourceHash(const std::string& destPath) {
+		try {
+			auto destExecOpt = findMainExecutable(destPath);
+			if (!destExecOpt) {
+				std::println("Cannot save hash - executable not found");
+				return;
+			}
+
+			uint64_t hash = computeCodeHash(*destExecOpt);
+
+			// Store hash OUTSIDE the bundle (not inside .app)
+			std::filesystem::path hashFile = std::filesystem::path(destPath).string() + ".hash";
+			std::ofstream hashOut(hashFile);
+			hashOut << std::hex << hash;
+
+			std::println("Saved source hash: {:016x}", hash);
+		} catch (const std::exception& e) {
+			std::println("Error saving source hash: {}", e.what());
+		}
+	}
+
+	// Since destination gets codesigned/modified after copying, we need to:
+	// 1. Store hash of source when first copied
+	// 2. Compare future sources against stored hash
 	bool needsClientUpdate(const std::string& sourcePath, const std::string& destPath) {
 		if (!std::filesystem::exists(destPath)) {
 			std::println("Destination does not exist, needs update");
@@ -146,34 +259,6 @@ namespace MultiInstance {
 		}
 
 		try {
-			// Check bundle identifiers first - this uniquely identifies the client type
-			auto sourceBundleId = getBundleIdentifier(sourcePath);
-			auto destBundleId = getBundleIdentifier(destPath);
-
-			if (sourceBundleId && destBundleId) {
-				// Extract the base identifier (before any profile-specific modifications)
-				// e.g., "com.roblox.RobloxPlayer" or "com.hydrogen.client"
-				std::string sourceBase = *sourceBundleId;
-				std::string destBase = *destBundleId;
-
-				// Remove any profile suffixes (e.g., ".cooker_0039")
-				auto sourceDot = sourceBase.find_last_of('.');
-				auto destDot = destBase.find_last_of('.');
-
-				// Only compare if they look like modified identifiers
-				if (sourceDot != std::string::npos && destDot != std::string::npos) {
-					std::string sourcePrefix = sourceBase.substr(0, sourceDot);
-					std::string destPrefix = destBase.substr(0, destDot);
-
-					if (sourcePrefix != destPrefix) {
-						std::println("Bundle identifiers differ (source: {}, dest: {}), needs update",
-									sourcePrefix, destPrefix);
-						return true;
-					}
-				}
-			}
-
-			// Find the main executable dynamically
 			auto sourceExecOpt = findMainExecutable(sourcePath);
 			if (!sourceExecOpt) {
 				std::println("Source executable not found in {}", sourcePath);
@@ -188,47 +273,32 @@ namespace MultiInstance {
 			}
 			std::filesystem::path destExec = *destExecOpt;
 
-			std::println("Comparing executables:");
-			std::println("  Source: {}", sourceExec.string());
-			std::println("  Dest:   {}", destExec.string());
+			std::filesystem::path hashFile = std::filesystem::path(destPath).string() + ".hash";
 
-			// Check if executable names are different (for clients like Delta with different names)
-			if (sourceExec.filename() != destExec.filename()) {
-				std::println("Executable names differ (source: {}, dest: {}), needs update",
-							sourceExec.filename().string(), destExec.filename().string());
-				return true;
-			}
+			uint64_t sourceHash = computeCodeHash(sourceExec);
+			std::println("Source hash: {:016x}", sourceHash);
 
-			// Check modification time - if source is newer, definitely need update
-			auto sourceTime = std::filesystem::last_write_time(sourceExec);
-			auto destTime = std::filesystem::last_write_time(destExec);
+			if (std::filesystem::exists(hashFile)) {
+				std::ifstream hashIn(hashFile);
+				uint64_t storedHash;
+				hashIn >> std::hex >> storedHash;
 
-			if (sourceTime > destTime) {
-				std::println("Source is newer, needs update");
-				return true;
-			}
+				std::println("Stored hash: {:016x}", storedHash);
 
-			// If destination is same age or newer, check Info.plist version as tiebreaker
-			// This handles cases where codesigning changed the binary but the base client hasn't changed
-			std::filesystem::path sourcePlist = std::filesystem::path(sourcePath) / "Contents" / "Info.plist";
-			std::filesystem::path destPlist = std::filesystem::path(destPath) / "Contents" / "Info.plist";
-
-			if (std::filesystem::exists(sourcePlist) && std::filesystem::exists(destPlist)) {
-				auto sourcePlistTime = std::filesystem::last_write_time(sourcePlist);
-				auto destPlistTime = std::filesystem::last_write_time(destPlist);
-
-				if (sourcePlistTime > destPlistTime) {
-					std::println("Source Info.plist is newer, needs update");
+				if (sourceHash == storedHash) {
+					std::println("Source matches stored hash, destination is up to date");
+					return false;
+				} else {
+					std::println("Source differs from stored hash, needs update");
 					return true;
 				}
 			}
 
-			std::println("Destination is up to date");
-			return false;
+			std::println("No stored hash found, needs update");
+			return true;
 
 		} catch (const std::exception& e) {
 			std::println("Error checking client update: {}", e.what());
-			// On error, safer to return false to avoid unnecessary copies
 			return false;
 		}
 	}
@@ -598,15 +668,9 @@ namespace MultiInstance {
 			return false;
 		}
 
-		// Try both possible plist locations
 		std::string plistPath = std::format("{}/Contents/Info.plist", clientPath);
 		if (!std::filesystem::exists(plistPath)) {
-
-			// For Delta
-			plistPath = std::format("{}/Info.plist", clientPath);
-			if (!std::filesystem::exists(plistPath)) {
-				return true;
-			}
+			return true;
 		}
 
 		std::ifstream plistIn(plistPath);
