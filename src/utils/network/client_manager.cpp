@@ -14,6 +14,7 @@
 #include "http.h"
 #include "ipa_installer.h"
 #include "multi_instance.h"
+#include "client_update_checker.h"
 
 namespace ClientManager {
 
@@ -550,6 +551,11 @@ void InstallClientAsync(const std::string& clientName,
 				if (progressCb) progressCb(1.0f, "IPA installation complete!");
 				LOG_INFO("Successfully installed {} IPA", clientName);
 				if (completionCb) completionCb(true, "Installation successful");
+
+				std::string clientVersion = ClientUpdateChecker::UpdateChecker::GetClientVersion(clientName);
+				if (!clientVersion.empty()) {
+					ClientUpdateChecker::UpdateChecker::MarkClientAsInstalled(clientName, clientVersion);
+				}
 			} else {
 				LOG_ERROR("IPA installation failed");
 				if (completionCb) completionCb(false, "IPA installation failed");
@@ -703,6 +709,11 @@ void InstallClientAsync(const std::string& clientName,
 				LOG_INFO("Successfully installed {}", clientName);
 
 				if (completionCb) completionCb(true, "Installation successful");
+
+				std::string clientVersion = ClientUpdateChecker::UpdateChecker::GetClientVersion(clientName);
+				if (!clientVersion.empty()) {
+					ClientUpdateChecker::UpdateChecker::MarkClientAsInstalled(clientName, clientVersion);
+				}
 			}).detach();
 }
 void RemoveClientAsync(const std::string& clientName, CompletionCallback completionCb) {
