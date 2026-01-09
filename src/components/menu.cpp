@@ -13,21 +13,18 @@
     #include <shlobj.h>
 #endif
 
-#include "network/roblox.h"
-#include "system/threading.h"
-#include "system/roblox_control.h"
-#include "system/multi_instance.h"
-#include "ui/confirm.h"
+#include "backup.h"
+#include "components.h"
+#include "console/console.h"
 #include "core/app_state.h"
 #include "core/status.h"
-#include "components.h"
 #include "data.h"
-#include "backup.h"
+#include "network/roblox.h"
+#include "system/multi_instance.h"
+#include "system/roblox_control.h"
+#include "system/threading.h"
 #include "ui/modal_popup.h"
-//#include "ui/webview.hpp"
-#include "webview_helpers.h"
-
-bool g_multiRobloxEnabled = false;
+#include "ui/webview.h"
 
 struct DuplicateAccountModalState {
     bool showModal = false;
@@ -168,7 +165,7 @@ namespace {
 
         g_accounts.push_back(std::move(newAcct));
 
-        LOG_INFO(std::format("Added new account {} - {}", id, displayName).c_str());
+        LOG_INFO("Added new account {} - {}", id, displayName);
         Data::SaveAccounts();
     }
 
@@ -307,7 +304,7 @@ bool RenderMainMenu() {
             const std::string deleteText = std::format("Delete {} Selected", g_selectedAccountIds.size());
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.4f, 0.4f, 1.f));
             if (ImGui::MenuItem(deleteText.c_str())) {
-                ConfirmPopup::AddYesNo("Delete selected accounts?", []() {
+                ModalPopup::AddYesNo("Delete selected accounts?", []() {
                     std::erase_if(
                         g_accounts,
                         [](const AccountData& acct) {
@@ -384,14 +381,14 @@ bool RenderMainMenu() {
         if (ImGui::Button("Export")) {
             if (std::strcmp(s_password1, s_password2) == 0 && s_password1[0] != '\0') {
                 if (Backup::Export(s_password1)) {
-                    ModalPopup::Add("Backup saved.");
+                    ModalPopup::AddInfo("Backup saved.");
                 } else {
-                    ModalPopup::Add("Backup failed.");
+                    ModalPopup::AddInfo("Backup failed.");
                 }
                 s_password1[0] = s_password2[0] = '\0';
                 ImGui::CloseCurrentPopup();
             } else {
-                ModalPopup::Add("Passwords do not match.");
+                ModalPopup::AddInfo("Passwords do not match.");
             }
         }
         ImGui::SameLine();
@@ -456,9 +453,9 @@ bool RenderMainMenu() {
                 ok = Backup::Import(path, s_importPassword, &err);
             }
             if (ok) {
-                ModalPopup::Add("Import completed.");
+                ModalPopup::AddInfo("Import completed.");
             } else {
-                ModalPopup::Add(err.empty() ? "Import failed." : err.c_str());
+                ModalPopup::AddInfo(err.empty() ? "Import failed." : err.c_str());
             }
             s_importPassword[0] = '\0';
             ImGui::CloseCurrentPopup();
@@ -510,7 +507,7 @@ bool RenderMainMenu() {
                 it->voiceStatus = g_duplicateAccountModal.pendingVoiceStatus.status;
                 it->voiceBanExpiry = g_duplicateAccountModal.pendingVoiceStatus.bannedUntil;
 
-                LOG_INFO(std::format("Updated existing account {} - {}", it->id, it->displayName).c_str());
+                LOG_INFO("Updated existing account {} - {}", it->id, it->displayName);
                 Data::SaveAccounts();
             }
             ImGui::CloseCurrentPopup();
@@ -518,8 +515,8 @@ bool RenderMainMenu() {
 
         ImGui::SameLine();
         if (ImGui::Button("Discard", ImVec2(100, 0))) {
-            LOG_INFO(std::format("Discarded new cookie for existing account {}",
-                g_duplicateAccountModal.existingId).c_str());
+            LOG_INFO("Discarded new cookie for existing account {}",
+                g_duplicateAccountModal.existingId);
             ImGui::CloseCurrentPopup();
         }
 
@@ -535,9 +532,9 @@ bool RenderMainMenu() {
                 g_duplicateAccountModal.pendingVoiceStatus
             );
 
-            LOG_INFO(std::format("Force added new account {} - {}",
+            LOG_INFO("Force added new account {} - {}",
                 g_duplicateAccountModal.nextId,
-                g_duplicateAccountModal.pendingDisplayName).c_str());
+                g_duplicateAccountModal.pendingDisplayName);
             ImGui::CloseCurrentPopup();
         }
 

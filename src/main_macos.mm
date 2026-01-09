@@ -12,11 +12,12 @@
 #include "components/data.h"
 #include "network/roblox.h"
 #include "ui/notifications.h"
-#include "core/logging.hpp"
-#include "ui/confirm.h"
+#include "ui/modal_popup.h"
 #include "system/main_thread.h"
-#include "system/update.h"
-#include "system/update_client_checker.h"
+#include "system/auto_updater.h"
+#include "system/client_update_checker.h"
+#include "console/console.h"
+#include "system/threading.h"
 
 #include "assets/fonts/embedded_rubik.h"
 #include "assets/fonts/embedded_fa_solid.h"
@@ -273,7 +274,7 @@ int main(int argc, const char * argv[]) {
                 ## GitHub Release Setup
 
                 For delta updates to work, structure your releases like this:
-                ```
+
                 Release v2.0.0
                 ├── AltMan-Windows.exe          (full installer)
                 ├── AltMan-macOS.dmg            (full installer)
@@ -415,7 +416,7 @@ int main(int argc, const char * argv[]) {
                 MainThread::Post([invalidIds, namesCopy]() {
                     char buf[512];
                     snprintf(buf, sizeof(buf), "Invalid cookies for: %s. Remove them?", namesCopy.c_str());
-                    ConfirmPopup::AddYesNo(buf, [invalidIds]() {
+                    ModalPopup::AddYesNo(buf, [invalidIds]() {
                         erase_if(g_accounts, [&](const AccountData &a) {
                             return std::find(invalidIds.begin(), invalidIds.end(), a.id) != invalidIds.end();
                         });

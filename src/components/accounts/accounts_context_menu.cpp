@@ -28,22 +28,22 @@
 #include <format>
 #include <span>
 
-#include "utils/network/roblox.h"
-#include "ui/webview.hpp"
-#include "../webview_helpers.h"
-#include "system/threading.h"
-#include "system/launcher.hpp"
-#include "core/logging.hpp"
-#include "core/status.h"
-#include "ui/confirm.h"
 #include "../../ui.h"
-#include "../data.h"
-#include "accounts_join_ui.h"
-#include "../context_menus.h"
 #include "../../utils/core/account_utils.h"
 #include "../../utils/network/roblox/common.h"
+#include "../context_menus.h"
+#include "../data.h"
+#include "accounts_join_ui.h"
+#include "console/console.h"
+#include "core/status.h"
+#include "system/multi_instance.h"
+#include "system/roblox_launcher.h"
+#include "system/threading.h"
+#include "ui/modal_popup.h"
+#include "ui/webview.h"
+#include "utils/network/roblox.h"
 
-namespace {
+	namespace {
     constexpr int MULTI_EDIT_SENTINEL = -2;
     constexpr int WEBVIEW_CONFIRM_THRESHOLD = 3;
 
@@ -391,7 +391,7 @@ namespace {
             };
             
             if (eligible >= WEBVIEW_CONFIRM_THRESHOLD) {
-                ConfirmPopup::AddYesNo(std::format("Open {} webviews?", eligible), launchAll);
+                ModalPopup::AddYesNo(std::format("Open {} webviews?", eligible), launchAll);
             } else {
                 launchAll();
             }
@@ -410,7 +410,7 @@ namespace {
             };
             
             if (eligible >= WEBVIEW_CONFIRM_THRESHOLD) {
-                ConfirmPopup::AddYesNo("Open webviews?", launchAll);
+                ModalPopup::AddYesNo("Open webviews?", launchAll);
             } else {
                 launchAll();
             }
@@ -658,7 +658,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
         
         if (ImGui::MenuItem(std::format("Remove {} Accounts", removeCount).c_str())) {
             std::vector<int> idsToRemove(g_selectedAccountIds.begin(), g_selectedAccountIds.end());
-            ConfirmPopup::AddYesNo(
+            ModalPopup::AddYesNo(
                 std::format("Delete {} accounts?", removeCount),
                 [idsToRemove]() {
                     const std::unordered_set<int> toRemove(idsToRemove.begin(), idsToRemove.end());
@@ -684,10 +684,10 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
     } else {
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
         if (ImGui::MenuItem("Remove Account")) {
-            ConfirmPopup::AddYesNo(
+            ModalPopup::AddYesNo(
                 std::format("Delete {}?", account.displayName),
                 [id = account.id, displayName = account.displayName, username = account.username]() {
-                    LOG_INFO(std::format("Attempting to delete account: {} (ID: {})", displayName, id));
+                    LOG_INFO("Attempting to delete account: {} (ID: {})", displayName, id);
                 	if (!MultiInstance::cleanupUserEnvironment(username)) {
 						LOG_WARN("Environment cleanup failed for " + username);
 					}
@@ -695,7 +695,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
                     g_selectedAccountIds.erase(id);
                     Status::Set("Deleted account " + displayName);
                     Data::SaveAccounts();
-                    LOG_INFO(std::format("Successfully deleted account: {} (ID: {})", displayName, id));
+                    LOG_INFO("Successfully deleted account: {} (ID: {})", displayName, id);
                 }
             );
         }

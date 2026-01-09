@@ -1,187 +1,177 @@
 #include "inventory.h"
 
 #include <imgui.h>
-#include <string>
-#include "ui/image.h"
-#include "system/threading.h"
-#include "system/main_thread.h"
-#include "../data.h"
+#include <imgui_internal.h>
 #include <nlohmann/json.hpp>
+
+#include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <cstring>
 #include <cctype>
 #include <cmath>
-#include <imgui_internal.h>
-#include <unordered_set>
+#include <format>
 
-using namespace ImGui;
+#include "ui/image.h"
+#include "system/threading.h"
+#include "system/main_thread.h"
+#include "../data.h"
 
-// Structs to keep inventory data
-struct InventoryItem {
-    uint64_t assetId{};
-    std::string assetName;
-};
+namespace {
+    constexpr float THUMB_ROUNDING = 6.0f;
+    constexpr int MAX_CONCURRENT_THUMB_LOADS = 24;
+    constexpr float MIN_CELL_SIZE_MULTIPLIER = 6.25f;
+    constexpr float MIN_FIELD_MULTIPLIER = 6.25f;
+    constexpr float EQUIPPED_MIN_CELL_MULTIPLIER = 3.75f;
+    constexpr size_t SEARCH_BUFFER_SIZE = 64;
 
-struct CategoryInfo {
-    std::string displayName; // e.g. "Accessories"
-    std::vector<std::pair<int, std::string> > assetTypes; // pair<assetTypeId, displayName>
-};
+    struct InventoryItem {
+        uint64_t assetId{};
+        std::string assetName;
+    };
 
-struct ThumbInfo {
-    TextureType srv{nullptr};
-    int width{0};
-    int height{0};
-    bool loading{false};
-    bool failed{false};
-};
+    struct CategoryInfo {
+        std::string displayName;
+        std::vector<std::pair<int, std::string>> assetTypes;
+    };
 
-static std::unordered_map<uint64_t, ThumbInfo> s_thumbCache; // key = assetId
+    struct ThumbInfo {
+        TextureType srv{nullptr};
+        int width{0};
+        int height{0};
+        bool loading{false};
+        bool failed{false};
+    };
 
-// Rounded corner radius for thumbnail buttons
-constexpr float kThumbRounding = 6.0f;
+    // State management
+    struct AvatarState {
+        TextureType texture{nullptr};
+        int imageWidth{0};
+        int imageHeight{0};
+        bool loading{false};
+        bool failed{false};
+        bool started{false};
+        uint64_t loadedUserId{0};
+    };
 
-// Selected inventory asset (for outline highlight)
-static uint64_t s_selectedAssetId = 0;
+    struct CategoryState {
+        uint64_t userId{0};
+        bool loading{false};
+        bool failed{false};
+        std::vector<CategoryInfo> categories;
+        int selectedCategory{0};
+    };
 
-// Equipped items state
-static uint64_t s_equippedUserId = 0;
-static bool s_equippedLoading = false;
-static bool s_equippedFailed = false;
-static std::vector<uint64_t> s_equippedAssetIds;
+    struct InventoryState {
+        std::unordered_map<int, std::vector<InventoryItem>> cachedInventories;
+        int selectedAssetTypeIndex{0};
+        bool loading{false};
+        bool failed{false};
+    };
 
-// Limit concurrent thumbnail fetches to avoid hammering the thumbnail API.
-static int s_activeThumbLoads = 0;
-constexpr int kMaxConcurrentThumbLoads = 24; // tweak as needed
+    struct EquippedState {
+        uint64_t userId{0};
+        bool loading{false};
+        bool failed{false};
+        std::vector<uint64_t> assetIds;
+    };
 
-void RenderInventoryTab() {
-    // Persistent state across frames
-    static TextureType s_texture = nullptr;
-    static int s_imageWidth = 0;
-    static int s_imageHeight = 0;
-    static bool s_loading = false;
-    static bool s_failed = false;
-    static bool s_started = false;
-    static uint64_t s_loadedUserId = 0; // UserId that the current texture belongs to
+    // Global state
+    AvatarState g_avatarState;
+    CategoryState g_categoryState;
+    InventoryState g_inventoryState;
+    EquippedState g_equippedState;
 
-    static uint64_t s_catUserId = 0; // userId categories were fetched for
-    static bool s_catLoading = false;
-    static bool s_catFailed = false;
-    static std::vector<CategoryInfo> s_categories;
-    static int s_selectedCategory = 0; // tab index
+    std::unordered_map<uint64_t, ThumbInfo> g_thumbCache;
+    uint64_t g_selectedAssetId{0};
+    int g_activeThumbLoads{0};
+    char g_searchBuffer[SEARCH_BUFFER_SIZE] = "";
 
-    static std::unordered_map<int, std::vector<InventoryItem> > s_cachedInventories; // key = assetTypeId
-    static int s_selectedAssetTypeIndex = 0; // dropdown index inside selected category
-    static bool s_invLoading = false;
-    static bool s_invFailed = false;
-
-    static char s_searchBuffer[64] = "";
-
-    // Determine which user we should show
-    uint64_t currentUserId = 0;
-    std::string currentCookie;
-    if (!g_selectedAccountIds.empty()) {
-        int internalId = *g_selectedAccountIds.begin();
-        for (const auto &acc: g_accounts) {
-            if (acc.id == internalId && !acc.userId.empty()) {
-                try {
-                    currentUserId = std::stoull(acc.userId);
-                } catch (...) {
-                    currentUserId = 0;
-                }
-                currentCookie = acc.cookie;
-                break;
+    void ClearTextureCache() {
+#ifdef _WIN32
+        for (auto& [id, thumb] : g_thumbCache) {
+            if (thumb.srv) {
+                thumb.srv->Release();
             }
         }
-    } else if (g_defaultAccountId != -1) {
-        for (const auto &acc: g_accounts) {
-            if (acc.id == g_defaultAccountId && !acc.userId.empty()) {
+#endif
+        g_thumbCache.clear();
+    }
+
+    void ResetAvatarTexture() {
+#ifdef _WIN32
+        if (g_avatarState.texture) {
+            g_avatarState.texture->Release();
+            g_avatarState.texture = nullptr;
+        }
+#else
+        g_avatarState.texture = nullptr;
+#endif
+    }
+
+    void ResetAllState() {
+        g_categoryState = CategoryState{};
+        g_inventoryState = InventoryState{};
+        g_equippedState = EquippedState{};
+        g_searchBuffer[0] = '\0';
+        ClearTextureCache();
+    }
+
+    std::pair<uint64_t, std::string> GetCurrentUserInfo() {
+        uint64_t userId = 0;
+        std::string cookie;
+
+        auto findUser = [&](int accountId) {
+            auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
+                [accountId](const AccountData& acc) {
+                    return acc.id == accountId && !acc.userId.empty();
+                });
+
+            if (it != g_accounts.end()) {
+                std::exception_ptr exPtr;
                 try {
-                    currentUserId = std::stoull(acc.userId);
+                    userId = std::stoull(it->userId);
+                    cookie = it->cookie;
                 } catch (...) {
-                    currentUserId = 0;
+                    userId = 0;
                 }
-                currentCookie = acc.cookie;
-                break;
             }
+        };
+
+        if (!g_selectedAccountIds.empty()) {
+            findUser(*g_selectedAccountIds.begin());
+        } else if (g_defaultAccountId != -1) {
+            findUser(g_defaultAccountId);
         }
+
+        return {userId, cookie};
     }
 
-    // If account changed, reset state so we fetch a new avatar
-    if (currentUserId != s_loadedUserId) {
-        s_started = false;
-        s_failed = false;
-        s_loading = false;
+    void FetchAvatarImage(uint64_t userId) {
+        g_avatarState.started = true;
+        g_avatarState.loading = true;
 
-        #ifdef _WIN32
-        if (s_texture) {
-            s_texture->Release();
-            s_texture = nullptr;
-        }
-        #else
-        s_texture = nullptr;
-        #endif
-
-
-        s_loadedUserId = currentUserId;
-    }
-
-    // If the displayed user changed, clear caches
-    if (currentUserId != s_catUserId) {
-        s_catUserId = currentUserId;
-        s_categories.clear();
-        s_catLoading = false;
-        s_catFailed = false;
-        s_selectedCategory = 0;
-        s_selectedAssetTypeIndex = 0;
-        s_cachedInventories.clear();
-        s_invLoading = false;
-        s_invFailed = false;
-        s_searchBuffer[0] = '\0';
-        // Clear thumbnail cache for previous user
-        #ifdef _WIN32
-        for (auto &p: s_thumbCache) {
-            if (p.second.srv)
-                p.second.srv->Release();
-        }
-        #endif
-        s_thumbCache.clear();
-        // reset equipped list state
-        s_equippedUserId = 0;
-        s_equippedLoading = false;
-        s_equippedFailed = false;
-        s_equippedAssetIds.clear();
-    }
-
-    // Early-out if we don't have a user to show
-    if (currentUserId == 0) {
-        TextUnformatted("No account selected.");
-        return;
-    }
-
-    // Kick off download once per userId
-    if (!s_started) {
-        s_started = true;
-        s_loading = true;
-
-        Threading::newThread([currentUserId] {
-            // 420×420 PNG full-body avatar image
-            std::string metaUrl =
-                    "https://thumbnails.roblox.com/v1/users/avatar?userIds=" + std::to_string(currentUserId) +
-                    "&size=420x420&format=Png";
+        Threading::newThread([userId] {
+            const std::string metaUrl = std::format(
+                "https://thumbnails.roblox.com/v1/users/avatar?userIds={}&size=420x420&format=Png",
+                userId
+            );
 
             auto metaResp = HttpClient::get(metaUrl);
             if (metaResp.status_code != 200 || metaResp.text.empty()) {
                 MainThread::Post([] {
-                    s_loading = false;
-                    s_failed = true;
+                    g_avatarState.loading = false;
+                    g_avatarState.failed = true;
                 });
                 return;
             }
 
             nlohmann::json metaJson = HttpClient::decode(metaResp);
             std::string avatarUrl;
+
+            std::exception_ptr exPtr;
             try {
                 if (metaJson.contains("data") && !metaJson["data"].empty() &&
                     metaJson["data"][0].contains("imageUrl")) {
@@ -193,8 +183,8 @@ void RenderInventoryTab() {
 
             if (avatarUrl.empty()) {
                 MainThread::Post([] {
-                    s_loading = false;
-                    s_failed = true;
+                    g_avatarState.loading = false;
+                    g_avatarState.failed = true;
                 });
                 return;
             }
@@ -202,354 +192,245 @@ void RenderInventoryTab() {
             auto imgResp = HttpClient::get(avatarUrl);
             if (imgResp.status_code != 200 || imgResp.text.empty()) {
                 MainThread::Post([] {
-                    s_loading = false;
-                    s_failed = true;
+                    g_avatarState.loading = false;
+                    g_avatarState.failed = true;
                 });
                 return;
             }
 
             std::string data = std::move(imgResp.text);
-
             MainThread::Post([data = std::move(data)]() mutable {
-                if (LoadTextureFromMemory(data.data(), data.size(), &s_texture, &s_imageWidth, &s_imageHeight)) {
-                    s_failed = false;
-                } else {
-                    s_failed = true;
-                }
-                s_loading = false;
+                g_avatarState.failed = !LoadTextureFromMemory(
+                    data.data(), data.size(),
+                    &g_avatarState.texture,
+                    &g_avatarState.imageWidth,
+                    &g_avatarState.imageHeight
+                );
+                g_avatarState.loading = false;
             });
         });
     }
 
-    // Kick off categories fetch once
-    if (!s_catLoading && s_categories.empty() && !s_catFailed) {
-        s_catLoading = true;
-        Threading::newThread([currentUserId, cookie = currentCookie] {
-            std::string url = "https://inventory.roblox.com/v1/users/" + std::to_string(currentUserId) + "/categories";
-            auto resp = HttpClient::get(url, {{"Cookie", ".ROBLOSECURITY=" + cookie}});
+    void FetchCategories(uint64_t userId, std::string cookie) {
+        g_categoryState.loading = true;
+
+        Threading::newThread([userId, cookie = std::move(cookie)] {
+            const std::string url = std::format(
+                "https://inventory.roblox.com/v1/users/{}/categories",
+                userId
+            );
+
+            auto resp = HttpClient::get(url, {{"Cookie", std::format(".ROBLOSECURITY={}", cookie)}});
             if (resp.status_code != 200 || resp.text.empty()) {
                 MainThread::Post([] {
-                    s_catLoading = false;
-                    s_catFailed = true;
+                    g_categoryState.loading = false;
+                    g_categoryState.failed = true;
                 });
                 return;
             }
+
             nlohmann::json j;
+            std::exception_ptr exPtr;
             try {
                 j = HttpClient::decode(resp);
             } catch (...) {
                 MainThread::Post([] {
-                    s_catLoading = false;
-                    s_catFailed = true;
+                    g_categoryState.loading = false;
+                    g_categoryState.failed = true;
                 });
                 return;
             }
+
             std::vector<CategoryInfo> categories;
             try {
                 if (j.contains("categories")) {
-                    for (auto &cat: j["categories"]) {
+                    for (auto& cat : j["categories"]) {
                         CategoryInfo ci;
                         ci.displayName = cat.value("displayName", "");
+
                         if (cat.contains("items")) {
-                            for (auto &it: cat["items"]) {
-                                int id = it.value("id", 0);
-                                std::string name = it.value("displayName", "");
-                                if (id != 0)
+                            for (auto& it : cat["items"]) {
+                                const int id = it.value("id", 0);
+                                const std::string name = it.value("displayName", "");
+                                if (id != 0) {
                                     ci.assetTypes.emplace_back(id, name);
+                                }
                             }
                         }
-                        if (!ci.assetTypes.empty())
+
+                        if (!ci.assetTypes.empty()) {
                             categories.push_back(std::move(ci));
+                        }
                     }
                 }
             } catch (...) {
             }
+
             MainThread::Post([categories = std::move(categories)]() mutable {
-                s_categories = std::move(categories);
-                s_catLoading = false;
-                s_catFailed = s_categories.empty();
+                g_categoryState.categories = std::move(categories);
+                g_categoryState.loading = false;
+                g_categoryState.failed = g_categoryState.categories.empty();
             });
         });
     }
 
-    // Layout: left 35% width child for the avatar image
-    float availWidth = GetContentRegionAvail().x;
-    float leftWidth = availWidth * 0.35f;
+    void FetchEquippedItems(uint64_t userId) {
+        g_equippedState.loading = true;
+        g_equippedState.failed = false;
 
-    BeginChild("AvatarImagePane", ImVec2(leftWidth, 0), true);
+        Threading::newThread([userId] {
+            const std::string url = std::format(
+                "https://avatar.roblox.com/v1/users/{}/currently-wearing",
+                userId
+            );
 
-    if (s_texture && !s_loading) {
-        float desiredWidth = leftWidth - GetStyle().ItemSpacing.x * 2;
-        float desiredHeight = (s_imageWidth > 0)
-                                  ? (desiredWidth * static_cast<float>(s_imageHeight) / s_imageWidth)
-                                  : 0.0f;
-        Image(ImTextureID(reinterpret_cast<void *>(s_texture)), ImVec2(desiredWidth, desiredHeight));
-    } else if (s_loading) {
-        TextUnformatted("Loading avatar...");
-    } else if (s_failed) {
-        TextUnformatted("Failed to load avatar image.");
-    }
-
-    // --- Equipped items fetch ---
-    if (currentUserId != 0 && currentUserId != s_equippedUserId && !s_equippedLoading) {
-        s_equippedLoading = true;
-        s_equippedFailed = false;
-        Threading::newThread([uid = currentUserId]() {
-            std::string url = "https://avatar.roblox.com/v1/users/" + std::to_string(uid) + "/currently-wearing";
             auto resp = HttpClient::get(url);
             if (resp.status_code != 200 || resp.text.empty()) {
-                MainThread::Post([uid]() {
-                    s_equippedUserId = uid;
-                    s_equippedFailed = true;
-                    s_equippedLoading = false;
+                MainThread::Post([userId] {
+                    g_equippedState.userId = userId;
+                    g_equippedState.failed = true;
+                    g_equippedState.loading = false;
                 });
                 return;
             }
+
             nlohmann::json j;
+            std::exception_ptr exPtr;
             try {
                 j = HttpClient::decode(resp);
             } catch (...) {
-                MainThread::Post([uid]() {
-                    s_equippedUserId = uid;
-                    s_equippedFailed = true;
-                    s_equippedLoading = false;
+                MainThread::Post([userId] {
+                    g_equippedState.userId = userId;
+                    g_equippedState.failed = true;
+                    g_equippedState.loading = false;
                 });
                 return;
             }
+
             std::vector<uint64_t> ids;
             try {
                 if (j.contains("assetIds")) {
-                    for (auto &v: j["assetIds"]) {
+                    for (auto& v : j["assetIds"]) {
                         uint64_t id = 0;
-                        try { id = v.get<uint64_t>(); } catch (...) {
+                        std::exception_ptr exPtr2;
+                        try {
+                            id = v.get<uint64_t>();
+                        } catch (...) {
                         }
-                        if (id != 0) ids.push_back(id);
+                        if (id != 0) {
+                            ids.push_back(id);
+                        }
                     }
                 }
             } catch (...) {
             }
 
-            MainThread::Post([uid, ids = std::move(ids)]() mutable {
-                // Discard if user changed while the request was in-flight
-                if (uid != s_catUserId)
+            MainThread::Post([userId, ids = std::move(ids)]() mutable {
+                if (userId != g_categoryState.userId) {
                     return;
+                }
 
-                s_equippedUserId = uid;
-                s_equippedAssetIds = std::move(ids);
-                s_equippedFailed = s_equippedAssetIds.empty();
-                s_equippedLoading = false;
+                g_equippedState.userId = userId;
+                g_equippedState.assetIds = std::move(ids);
+                g_equippedState.failed = g_equippedState.assetIds.empty();
+                g_equippedState.loading = false;
             });
         });
     }
 
-    // --- Equipped items UI below avatar ---
-    if (s_equippedLoading) {
-        TextUnformatted("Fetching equipped items...");
-    } else if (s_equippedFailed) {
-        TextUnformatted("Failed to fetch equipped items.");
-    } else if (!s_equippedAssetIds.empty()) {
-        // Dynamic equipped items grid sizing
-    float equipMinCell = GetFontSize() * 3.75f; // ~60px at 16px
-    float equipAvailX = leftWidth - GetStyle().ItemSpacing.x * 2;
-    int equipColumns = static_cast<int>(std::floor(equipAvailX / equipMinCell));
-        if (equipColumns < 1)
-            equipColumns = 1;
-        float equipCellSize = (equipAvailX - (equipColumns - 1) * GetStyle().ItemSpacing.x) / equipColumns;
-        equipCellSize = std::floor(equipCellSize);
+    void FetchThumbnail(uint64_t assetId) {
+        auto& thumb = g_thumbCache[assetId];
+        thumb.loading = true;
+        ++g_activeThumbLoads;
 
-        int index = 0;
-        for (uint64_t aid: s_equippedAssetIds) {
-            if (index % equipColumns != 0)
-                SameLine();
-
-            auto &thumb = s_thumbCache[aid];
-            if (!thumb.srv && !thumb.loading && !thumb.failed && s_activeThumbLoads < kMaxConcurrentThumbLoads) {
-                thumb.loading = true;
-                ++s_activeThumbLoads;
-                Threading::newThread([assetId = aid]() {
-                    // identical download logic as before
-                    auto finish = [assetId](bool success) {
-                        MainThread::Post([assetId, success]() {
-                            auto &ti = s_thumbCache[assetId];
-                            ti.loading = false;
-                            ti.failed = !success;
-                            --s_activeThumbLoads;
-                        });
-                    };
-                    std::string metaUrl = "https://thumbnails.roblox.com/v1/assets?assetIds=" + std::to_string(assetId)
-                                          + "&size=75x75&format=Png";
-                    auto metaResp = HttpClient::get(metaUrl);
-                    if (metaResp.status_code != 200 || metaResp.text.empty()) {
-                        finish(false);
-                        return;
-                    }
-                    nlohmann::json metaJson = HttpClient::decode(metaResp);
-                    std::string imageUrl;
-                    try {
-                        if (metaJson.contains("data") && !metaJson["data"].empty()) {
-                            const auto &d = metaJson["data"][0];
-                            if (d.contains("imageUrl")) imageUrl = d["imageUrl"].get<std::string>();
-                        }
-                    } catch (...) { imageUrl.clear(); }
-                    if (imageUrl.empty()) {
-                        finish(false);
-                        return;
-                    }
-                    auto imgResp = HttpClient::get(imageUrl);
-                    if (imgResp.status_code != 200 || imgResp.text.empty()) {
-                        finish(false);
-                        return;
-                    }
-                    std::string data = std::move(imgResp.text);
-                    MainThread::Post([assetId, data = std::move(data)]() mutable {
-                        auto &ti = s_thumbCache[assetId];
-                        bool ok = LoadTextureFromMemory(data.data(), data.size(), &ti.srv, &ti.width, &ti.height);
-                        ti.loading = false;
-                        ti.failed = !ok;
-                        --s_activeThumbLoads;
-                    });
+        Threading::newThread([assetId] {
+            auto finish = [assetId](bool success) {
+                MainThread::Post([assetId, success] {
+                    auto& ti = g_thumbCache[assetId];
+                    ti.loading = false;
+                    ti.failed = !success;
+                    --g_activeThumbLoads;
                 });
+            };
+
+            const std::string metaUrl = std::format(
+                "https://thumbnails.roblox.com/v1/assets?assetIds={}&size=75x75&format=Png",
+                assetId
+            );
+
+            auto metaResp = HttpClient::get(metaUrl);
+            if (metaResp.status_code != 200 || metaResp.text.empty()) {
+                finish(false);
+                return;
             }
 
-            // Ensure unique ImGui IDs for each equipped item to avoid conflicts.
-            PushID(index);
+            nlohmann::json metaJson = HttpClient::decode(metaResp);
+            std::string imageUrl;
 
-            // Render equipped thumbnail
-            PushStyleVar(ImGuiStyleVar_FrameRounding, kThumbRounding);
-            PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-            ImVec4 tintEquip(1, 1, 1, 1);
-            if (thumb.srv) {
-                ImageButton("##eq", ImTextureID(reinterpret_cast<void *>(thumb.srv)),
-                            ImVec2(equipCellSize, equipCellSize), ImVec2(0, 0), ImVec2(1, 1), ImVec4(0, 0, 0, 0),
-                            tintEquip);
-            } else {
-                Button("", ImVec2(equipCellSize, equipCellSize));
+            std::exception_ptr exPtr;
+            try {
+                if (metaJson.contains("data") && !metaJson["data"].empty()) {
+                    const auto& d = metaJson["data"][0];
+                    if (d.contains("imageUrl")) {
+                        imageUrl = d["imageUrl"].get<std::string>();
+                    }
+                }
+            } catch (...) {
+                imageUrl.clear();
             }
-            PopStyleVar(2);
 
-            PopID();
+            if (imageUrl.empty()) {
+                finish(false);
+                return;
+            }
 
-            ++index;
-        }
+            auto imgResp = HttpClient::get(imageUrl);
+            if (imgResp.status_code != 200 || imgResp.text.empty()) {
+                finish(false);
+                return;
+            }
+
+            std::string data = std::move(imgResp.text);
+            MainThread::Post([assetId, data = std::move(data)]() mutable {
+                auto& ti = g_thumbCache[assetId];
+                const bool ok = LoadTextureFromMemory(
+                    data.data(), data.size(),
+                    &ti.srv, &ti.width, &ti.height
+                );
+                ti.loading = false;
+                ti.failed = !ok;
+                --g_activeThumbLoads;
+            });
+        });
     }
 
-    EndChild();
+    void FetchInventory(uint64_t userId, std::string cookie, int assetTypeId) {
+        g_inventoryState.loading = true;
+        g_inventoryState.failed = false;
 
-    SameLine();
-
-    // Right pane for inventory
-    BeginChild("AvatarInventoryPane", ImVec2(0, 0), true);
-
-    if (s_catLoading) {
-        TextUnformatted("Loading categories...");
-        EndChild();
-        return;
-    }
-    if (s_catFailed) {
-        TextUnformatted("Failed to load categories.");
-        EndChild();
-        return;
-    }
-
-    // ------------------------------
-    // Search bar + Category dropdown + (optional) AssetType dropdown row
-    ImGuiStyle &style = GetStyle();
-
-    // Build category list for combo
-    std::vector<const char *> categoryNames;
-    for (auto &ci: s_categories)
-        categoryNames.push_back(ci.displayName.c_str());
-
-    if (s_selectedCategory >= static_cast<int>(categoryNames.size()))
-        s_selectedCategory = 0;
-
-    // Build asset-type list for the currently selected category
-    std::vector<const char *> assetTypeNames;
-    for (auto &p: s_categories[s_selectedCategory].assetTypes)
-        assetTypeNames.push_back(p.second.c_str());
-
-    if (s_selectedAssetTypeIndex >= static_cast<int>(assetTypeNames.size()))
-        s_selectedAssetTypeIndex = 0;
-
-    // Compute widths so everything fits nicely in one line
-    auto calcComboWidth = [&](const char *text) {
-        // Text width + padding left/right + arrow region (~frame height)
-        return CalcTextSize(text).x + style.FramePadding.x * 2.0f + GetFrameHeight();
-    };
-    float catComboWidth = calcComboWidth(categoryNames[s_selectedCategory]);
-    float assetComboWidth = 0.0f;
-    if (assetTypeNames.size() > 1)
-        assetComboWidth = calcComboWidth(assetTypeNames[s_selectedAssetTypeIndex]);
-
-    float inputWidth = GetContentRegionAvail().x - catComboWidth - assetComboWidth;
-    if (assetComboWidth > 0)
-        inputWidth -= style.ItemSpacing.x;
-    inputWidth -= style.ItemSpacing.x; // space between search and category combo
-    float minField = GetFontSize() * 6.25f; // ~100px at 16px
-    if (inputWidth < minField)
-        inputWidth = minField;
-
-    // Determine current asset type to display (needed for dynamic search hint)
-    int assetTypeId = s_categories[s_selectedCategory].assetTypes[s_selectedAssetTypeIndex].first;
-
-    // Build dynamic hint text like "Search 53 items" when inventory is available
-    int itemCountHint = 0;
-    auto itHintInv = s_cachedInventories.find(assetTypeId);
-    if (itHintInv != s_cachedInventories.end())
-        itemCountHint = static_cast<int>(itHintInv->second.size());
-
-    std::string searchHint = itemCountHint > 0
-                                 ? ("Search " + std::to_string(itemCountHint) + " items")
-                                 : "Search items";
-
-    // Search input
-    PushItemWidth(inputWidth);
-    InputTextWithHint("##inventory_search", searchHint.c_str(), s_searchBuffer, sizeof(s_searchBuffer));
-    PopItemWidth();
-
-    // Category combo
-    SameLine(0, style.ItemSpacing.x);
-    PushItemWidth(catComboWidth);
-    if (Combo("##categoryCombo", &s_selectedCategory, categoryNames.data(), categoryNames.size())) {
-        // when user picks a new category reset sub-state
-        s_selectedAssetTypeIndex = 0;
-        s_searchBuffer[0] = '\0';
-    }
-    PopItemWidth();
-
-    // Asset-type combo (only if category has multiple)
-    if (assetComboWidth > 0) {
-        SameLine(0, style.ItemSpacing.x);
-        PushItemWidth(assetComboWidth);
-        Combo("##assetTypeCombo", &s_selectedAssetTypeIndex, assetTypeNames.data(), assetTypeNames.size());
-        PopItemWidth();
-    }
-
-    Separator();
-
-    // Fetch inventory if not cached
-    auto itInv = s_cachedInventories.find(assetTypeId);
-    if (itInv == s_cachedInventories.end() && !s_invLoading) {
-        s_invLoading = true;
-        s_invFailed = false;
-        Threading::newThread([currentUserId, cookie = currentCookie, assetTypeId] {
+        Threading::newThread([userId, cookie = std::move(cookie), assetTypeId] {
             std::vector<InventoryItem> items;
-
-            std::string cursor; // pagination cursor, empty for first page
+            std::string cursor;
             bool anyError = false;
-            while (!anyError) {
-                std::string url = "https://inventory.roblox.com/v2/users/" + std::to_string(currentUserId) +
-                                  "/inventory/" + std::to_string(assetTypeId) + "?limit=100&sortOrder=Asc";
-                if (!cursor.empty())
-                    url += "&cursor=" + cursor;
 
-                auto resp = HttpClient::get(url, {{"Cookie", ".ROBLOSECURITY=" + cookie}});
+            while (!anyError) {
+                std::string url = std::format(
+                    "https://inventory.roblox.com/v2/users/{}/inventory/{}?limit=100&sortOrder=Asc",
+                    userId, assetTypeId
+                );
+
+                if (!cursor.empty()) {
+                    url.append(std::format("&cursor={}", cursor));
+                }
+
+                auto resp = HttpClient::get(url, {{"Cookie", std::format(".ROBLOSECURITY={}", cookie)}});
                 if (resp.status_code != 200 || resp.text.empty()) {
                     anyError = true;
                     break;
                 }
 
                 nlohmann::json j;
+                std::exception_ptr exPtr;
                 try {
                     j = HttpClient::decode(resp);
                 } catch (...) {
@@ -559,7 +440,7 @@ void RenderInventoryTab() {
 
                 try {
                     if (j.contains("data")) {
-                        for (auto &it: j["data"]) {
+                        for (auto& it : j["data"]) {
                             InventoryItem ii;
                             ii.assetId = it.value("assetId", 0);
                             ii.assetName = it.value("assetName", "");
@@ -569,225 +450,406 @@ void RenderInventoryTab() {
                 } catch (...) {
                 }
 
-                // Check for pagination cursor
                 cursor.clear();
                 try {
-                    if (j.contains("nextPageCursor") && !j["nextPageCursor"].is_null())
+                    if (j.contains("nextPageCursor") && !j["nextPageCursor"].is_null()) {
                         cursor = j["nextPageCursor"].get<std::string>();
+                    }
                 } catch (...) {
                 }
 
-                if (cursor.empty())
-                    break; // no more pages
+                if (cursor.empty()) {
+                    break;
+                }
             }
 
             MainThread::Post([assetTypeId, anyError, items = std::move(items)]() mutable {
                 if (!anyError) {
-                    s_cachedInventories[assetTypeId] = std::move(items);
-                    s_invFailed = false;
+                    g_inventoryState.cachedInventories[assetTypeId] = std::move(items);
+                    g_inventoryState.failed = false;
                 } else {
-                    s_invFailed = true;
+                    g_inventoryState.failed = true;
                 }
-                s_invLoading = false;
+                g_inventoryState.loading = false;
             });
         });
     }
 
-    // Draw inventory list / grid
-    if (s_invLoading) {
-        TextUnformatted("Loading items...");
-    } else if (s_invFailed) {
-        TextUnformatted("Failed to load items.");
-    } else {
-        const auto &invItems = s_cachedInventories[assetTypeId];
-        std::string filterLower; {
-            std::string sb = s_searchBuffer;
+    void RenderAvatarPane(float width, uint64_t userId) {
+        ImGui::BeginChild("AvatarImagePane", ImVec2(width, 0), true);
+
+        if (g_avatarState.texture && !g_avatarState.loading) {
+            const float desiredWidth = width - ImGui::GetStyle().ItemSpacing.x * 2;
+            const float desiredHeight = (g_avatarState.imageWidth > 0)
+                ? (desiredWidth * static_cast<float>(g_avatarState.imageHeight) / g_avatarState.imageWidth)
+                : 0.0f;
+            ImGui::Image(
+                ImTextureID(reinterpret_cast<void*>(g_avatarState.texture)),
+                ImVec2(desiredWidth, desiredHeight)
+            );
+        } else if (g_avatarState.loading) {
+            ImGui::TextUnformatted("Loading avatar...");
+        } else if (g_avatarState.failed) {
+            ImGui::TextUnformatted("Failed to load avatar image.");
+        }
+
+        // Equipped items
+        if (userId != 0 && userId != g_equippedState.userId && !g_equippedState.loading) {
+            FetchEquippedItems(userId);
+        }
+
+        if (g_equippedState.loading) {
+            ImGui::TextUnformatted("Fetching equipped items...");
+        } else if (g_equippedState.failed) {
+            ImGui::TextUnformatted("Failed to fetch equipped items.");
+        } else if (!g_equippedState.assetIds.empty()) {
+            const float equipMinCell = ImGui::GetFontSize() * EQUIPPED_MIN_CELL_MULTIPLIER;
+            const float equipAvailX = width - ImGui::GetStyle().ItemSpacing.x * 2;
+            int equipColumns = static_cast<int>(std::floor(equipAvailX / equipMinCell));
+            equipColumns = std::max(equipColumns, 1);
+
+            const float equipCellSize = std::floor(
+                (equipAvailX - (equipColumns - 1) * ImGui::GetStyle().ItemSpacing.x) / equipColumns
+            );
+
+            int index = 0;
+            for (uint64_t assetId : g_equippedState.assetIds) {
+                if (index % equipColumns != 0) {
+                    ImGui::SameLine();
+                }
+
+                auto& thumb = g_thumbCache[assetId];
+                if (!thumb.srv && !thumb.loading && !thumb.failed &&
+                    g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
+                    FetchThumbnail(assetId);
+                }
+
+                ImGui::PushID(index);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, THUMB_ROUNDING);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+
+                if (thumb.srv) {
+                    ImGui::ImageButton(
+                        "##eq",
+                        ImTextureID(reinterpret_cast<void*>(thumb.srv)),
+                        ImVec2(equipCellSize, equipCellSize),
+                        ImVec2(0, 0), ImVec2(1, 1),
+                        ImVec4(0, 0, 0, 0),
+                        ImVec4(1, 1, 1, 1)
+                    );
+                } else {
+                    ImGui::Button("", ImVec2(equipCellSize, equipCellSize));
+                }
+
+                ImGui::PopStyleVar(2);
+                ImGui::PopID();
+                ++index;
+            }
+        }
+
+        ImGui::EndChild();
+    }
+
+    float CalculateComboWidth(const char* text) {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        return ImGui::CalcTextSize(text).x + style.FramePadding.x * 2.0f + ImGui::GetFrameHeight();
+    }
+
+    void RenderSearchAndFilters(int assetTypeId, const std::vector<const char*>& categoryNames,
+                                const std::vector<const char*>& assetTypeNames) {
+        const ImGuiStyle& style = ImGui::GetStyle();
+
+        const float catComboWidth = CalculateComboWidth(categoryNames[g_categoryState.selectedCategory]);
+        float assetComboWidth = 0.0f;
+        if (assetTypeNames.size() > 1) {
+            assetComboWidth = CalculateComboWidth(assetTypeNames[g_inventoryState.selectedAssetTypeIndex]);
+        }
+
+        const float minFieldWidth = ImGui::GetFontSize() * MIN_FIELD_MULTIPLIER;
+        float inputWidth = ImGui::GetContentRegionAvail().x - catComboWidth - assetComboWidth;
+        if (assetComboWidth > 0) {
+            inputWidth -= style.ItemSpacing.x;
+        }
+        inputWidth -= style.ItemSpacing.x;
+        inputWidth = std::max(inputWidth, minFieldWidth);
+
+        int itemCount = 0;
+        if (auto it = g_inventoryState.cachedInventories.find(assetTypeId);
+            it != g_inventoryState.cachedInventories.end()) {
+            itemCount = static_cast<int>(it->second.size());
+        }
+
+        const std::string searchHint = itemCount > 0
+            ? std::format("Search {} items", itemCount)
+            : "Search items";
+
+        ImGui::PushItemWidth(inputWidth);
+        ImGui::InputTextWithHint("##inventory_search", searchHint.c_str(), g_searchBuffer, SEARCH_BUFFER_SIZE);
+        ImGui::PopItemWidth();
+
+        ImGui::SameLine(0, style.ItemSpacing.x);
+        ImGui::PushItemWidth(catComboWidth);
+        if (ImGui::Combo("##categoryCombo", &g_categoryState.selectedCategory,
+                        categoryNames.data(), categoryNames.size())) {
+            g_inventoryState.selectedAssetTypeIndex = 0;
+            g_searchBuffer[0] = '\0';
+        }
+        ImGui::PopItemWidth();
+
+        if (assetComboWidth > 0) {
+            ImGui::SameLine(0, style.ItemSpacing.x);
+            ImGui::PushItemWidth(assetComboWidth);
+            ImGui::Combo("##assetTypeCombo", &g_inventoryState.selectedAssetTypeIndex,
+                        assetTypeNames.data(), assetTypeNames.size());
+            ImGui::PopItemWidth();
+        }
+
+        ImGui::Separator();
+    }
+
+    void RenderInventoryGrid(const std::vector<InventoryItem>& items, float cellSize, int columns) {
+        std::string filterLower;
+        {
+            std::string sb = g_searchBuffer;
             std::transform(sb.begin(), sb.end(), sb.begin(), ::tolower);
             filterLower = std::move(sb);
         }
 
-    float MIN_CELL_SIZE = GetFontSize() * 6.25f; // ~100px at 16px
-        float availX = GetContentRegionAvail().x;
-        int columns = static_cast<int>(std::floor(availX / MIN_CELL_SIZE));
-        if (columns < 1)
-            columns = 1;
-        float cellSize = (availX - (columns - 1) * style.ItemSpacing.x) / columns;
-        cellSize = std::floor(cellSize);
+        const std::unordered_set<uint64_t> equippedSet(
+            g_equippedState.assetIds.begin(),
+            g_equippedState.assetIds.end()
+        );
 
-        // Build a fast lookup for equipped items
-        std::unordered_set<uint64_t> equippedSet(s_equippedAssetIds.begin(), s_equippedAssetIds.end());
-
-        // Build a list of indices that pass the search filter so we can clip accurately, keeping the selected item on top
         std::vector<int> visibleIndices;
-        visibleIndices.reserve(invItems.size());
+        visibleIndices.reserve(items.size());
         int selectedIndex = -1;
-        for (int i = 0; i < static_cast<int>(invItems.size()); ++i) {
+
+        for (int i = 0; i < static_cast<int>(items.size()); ++i) {
             if (!filterLower.empty()) {
-                std::string nameLower = invItems[i].assetName;
+                std::string nameLower = items[i].assetName;
                 std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
-                if (nameLower.find(filterLower) == std::string::npos)
+                if (nameLower.find(filterLower) == std::string::npos) {
                     continue;
+                }
             }
-            if (invItems[i].assetId == s_selectedAssetId) {
+
+            if (items[i].assetId == g_selectedAssetId) {
                 selectedIndex = i;
             } else {
                 visibleIndices.push_back(i);
             }
         }
-        // Place selected index at the front if it matches filter
-        if (selectedIndex != -1)
-            visibleIndices.insert(visibleIndices.begin(), selectedIndex);
 
-        int itemCount = static_cast<int>(visibleIndices.size());
-        int rowCount = (itemCount + columns - 1) / columns;
+        if (selectedIndex != -1) {
+            visibleIndices.insert(visibleIndices.begin(), selectedIndex);
+        }
+
+        const int itemCount = static_cast<int>(visibleIndices.size());
+        const int rowCount = (itemCount + columns - 1) / columns;
 
         ImGuiListClipper clipper;
-        clipper.Begin(rowCount, cellSize + style.ItemSpacing.y);
+        clipper.Begin(rowCount, cellSize + ImGui::GetStyle().ItemSpacing.y);
+
         while (clipper.Step()) {
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
-                int firstIdx = row * columns;
+                const int firstIdx = row * columns;
+
                 for (int col = 0; col < columns; ++col) {
-                    int listIdx = firstIdx + col;
-                    if (listIdx >= itemCount)
+                    const int listIdx = firstIdx + col;
+                    if (listIdx >= itemCount) {
                         break;
-
-                    int itemIndex = visibleIndices[listIdx];
-                    const auto &itm = invItems[itemIndex];
-
-                    if (col > 0)
-                        SameLine();
-
-                    // Thumbnail handling (only start downloads for on-screen items)
-                    auto &thumb = s_thumbCache[itm.assetId];
-                    if (!thumb.srv && !thumb.loading && !thumb.failed && s_activeThumbLoads <
-                        kMaxConcurrentThumbLoads) {
-                        thumb.loading = true;
-                        ++s_activeThumbLoads;
-                        Threading::newThread([assetId = itm.assetId]() {
-                            auto finishWithState = [assetId](bool success) {
-                                MainThread::Post([assetId, success]() {
-                                    auto &ti = s_thumbCache[assetId];
-                                    ti.loading = false;
-                                    ti.failed = !success;
-                                    --s_activeThumbLoads;
-                                });
-                            };
-
-                            std::string metaUrl = "https://thumbnails.roblox.com/v1/assets?assetIds=" + std::to_string(
-                                                      assetId) +
-                                                  "&size=75x75&format=Png";
-                            auto metaResp = HttpClient::get(metaUrl);
-                            if (metaResp.status_code != 200 || metaResp.text.empty()) {
-                                finishWithState(false);
-                                return;
-                            }
-
-                            nlohmann::json metaJson = HttpClient::decode(metaResp);
-                            std::string imageUrl;
-                            try {
-                                if (metaJson.contains("data") && !metaJson["data"].empty()) {
-                                    const auto &d = metaJson["data"][0];
-                                    if (d.contains("imageUrl"))
-                                        imageUrl = d["imageUrl"].get<std::string>();
-                                }
-                            } catch (...) {
-                                imageUrl.clear();
-                            }
-
-                            if (imageUrl.empty()) {
-                                finishWithState(false);
-                                return;
-                            }
-
-                            auto imgResp = HttpClient::get(imageUrl);
-                            if (imgResp.status_code != 200 || imgResp.text.empty()) {
-                                finishWithState(false);
-                                return;
-                            }
-
-                            std::string data = std::move(imgResp.text);
-                            MainThread::Post([assetId, data = std::move(data)]() mutable {
-                                auto &ti = s_thumbCache[assetId];
-                                bool ok = LoadTextureFromMemory(data.data(), data.size(), &ti.srv, &ti.width,
-                                                                &ti.height);
-                                ti.loading = false;
-                                ti.failed = !ok;
-                                --s_activeThumbLoads;
-                            });
-                        });
                     }
 
-                    PushID(itemIndex);
-                    bool itemClicked = false;
+                    const int itemIndex = visibleIndices[listIdx];
+                    const auto& item = items[itemIndex];
+
+                    if (col > 0) {
+                        ImGui::SameLine();
+                    }
+
+                    auto& thumb = g_thumbCache[item.assetId];
+                    if (!thumb.srv && !thumb.loading && !thumb.failed &&
+                        g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
+                        FetchThumbnail(item.assetId);
+                    }
+
+                    ImGui::PushID(itemIndex);
+
+                    const bool isEquipped = equippedSet.contains(item.assetId);
+                    const bool isSelected = (item.assetId == g_selectedAssetId);
+
                     if (thumb.srv) {
-                        bool isEquipped = equippedSet.count(itm.assetId) > 0;
+                        const ImVec4 tint = isSelected ? ImVec4(1, 1, 1, 1) : ImVec4(1, 1, 1, 1);
+                        const ImVec4 btnCol = isEquipped
+                            ? ImGui::GetStyleColorVec4(ImGuiCol_Button)
+                            : ImVec4(0, 0, 0, 0);
+                        const ImVec4 btnColHovered = isEquipped
+                            ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered)
+                            : ImVec4(0, 0, 0, 0);
+                        const ImVec4 btnColActive = isEquipped
+                            ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                            : ImVec4(0, 0, 0, 0);
 
-                        // Build tint/background colours. Non-selected, non-equipped items should have a fully
-                        // transparent background so the accessory images blend seamlessly with the UI.
-                        ImVec4 tint = (itm.assetId == s_selectedAssetId)
-                                          ? ImVec4(1, 1, 1, 1)
-                                          : ImVec4(1.0f, 1.0f, 1.0f, 1);
+                        ImGui::PushStyleColor(ImGuiCol_Button, btnCol);
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btnColHovered);
+                        ImGui::PushStyleColor(ImGuiCol_ButtonActive, btnColActive);
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, THUMB_ROUNDING);
+                        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
 
-                        // Background colour only shown for equipped items – otherwise keep alpha at 0.
-                        ImVec4 btnCol = isEquipped ? GetStyleColorVec4(ImGuiCol_Button) : ImVec4(0, 0, 0, 0);
-                        ImVec4 btnColHovered = isEquipped
-                                                   ? GetStyleColorVec4(ImGuiCol_ButtonHovered)
-                                                   : ImVec4(0, 0, 0, 0);
-                        ImVec4 btnColActive =
-                                isEquipped ? GetStyleColorVec4(ImGuiCol_ButtonActive) : ImVec4(0, 0, 0, 0);
+                        ImGui::ImageButton(
+                            "##img",
+                            ImTextureID(reinterpret_cast<void*>(thumb.srv)),
+                            ImVec2(cellSize, cellSize),
+                            ImVec2(0, 0), ImVec2(1, 1),
+                            ImVec4(0, 0, 0, 0),
+                            tint
+                        );
 
-                        // Override ImGui button colours for the duration of this draw so that non-selected,
-                        // non-equipped thumbnails have no visible frame/background.
-                        PushStyleColor(ImGuiCol_Button, btnCol);
-                        PushStyleColor(ImGuiCol_ButtonHovered, btnColHovered);
-                        PushStyleColor(ImGuiCol_ButtonActive, btnColActive);
+                        ImGui::PopStyleVar(2);
+                        ImGui::PopStyleColor(3);
 
-                        PushStyleVar(ImGuiStyleVar_FrameRounding, kThumbRounding);
-                        PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-
-                        itemClicked = ImageButton("##img", ImTextureID(reinterpret_cast<void *>(thumb.srv)),
-                                                  ImVec2(cellSize, cellSize), ImVec2(0, 0), ImVec2(1, 1),
-                                                  ImVec4(0, 0, 0, 0), tint);
-
-                        PopStyleVar(2);
-                        PopStyleColor(3);
-
-                        if (IsItemHovered())
-                            SetTooltip("%s", itm.assetName.c_str());
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::SetTooltip("%s", item.assetName.c_str());
+                        }
                     } else {
-                        bool isEquipped = equippedSet.count(itm.assetId) > 0;
-                        PushStyleVar(ImGuiStyleVar_FrameRounding, kThumbRounding);
-                        ImVec4 btnCol = isEquipped ? GetStyleColorVec4(ImGuiCol_Button) : ImVec4(0, 0, 0, 0);
-                        if (itm.assetId != s_selectedAssetId)
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, THUMB_ROUNDING);
+                        ImVec4 btnCol = isEquipped
+                            ? ImGui::GetStyleColorVec4(ImGuiCol_Button)
+                            : ImVec4(0, 0, 0, 0);
+                        if (!isSelected) {
                             btnCol.w *= 0.7f;
-                        PushStyleColor(ImGuiCol_Button, btnCol);
-                        itemClicked = Button(itm.assetName.c_str(), ImVec2(cellSize, cellSize));
-                        PopStyleColor();
-                        PopStyleVar();
+                        }
+                        ImGui::PushStyleColor(ImGuiCol_Button, btnCol);
+                        ImGui::Button(item.assetName.c_str(), ImVec2(cellSize, cellSize));
+                        ImGui::PopStyleColor();
+                        ImGui::PopStyleVar();
                     }
 
-                    // Clicking no longer changes selection – disabled.
-
-                    // Context menu
-                    if (BeginPopupContextItem("ctx")) {
-                        MenuItem("Equip", nullptr, false, false); // dummy disabled
-                        MenuItem("Inspect", nullptr, false, false);
-                        EndPopup();
+                    if (ImGui::BeginPopupContextItem("ctx")) {
+                        ImGui::MenuItem("Equip", nullptr, false, false);
+                        ImGui::MenuItem("Inspect", nullptr, false, false);
+                        ImGui::EndPopup();
                     }
 
-                    // Draw outline around the last item rect
-                    ImVec2 rectMin = GetItemRectMin();
-                    ImVec2 rectMax = GetItemRectMax();
-                    ImU32 outlineColor = (itm.assetId == s_selectedAssetId)
-                                             ? GetColorU32(ImGuiCol_ButtonActive)
-                                             : GetColorU32(ImGuiCol_Border);
-                    GetWindowDrawList()->AddRect(rectMin, rectMax, outlineColor, kThumbRounding, 0, 1.0f);
+                    const ImVec2 rectMin = ImGui::GetItemRectMin();
+                    const ImVec2 rectMax = ImGui::GetItemRectMax();
+                    const ImU32 outlineColor = isSelected
+                        ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+                        : ImGui::GetColorU32(ImGuiCol_Border);
+                    ImGui::GetWindowDrawList()->AddRect(rectMin, rectMax, outlineColor, THUMB_ROUNDING, 0, 1.0f);
 
-                    PopID();
+                    ImGui::PopID();
                 }
             }
         }
     }
 
-    EndChild();
+    void RenderInventoryPane(uint64_t userId, std::string cookie) {
+        ImGui::BeginChild("AvatarInventoryPane", ImVec2(0, 0), true);
+
+        if (g_categoryState.loading) {
+            ImGui::TextUnformatted("Loading categories...");
+            ImGui::EndChild();
+            return;
+        }
+
+        if (g_categoryState.failed) {
+            ImGui::TextUnformatted("Failed to load categories.");
+            ImGui::EndChild();
+            return;
+        }
+
+        if (g_categoryState.categories.empty()) {
+            ImGui::TextUnformatted("No categories available.");
+            ImGui::EndChild();
+            return;
+        }
+
+        std::vector<const char*> categoryNames;
+        for (auto& ci : g_categoryState.categories) {
+            categoryNames.push_back(ci.displayName.c_str());
+        }
+
+        if (g_categoryState.selectedCategory >= static_cast<int>(categoryNames.size())) {
+            g_categoryState.selectedCategory = 0;
+        }
+
+        std::vector<const char*> assetTypeNames;
+        for (auto& p : g_categoryState.categories[g_categoryState.selectedCategory].assetTypes) {
+            assetTypeNames.push_back(p.second.c_str());
+        }
+
+        if (g_inventoryState.selectedAssetTypeIndex >= static_cast<int>(assetTypeNames.size())) {
+            g_inventoryState.selectedAssetTypeIndex = 0;
+        }
+
+        const int assetTypeId = g_categoryState.categories[g_categoryState.selectedCategory]
+            .assetTypes[g_inventoryState.selectedAssetTypeIndex].first;
+
+        RenderSearchAndFilters(assetTypeId, categoryNames, assetTypeNames);
+
+        auto itInv = g_inventoryState.cachedInventories.find(assetTypeId);
+        if (itInv == g_inventoryState.cachedInventories.end() && !g_inventoryState.loading) {
+            FetchInventory(userId, std::move(cookie), assetTypeId);
+        }
+
+        if (g_inventoryState.loading) {
+            ImGui::TextUnformatted("Loading items...");
+        } else if (g_inventoryState.failed) {
+            ImGui::TextUnformatted("Failed to load items.");
+        } else if (itInv != g_inventoryState.cachedInventories.end()) {
+            const auto& invItems = itInv->second;
+            const float minCellSize = ImGui::GetFontSize() * MIN_CELL_SIZE_MULTIPLIER;
+            const float availX = ImGui::GetContentRegionAvail().x;
+
+            int columns = static_cast<int>(std::floor(availX / minCellSize));
+            columns = std::max(columns, 1);
+
+            const float cellSize = std::floor(
+                (availX - (columns - 1) * ImGui::GetStyle().ItemSpacing.x) / columns
+            );
+
+            RenderInventoryGrid(invItems, cellSize, columns);
+        }
+
+        ImGui::EndChild();
+    }
+}
+
+void RenderInventoryTab() {
+    auto [currentUserId, currentCookie] = GetCurrentUserInfo();
+
+    if (currentUserId != g_avatarState.loadedUserId) {
+        g_avatarState.started = false;
+        g_avatarState.failed = false;
+        g_avatarState.loading = false;
+        ResetAvatarTexture();
+        g_avatarState.loadedUserId = currentUserId;
+    }
+
+    if (currentUserId != g_categoryState.userId) {
+        ResetAllState();
+        g_categoryState.userId = currentUserId;
+    }
+
+    if (currentUserId == 0) {
+        ImGui::TextUnformatted("No account selected.");
+        return;
+    }
+
+    if (!g_avatarState.started) {
+        FetchAvatarImage(currentUserId);
+    }
+
+    if (g_categoryState.userId != 0 && !g_categoryState.loading &&
+        g_categoryState.categories.empty() && !g_categoryState.failed) {
+        FetchCategories(currentUserId, currentCookie);
+    }
+
+    const float availWidth = ImGui::GetContentRegionAvail().x;
+    const float leftWidth = availWidth * 0.35f;
+
+    RenderAvatarPane(leftWidth, currentUserId);
+    ImGui::SameLine();
+    RenderInventoryPane(currentUserId, currentCookie);
 }

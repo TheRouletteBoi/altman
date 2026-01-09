@@ -8,11 +8,9 @@ bool RenderUI();
 constexpr int JOIN_VALUE_BUF_SIZE = 128;
 constexpr int JOIN_JOBID_BUF_SIZE = 128;
 
-extern char join_value_buf[JOIN_VALUE_BUF_SIZE];
-extern char join_jobid_buf[JOIN_JOBID_BUF_SIZE];
-
-extern int join_type_combo_index;
-extern int g_activeTab;
+inline char join_value_buf[JOIN_VALUE_BUF_SIZE] = "";
+inline char join_jobid_buf[JOIN_JOBID_BUF_SIZE] = "";
+inline int join_type_combo_index = 0;
 
 enum Tab {
     Tab_Accounts,
@@ -26,7 +24,9 @@ enum Tab {
     Tab_COUNT
 };
 
-extern uint64_t g_targetPlaceId_ServersTab;
-extern uint64_t g_targetUniverseId_ServersTab;
+inline int g_activeTab = Tab_Accounts;
+
+inline uint64_t g_targetPlaceId_ServersTab = 0;
+inline uint64_t g_targetUniverseId_ServersTab = 0;
 
 #endif

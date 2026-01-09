@@ -10,18 +10,20 @@
 #include <ranges>
 #include <string_view>
 
-#include "../data.h"
-#include "network/roblox.h"
-#include "system/launcher.hpp"
-#include "system/threading.h"
-#include "./friends_actions.h"
-#include "ui/webview.hpp"
-#include "../games/games_utils.h"
-#include "core/time_utils.h"
-#include "ui/confirm.h"
+#include "../../utils/core/account_utils.h"
 #include "../accounts/accounts_join_ui.h"
 #include "../context_menus.h"
-#include "../../utils/core/account_utils.h"
+#include "../data.h"
+#include "../games/games_utils.h"
+#include "./friends_actions.h"
+#include "console/console.h"
+#include "core/status.h"
+#include "core/time_utils.h"
+#include "network/roblox.h"
+#include "system/roblox_launcher.h"
+#include "system/threading.h"
+#include "ui/modal_popup.h"
+#include "ui/webview.h"
 
 namespace {
     constexpr std::string_view ICON_TOOL = "\xEF\x82\xAD ";
@@ -352,7 +354,7 @@ namespace {
         ImGui::Separator();
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
         if (ImGui::MenuItem("Unfriend")) {
-            ConfirmPopup::AddYesNo(
+            ModalPopup::AddYesNo(
                 std::format("Unfriend {}?", frend.username),
                 [frend, cookie = account.cookie, accountId = account.id]() {
                     Threading::newThread([frend, cookie, accountId]() {
@@ -655,23 +657,23 @@ namespace {
             const auto uidStr = std::to_string(detail.id);
 
             if (ImGui::MenuItem("Profile")) {
-                LaunchWebview("https://www.roblox.com/users/" + uidStr + "/profile",
+                LaunchWebviewImpl("https://www.roblox.com/users/" + uidStr + "/profile",
                             "Roblox Profile", cookie, userId);
             }
             if (ImGui::MenuItem("Friends")) {
-                LaunchWebview("https://www.roblox.com/users/" + uidStr + "/friends",
+                LaunchWebviewImpl("https://www.roblox.com/users/" + uidStr + "/friends",
                             "Friends", cookie, userId);
             }
             if (ImGui::MenuItem("Favorites")) {
-                LaunchWebview("https://www.roblox.com/users/" + uidStr + "/favorites",
+                LaunchWebviewImpl("https://www.roblox.com/users/" + uidStr + "/favorites",
                             "Favorites", cookie, userId);
             }
             if (ImGui::MenuItem("Inventory")) {
-                LaunchWebview("https://www.roblox.com/users/" + uidStr + "/inventory/#!/accessories",
+                LaunchWebviewImpl("https://www.roblox.com/users/" + uidStr + "/inventory/#!/accessories",
                             "Inventory", cookie, userId);
             }
             if (ImGui::MenuItem("Rolimons")) {
-                LaunchWebview("https://www.rolimons.com/player/" + uidStr, "Rolimons");
+                LaunchWebviewImpl("https://www.rolimons.com/player/" + uidStr, "Rolimons");
             }
             ImGui::EndPopup();
         }

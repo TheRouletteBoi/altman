@@ -1,6 +1,6 @@
 #include "backup.h"
 #include "data.h"
-#include "../utils/core/logging.hpp"
+#include "console/console.h"
 #include "../utils/system/threading.h"
 #include "network/roblox.h"
 #include <nlohmann/json.hpp>
@@ -48,7 +48,7 @@ std::filesystem::path getBackupDir() {
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     if (ec) {
-        LOG_ERROR("Failed to create backups directory: " + ec.message());
+        LOG_ERROR("Failed to create backups directory: ", ec.message());
     }
     return dir;
 }
@@ -138,18 +138,18 @@ bool Backup::Import(const std::string &file, const std::string &password, std::s
         // Validate cookie first to avoid multiple error messages
         Roblox::BanCheckResult banStatus = Roblox::cachedBanStatus(acct.cookie);
         if (banStatus == Roblox::BanCheckResult::InvalidCookie) {
-            LOG_WARN("Skipping account with invalid cookie during backup import (ID: " + std::to_string(acct.id) + ")");
+            LOG_WARN("Skipping account with invalid cookie during backup import (ID: {})", acct.id);
             continue;
         }
         
         // Get user information
         uint64_t uid = Roblox::getUserId(acct.cookie);
-        string username = Roblox::getUsername(acct.cookie);
-        string displayName = Roblox::getDisplayName(acct.cookie);
+        std::string username = Roblox::getUsername(acct.cookie);
+        std::string displayName = Roblox::getDisplayName(acct.cookie);
         
         // Double-check that we got valid user data
         if (uid == 0 || username.empty() || displayName.empty()) {
-            LOG_WARN("Skipping account with invalid data during backup import (ID: " + std::to_string(acct.id) + ")");
+            LOG_WARN("Skipping account with invalid data during backup import (ID: {})", acct.id);
             continue;
         }
         

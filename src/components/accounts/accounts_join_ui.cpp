@@ -14,18 +14,17 @@
 #include <array>
 #include <sstream>
 
-#include "roblox.h"
-#include "threading.h"
-#include "../data.h"
 #include "../../ui.h"
-#include "system/launcher.hpp"
-#include "core/status.h"
-#include "core/logging.hpp"
-#include "ui/modal_popup.h"
-#include "ui/confirm.h"
-#include "core/app_state.h"
 #include "../../utils/core/account_utils.h"
+#include "../data.h"
+#include "console/console.h"
+#include "core/app_state.h"
+#include "core/status.h"
+#include "roblox.h"
 #include "system/roblox_control.h"
+#include "system/roblox_launcher.h"
+#include "threading.h"
+#include "ui/modal_popup.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -241,7 +240,7 @@ namespace {
 
                 launchRobloxSequential(LaunchParams::gameJob(it->second.placeId, it->second.jobId), std::move(accounts));
             } catch (const std::exception& e) {
-                LOG_ERROR(std::format("Join by username failed: {}", e.what()));
+                LOG_ERROR("Join by username failed: {}", e.what());
                 Status::Error("Failed to join by username");
             }
         });
@@ -255,7 +254,7 @@ namespace {
             try {
                 launchRobloxSequential(LaunchParams::privateServer(serverLink), std::move(accounts));
             } catch (const std::exception& e) {
-                LOG_ERROR(std::format("Join by link failed: {}", e.what()));
+                LOG_ERROR("Join by link failed: {}", e.what());
                 Status::Error("Failed to join by link");
             }
         });
@@ -338,7 +337,7 @@ namespace {
 
     void performJoin() {
         if (g_selectedAccountIds.empty()) {
-            ModalPopup::Add("Select an account first.");
+            ModalPopup::AddInfo("Select an account first.");
             return;
         }
 
@@ -362,9 +361,9 @@ namespace {
                         
                     handleJoinByPlaceId(placeId, jobId);
                 } catch (const std::invalid_argument& e) {
-                    LOG_ERROR(std::format("Invalid numeric input: {}", e.what()));
+                    LOG_ERROR("Invalid numeric input: {}", e.what());
                 } catch (const std::out_of_range& e) {
-                    LOG_ERROR(std::format("Numeric input out of range: {}", e.what()));
+                    LOG_ERROR("Numeric input out of range: {}", e.what());
                 }
                 break;
             }
@@ -428,7 +427,7 @@ void RenderJoinOptions() {
 
 #ifdef _WIN32
         if (!g_multiRobloxEnabled && RobloxControl::IsRobloxRunning()) {
-            ConfirmPopup::Add("Roblox is already running. Launch anyway?", doJoin);
+            ModalPopup::Add("Roblox is already running. Launch anyway?", doJoin);
         } else {
             doJoin();
         }

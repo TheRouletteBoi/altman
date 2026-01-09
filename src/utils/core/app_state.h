@@ -1,2 +1,2 @@
 #pragma once
-extern bool g_multiRobloxEnabled;
+inline bool g_multiRobloxEnabled = false;

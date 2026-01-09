@@ -10,16 +10,16 @@
 #include <utility>
 
 #include "accounts/accounts.h"
+#include "avatar/inventory.h"
 #include "components/components.h"
+#include "core/status.h"
 #include "friends/friends.h"
 #include "games/games.h"
 #include "history/history.h"
-#include "settings/settings.h"
 #include "network/roblox.h"
-#include "core/status.h"
+#include "settings/settings.h"
 #include "ui/modal_popup.h"
-#include "ui/confirm.h"
-#include "avatar/inventory.h"
+#include "ui/notifications.h"
 
 namespace {
     constexpr std::string_view ICON_ACCOUNTS = "\xEF\x80\x87";
@@ -158,16 +158,6 @@ namespace {
 
 }
 
-char join_value_buf[JOIN_VALUE_BUF_SIZE] = "";
-char join_jobid_buf[JOIN_JOBID_BUF_SIZE] = "";
-int join_type_combo_index = 0;
-int g_activeTab = Tab_Accounts;
-
-uint64_t g_targetPlaceId_ServersTab = 0;
-uint64_t g_targetUniverseId_ServersTab = 0;
-
-#include "utils/system/update.h"
-
 bool RenderUI() {
     const bool exitFromMenu = RenderMainMenu();
 
@@ -194,7 +184,6 @@ bool RenderUI() {
     ImGui::End();
 
     ModalPopup::Render();
-    ConfirmPopup::Render();
 	float deltaTime = ImGui::GetIO().DeltaTime;
 	UpdateNotification::Update(deltaTime);
 	UpdateNotification::Render();

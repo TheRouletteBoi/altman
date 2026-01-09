@@ -1,8 +1,7 @@
-// image.h
 #pragma once
 
+#include "network/http.h"
 #include <string>
-#include "network/http.hpp"
 
 #ifdef _WIN32
     #include <d3d11.h>

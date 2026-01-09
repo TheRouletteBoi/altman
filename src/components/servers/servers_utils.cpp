@@ -2,11 +2,9 @@
 #include <algorithm>
 #include <cctype>
 
-using namespace std;
-
-string toLower(string s)
+std::string toLower(std::string s)
 {
-    transform(s.begin(), s.end(), s.begin(),
+    std::transform(s.begin(), s.end(), s.begin(),
               [](unsigned char c)
               {
                   return static_cast<char>(tolower(c));
@@ -14,11 +12,11 @@ string toLower(string s)
     return s;
 }
 
-bool containsCI(const string &haystack, const string &needle)
+bool containsCI(const std::string &haystack, const std::string &needle)
 {
     if (needle.empty())
         return true;
-    string h_lower = toLower(haystack);
-    string n_lower = toLower(needle);
-    return h_lower.find(n_lower) != string::npos;
+    std::string h_lower = toLower(haystack);
+    std::string n_lower = toLower(needle);
+    return h_lower.find(n_lower) != std::string::npos;
 }

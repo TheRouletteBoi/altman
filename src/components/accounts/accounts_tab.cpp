@@ -16,14 +16,13 @@
 #include <format>
 
 #include "main_thread.h"
-#include "webview.hpp"
-#include "../webview_helpers.h"
+#include "webview.h"
 
-#include "system/threading.h"
-#include "network/roblox.h"
-#include "core/time_utils.h"
-#include "core/logging.hpp"
+#include "console/console.h"
 #include "core/status.h"
+#include "core/time_utils.h"
+#include "network/roblox.h"
+#include "system/threading.h"
 
 #include "../components.h"
 #include "../../ui.h"
@@ -91,13 +90,13 @@ namespace {
 
     void handleDoubleClick(const AccountData& account) {
         if (account.cookie.empty()) {
-            LOG_WARN("Cannot open browser - cookie is empty for account: " + account.displayName);
+            LOG_WARN("Cannot open browser - cookie is empty for account: {}", account.displayName);
             Status::Error("Cookie is empty for this account");
             return;
         }
 
-        LOG_INFO(std::format("Opening browser for account: {} (ID: {})", 
-                            account.displayName, account.id));
+        LOG_INFO("Opening browser for account: {} (ID: {})",
+                            account.displayName, account.id);
         Threading::newThread([account]() { 
             LaunchBrowserWithCookie(account); 
         });
@@ -105,7 +104,7 @@ namespace {
 
     void handleHoldAction(const AccountData& account) {
         if (account.cookie.empty()) {
-            LOG_WARN("Cannot open browser - cookie is empty for account: " + account.displayName);
+            LOG_WARN("Cannot open browser - cookie is empty for account: {}", account.displayName);
             Status::Error("Cookie is empty for this account");
             return;
         }
@@ -247,8 +246,8 @@ namespace {
                     g_accounts.insert(g_accounts.begin() + insertIndex, accountCopy);
                     Data::SaveAccounts();
 
-                    LOG_INFO(std::format("Reordered account from index {} to {}",
-                                        sourceIndex, insertIndex));
+                    LOG_INFO("Reordered account from index {} to {}",
+                                        sourceIndex, insertIndex);
                 }
             }
             ImGui::EndDragDropTarget();

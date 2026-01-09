@@ -1,11 +1,11 @@
 #define IDI_ICON_32 102
 
-#include "webview.hpp"
-#include <windows.h>
-#include <shlobj_core.h>
-#include <shellscalingapi.h>
-#include <wrl.h>
+#include "webview.h"
 #include <WebView2.h>
+#include <shellscalingapi.h>
+#include <shlobj_core.h>
+#include <windows.h>
+#include <wrl.h>
 
 #include <atomic>
 #include <chrono>

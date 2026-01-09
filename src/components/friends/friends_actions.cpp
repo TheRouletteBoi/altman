@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <ranges>
 #include <execution>
+#include "console/console.h"
 
 namespace {
     constexpr int presencePriority(std::string_view presence) noexcept {

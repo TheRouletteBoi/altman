@@ -20,19 +20,19 @@
 #include "history_utils.h"
 #include "core/time_utils.h"
 
-#include "system/threading.h"
-#include "system/launcher.hpp"
-#include "ui/modal_popup.h"
-#include "core/status.h"
-#include "ui/confirm.h"
 #include "../../ui.h"
-#include "../data.h"
+#include "../../utils/core/account_utils.h"
 #include "../accounts/accounts_join_ui.h"
 #include "../context_menus.h"
-#include "../../utils/core/account_utils.h"
+#include "../data.h"
+#include "core/status.h"
+#include "system/roblox_launcher.h"
+#include "system/threading.h"
+#include "ui/modal_popup.h"
 #ifdef _WIN32
     #include <windows.h>
 #endif
+#include "console/console.h"
 
 namespace {
     constexpr auto ICON_REFRESH = "\xEF\x8B\xB1 ";
@@ -158,7 +158,7 @@ static void clearLogs() {
                 std::error_code ec;
                 std::filesystem::remove(entry.path(), ec);
                 if (ec) {
-                    LOG_WARN(std::format("Failed to delete log: {}", entry.path().string()));
+                    LOG_WARN("Failed to delete log: {}", entry.path().string());
                 }
             }
         }
@@ -209,7 +209,7 @@ static void refreshLogs() {
             g_selected_log_idx = -1;
         }
 
-        LOG_INFO(std::format("Log scan complete. Recreated logs cache with {} logs.", tempLogs.size()));
+        LOG_INFO("Log scan complete. Recreated logs cache with {} logs.", tempLogs.size());
         g_logs_loading = false;
 
         updateFilteredLogs();
@@ -509,7 +509,7 @@ void RenderHistoryTab() {
     }
     ImGui::SameLine();
     if (ImGui::Button(std::format("{} Clear Logs", ICON_TRASH).c_str())) {
-        ConfirmPopup::AddYesNo("Clear all logs?", []() {
+        ModalPopup::AddYesNo("Clear all logs?", []() {
             clearLogs();
             g_search_buffer[0] = '\0';
             g_search_active = false;

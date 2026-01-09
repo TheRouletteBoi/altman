@@ -1,6 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
-#include "webview.hpp"
+#include "webview.h"
 #include "../../components/data.h"
 #include <thread>
 #include <filesystem>
@@ -233,7 +233,7 @@ static NSMutableDictionary *GetWebByUser() {
 
 @end
 
-void LaunchWebview(const std::string &url,
+void LaunchWebviewImpl(const std::string &url,
                    const std::string &windowName,
                    const std::string &cookie,
                    const std::string &userId,
@@ -299,7 +299,43 @@ void LaunchWebview(const std::string &url,
     });
 }
 
-void LaunchWebview(const std::string &url, const AccountData &account) {
-    std::string windowName = account.displayName.empty() ? account.username : account.displayName;
-    LaunchWebview(url, windowName, account.cookie, account.userId, nullptr);
+void LaunchWebview(const std::string& url, const AccountData& account) {
+    std::string title =
+        !account.displayName.empty()
+            ? account.displayName
+            : account.username +
+              (account.userId.empty() ? "" : (" - " + account.userId));
+
+    LaunchWebviewImpl(
+        url,
+        title,
+        account.cookie,
+        account.userId,
+        nullptr);
+}
+
+void LaunchWebview(
+    const std::string& url,
+    const AccountData& account,
+    const std::string& windowName
+) {
+    LaunchWebviewImpl(
+        url,
+        windowName.empty() ? account.username : windowName,
+        account.cookie,
+        account.userId,
+        nullptr);
+}
+
+void LaunchWebviewForLogin(
+    const std::string& url,
+    const std::string& windowName,
+    CookieCallback onCookieExtracted
+) {
+    LaunchWebviewImpl(
+        url,
+        windowName,
+        "",
+        "",
+        onCookieExtracted);
 }

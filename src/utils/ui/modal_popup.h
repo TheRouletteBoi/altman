@@ -1,35 +1,37 @@
 #pragma once
-#include <imgui.h>
+
 #include <deque>
+#include <functional>
 #include <string>
 
 namespace ModalPopup {
-	struct Notification {
-		std::string message;
-		bool open = true;
+	enum class PopupType {
+		YesNo,
+		Ok,
+		Info
 	};
 
-	inline std::deque<Notification> queue;
+	struct Item {
+		std::string id;
+		std::string message;
+		std::function<void()> onYes;
+		std::function<void()> onNo;
+		PopupType type;
+		int progress;
+		bool isOpen;
+		bool shouldOpen;
+		bool closeable;
+	};
 
-	inline void Add(const std::string &msg) {
-		queue.push_back({msg, true});
-	}
+	inline std::deque<Item> queue;
+	inline int nextId{0};
 
-	inline void Render() {
-		if (queue.empty()) return;
-		Notification &current = queue.front();
-		if (current.open) {
-			ImGui::OpenPopup("Notification");
-			current.open = false;
-		}
-		if (ImGui::BeginPopupModal("Notification", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::TextWrapped("%s", current.message.c_str());
-			ImGui::Spacing();
-			if (ImGui::Button("OK", ImVec2(300, 0))) {
-				ImGui::CloseCurrentPopup();
-				queue.pop_front();
-			}
-			ImGui::EndPopup();
-		}
-	}
+	void AddYesNo(const std::string& msg, std::function<void()> onYes, std::function<void()> onNo = nullptr);
+	void AddOk(const std::string& msg, std::function<void()> onOk);
+	void AddInfo(const std::string& msg);
+	void AddProgress(const std::string& msg, int percentage = 0);
+	void CloseProgress();
+	void Clear();
+	void Render();
+
 }

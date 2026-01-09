@@ -18,15 +18,16 @@
 #include <format>
 #include <expected>
 
-#include "../components.h"
-#include "network/roblox.h"
-#include "core/status.h"
-#include "system/launcher.hpp"
-#include "ui/modal_popup.h"
 #include "../../ui.h"
-#include "../accounts/accounts_join_ui.h"
-#include "../context_menus.h"
 #include "../../utils/core/account_utils.h"
+#include "../accounts/accounts_join_ui.h"
+#include "../components.h"
+#include "../context_menus.h"
+#include "console/console.h"
+#include "core/status.h"
+#include "network/roblox.h"
+#include "system/roblox_launcher.h"
+#include "ui/modal_popup.h"
 
 namespace {
 	void renderPublicServers();
@@ -171,7 +172,7 @@ namespace {
 			g_state.currentCursor = cursorStr;
 			LOG_INFO(page.data.empty() ? "No servers found for this page" : "Fetched servers");
 		} catch (const std::exception& ex) {
-			LOG_INFO(std::format("Fetch error: {}", ex.what()));
+			LOG_INFO("Fetch error: {}", ex.what());
 			g_state.cachedServers.clear();
 			g_state.nextCursor.clear();
 			g_state.prevCursor.clear();
@@ -340,7 +341,7 @@ namespace {
 			if (accounts.empty()) {
 				LOG_INFO("No account selected to join server.");
 				Status::Error("No account selected to join server.");
-				ModalPopup::Add("Select an account first.");
+				ModalPopup::AddInfo("Select an account first.");
 			} else {
 				LOG_INFO("Joining server (double-click)...");
 				std::thread([accounts, placeId = g_state.currentPlaceId, jobId = server.jobId]() {
@@ -417,7 +418,7 @@ namespace {
 			if (accounts.empty()) {
 				LOG_INFO("No account selected to join server.");
 				Status::Error("No account selected to join server.");
-				ModalPopup::Add("Select an account first.");
+				ModalPopup::AddInfo("Select an account first.");
 			} else {
 				LOG_INFO("Joining server via Join button...");
 				std::thread([accounts, placeId = g_state.currentPlaceId, jobId = server.jobId]() {
@@ -534,7 +535,7 @@ namespace {
 					nextPageCursor = page.nextCursor;
 					prevPageCursor = page.prevCursor;
 
-					LOG_INFO(std::format("Loaded {} private servers", servers.size()));
+					LOG_INFO("Loaded {} private servers", servers.size());
 				}
 				catch (const std::exception& ex) {
 					errorMessage = std::format("Error loading servers: {}", ex.what());
@@ -549,7 +550,7 @@ namespace {
 			if (g_selectedAccountIds.empty()) {
 				LOG_INFO("No account selected to join server");
 				Status::Error("No account selected to join server");
-				ModalPopup::Add("Select an account first.");
+				ModalPopup::AddInfo("Select an account first.");
 				return;
 			}
 

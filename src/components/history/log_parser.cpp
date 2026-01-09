@@ -8,268 +8,310 @@
 #include <string_view>
 #include <regex>
 #include <algorithm>
+#include <format>
 
 #include "log_parser.h"
 
-using namespace std;
-namespace fs = filesystem;
+namespace {
+    constexpr std::string_view CHANNEL_TOKEN = "The channel is ";
+    constexpr std::string_view VERSION_TOKEN = "\"version\":\"";
+    constexpr std::string_view JOIN_TIME_TOKEN = "join_time:";
+    constexpr std::string_view JOB_ID_TOKEN = "Joining game '";
+    constexpr std::string_view PLACE_TOKEN = "place ";
+    constexpr std::string_view UNIVERSE_TOKEN = "universeid:";
+    constexpr std::string_view SERVER_TOKEN = "UDMUX Address = ";
+    constexpr std::string_view PORT_TOKEN = ", Port = ";
+    constexpr std::string_view USER_ID_TOKEN = "userId = ";
+    constexpr std::string_view OUTPUT_TOKEN = "[FLog::Output]";
+
+    constexpr size_t MAX_READ = 512 * 1024; // 512KB
+    constexpr std::string_view DIGITS = "0123456789";
+    constexpr std::string_view WHITESPACE = " \t\n\r";
+    constexpr std::string_view NUMERIC_CHARS = "0123456789.";
+
+    const std::regex GUID_REGEX(R"([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})");
+
+    [[nodiscard]] size_t findNextLine(std::string_view data, size_t pos) noexcept {
+        const size_t newlinePos = data.find('\n', pos);
+        return newlinePos == std::string_view::npos ? data.size() : newlinePos;
+    }
+
+    [[nodiscard]] std::string_view trimLine(std::string_view line) noexcept {
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        return line;
+    }
+
+    [[nodiscard]] bool isTimestampLine(std::string_view line) noexcept {
+        return line.length() >= 20 && !line.empty() && std::isdigit(static_cast<unsigned char>(line[0]));
+    }
+
+    [[nodiscard]] std::string extractTimestamp(std::string_view line) {
+        const size_t zPos = line.find('Z');
+        if (zPos != std::string_view::npos && zPos < 30) {
+            return std::string(line.substr(0, zPos + 1));
+        }
+        return {};
+    }
+
+    [[nodiscard]] std::string extractToken(std::string_view line, std::string_view token, std::string_view delimiters) {
+        const size_t tokenPos = line.find(token);
+        if (tokenPos == std::string_view::npos) {
+            return {};
+        }
+
+        const size_t valueStart = tokenPos + token.length();
+        const size_t valueEnd = line.find_first_of(delimiters, valueStart);
+        const size_t length = (valueEnd == std::string_view::npos ? line.length() : valueEnd) - valueStart;
+
+        return std::string(line.substr(valueStart, length));
+    }
+
+    [[nodiscard]] std::string extractQuotedValue(std::string_view line, std::string_view token) {
+        const size_t tokenPos = line.find(token);
+        if (tokenPos == std::string_view::npos) {
+            return {};
+        }
+
+        const size_t valueStart = tokenPos + token.length();
+        const size_t valueEnd = line.find('"', valueStart);
+
+        if (valueEnd != std::string_view::npos) {
+            return std::string(line.substr(valueStart, valueEnd - valueStart));
+        }
+        return {};
+    }
+
+    void processOutputLine(LogInfo& logInfo, std::string_view line) {
+        if (line.find(OUTPUT_TOKEN) != std::string_view::npos) {
+            logInfo.outputLines.emplace_back(line);
+        }
+    }
+
+    void processChannel(LogInfo& logInfo, std::string_view line) {
+        if (!logInfo.channel.empty()) {
+            return;
+        }
+        logInfo.channel = extractToken(line, CHANNEL_TOKEN, WHITESPACE);
+    }
+
+    void processVersion(LogInfo& logInfo, std::string_view line) {
+        if (!logInfo.version.empty()) {
+            return;
+        }
+        logInfo.version = extractQuotedValue(line, VERSION_TOKEN);
+    }
+
+    void processJoinTime(LogInfo& logInfo, std::string_view line) {
+        if (!logInfo.joinTime.empty()) {
+            return;
+        }
+        logInfo.joinTime = extractToken(line, JOIN_TIME_TOKEN, WHITESPACE);
+    }
+
+    void processJobId(LogInfo& logInfo, std::string_view line, std::string_view timestamp, GameSession*& currentSession) {
+        const size_t tokenPos = line.find(JOB_ID_TOKEN);
+        if (tokenPos == std::string_view::npos) {
+            return;
+        }
+
+        const size_t valueStart = tokenPos + JOB_ID_TOKEN.length();
+        const size_t valueEnd = line.find('\'', valueStart);
+
+        if (valueEnd == std::string_view::npos) {
+            return;
+        }
+
+        const std::string_view guidCandidate = line.substr(valueStart, valueEnd - valueStart);
+
+        if (!std::regex_match(guidCandidate.begin(), guidCandidate.end(), GUID_REGEX)) {
+            return;
+        }
+
+        GameSession newSession;
+        newSession.timestamp = std::string(timestamp);
+        newSession.jobId = std::string(guidCandidate);
+
+        logInfo.sessions.push_back(std::move(newSession));
+        currentSession = &logInfo.sessions.back();
+
+        if (logInfo.jobId.empty()) {
+            logInfo.jobId = currentSession->jobId;
+        }
+    }
+
+    void processPlaceId(LogInfo& logInfo, std::string_view line, GameSession* currentSession) {
+        if (currentSession == nullptr) {
+            return;
+        }
+
+        std::string placeId = extractToken(line, PLACE_TOKEN, WHITESPACE);
+        if (placeId.empty()) {
+            return;
+        }
+
+        currentSession->placeId = placeId;
+
+        if (logInfo.placeId.empty()) {
+            logInfo.placeId = placeId;
+        }
+    }
+
+    void processUniverseId(LogInfo& logInfo, std::string_view line, GameSession* currentSession) {
+        if (currentSession == nullptr) {
+            return;
+        }
+
+        std::string universeId = extractToken(line, UNIVERSE_TOKEN, WHITESPACE);
+        if (universeId.empty()) {
+            return;
+        }
+
+        currentSession->universeId = universeId;
+
+        if (logInfo.universeId.empty()) {
+            logInfo.universeId = universeId;
+        }
+    }
+
+    void processServerInfo(LogInfo& logInfo, std::string_view line, GameSession* currentSession) {
+        if (currentSession == nullptr) {
+            return;
+        }
+
+        const size_t tokenPos = line.find(SERVER_TOKEN);
+        if (tokenPos == std::string_view::npos) {
+            return;
+        }
+
+        const size_t ipStart = tokenPos + SERVER_TOKEN.length();
+        const size_t ipEnd = line.find(PORT_TOKEN, ipStart);
+
+        if (ipEnd == std::string_view::npos) {
+            return;
+        }
+
+        std::string ip(line.substr(ipStart, ipEnd - ipStart));
+
+        const size_t portStart = ipEnd + PORT_TOKEN.length();
+        std::string port = extractToken(line.substr(portStart), "", WHITESPACE);
+
+        if (ip.empty() || port.empty()) {
+            return;
+        }
+
+        currentSession->serverIp = std::move(ip);
+        currentSession->serverPort = std::move(port);
+
+        if (logInfo.serverIp.empty()) {
+            logInfo.serverIp = currentSession->serverIp;
+            logInfo.serverPort = currentSession->serverPort;
+        }
+    }
+
+    void processUserId(LogInfo& logInfo, std::string_view line) {
+        if (!logInfo.userId.empty()) {
+            return;
+        }
+        logInfo.userId = extractToken(line, USER_ID_TOKEN, WHITESPACE);
+    }
+
+    void createBackwardCompatSession(LogInfo& logInfo) {
+        if (!logInfo.sessions.empty()) {
+            return;
+        }
+
+        if (logInfo.jobId.empty() && logInfo.placeId.empty()) {
+            return;
+        }
+
+        GameSession session;
+        session.timestamp = logInfo.timestamp;
+        session.jobId = logInfo.jobId;
+        session.placeId = logInfo.placeId;
+        session.universeId = logInfo.universeId;
+        session.serverIp = logInfo.serverIp;
+        session.serverPort = logInfo.serverPort;
+
+        logInfo.sessions.push_back(std::move(session));
+    }
+
+    void sortSessions(LogInfo& logInfo) {
+        std::sort(logInfo.sessions.begin(), logInfo.sessions.end(),
+            [](const GameSession& a, const GameSession& b) {
+                return a.timestamp > b.timestamp;
+            });
+    }
+}
 
 std::string logsFolder() {
     #ifdef _WIN32
-        const char *localAppDataPath = getenv("LOCALAPPDATA");
+        const char* localAppDataPath = std::getenv("LOCALAPPDATA");
         if (localAppDataPath) {
-            return std::string(localAppDataPath) + "\\Roblox\\logs";
+            return std::format("{}\\Roblox\\logs", localAppDataPath);
         }
     #elif __APPLE__
-        const char *homePath = getenv("HOME");
+        const char* homePath = std::getenv("HOME");
         if (homePath) {
-            return std::string(homePath) + "/Library/Logs/Roblox";
+            return std::format("{}/Library/Logs/Roblox", homePath);
         }
     #else
-        const char *homePath = getenv("HOME");
+        const char* homePath = std::getenv("HOME");
         if (homePath) {
-            return std::string(homePath) + "/Roblox/logs";
+            return std::format("{}/Roblox/logs", homePath);
         }
     #endif
-    return std::string{};
+    return {};
 }
 
-void parseLogFile(LogInfo &logInfo) {
-	using namespace string_view_literals;
+void parseLogFile(LogInfo& logInfo) {
+    if (logInfo.fileName.find("RobloxPlayerInstaller") != std::string::npos) {
+        logInfo.isInstallerLog = true;
+        return;
+    }
 
-	// Skip installer logs - they contain "RobloxPlayerInstaller" in the filename
-	if (logInfo.fileName.find("RobloxPlayerInstaller") != string::npos) {
-		logInfo.isInstallerLog = true;
-		return;
-	}
+    std::ifstream fileStream(logInfo.fullPath, std::ios::binary);
+    if (!fileStream) {
+        return;
+    }
 
-	constexpr size_t kMaxRead = 512 * 1024; // halfMB
-	ifstream fileInputStream(logInfo.fullPath, ios::binary);
-	if (!fileInputStream)
-		return;
+    std::string fileBuffer(MAX_READ, '\0');
+    fileStream.read(fileBuffer.data(), MAX_READ);
+    fileBuffer.resize(static_cast<size_t>(fileStream.gcount()));
 
-	string fileBuffer(kMaxRead, '\0');
-	fileInputStream.read(fileBuffer.data(), kMaxRead);
-	fileBuffer.resize(static_cast<size_t>(fileInputStream.gcount()));
-	string_view log_data_view(fileBuffer);
+    const std::string_view logData(fileBuffer);
+    GameSession* currentSession = nullptr;
+    std::string currentTimestamp;
 
-	auto nextLinePos = [&log_data_view](size_t currentPosition) -> size_t {
-		size_t newlinePosition = log_data_view.find('\n', currentPosition);
-		return newlinePosition == string_view::npos ? log_data_view.size() : newlinePosition;
-	};
-	
-	// Track the current game session we're building
-	GameSession* currentSession = nullptr;
-	string currentTimestamp;
-	
-	for (size_t currentScanPosition = 0; currentScanPosition < log_data_view.size();) {
-		size_t endOfLineIndex = nextLinePos(currentScanPosition);
-		string_view currentLineView = log_data_view.substr(currentScanPosition, endOfLineIndex - currentScanPosition);
+    for (size_t pos = 0; pos < logData.size();) {
+        const size_t lineEnd = findNextLine(logData, pos);
+        std::string_view line = trimLine(logData.substr(pos, lineEnd - pos));
 
-		if (!currentLineView.empty() && currentLineView.back() == '\r') {
-			currentLineView.remove_suffix(1);
-		}
+        if (isTimestampLine(line)) {
+            std::string timestamp = extractTimestamp(line);
+            if (!timestamp.empty()) {
+                currentTimestamp = std::move(timestamp);
 
-		// Track timestamps for all lines to associate with sessions
-		if (currentLineView.length() >= 20 && !currentLineView.empty() && isdigit(currentLineView[0])) {
-			size_t timestampZIndex = currentLineView.find('Z');
-			if (timestampZIndex != string_view::npos && timestampZIndex < 30) {
-				// Found a timestamp line
-				currentTimestamp = string(currentLineView.substr(0, timestampZIndex + 1));
-				
-				// Set the initial timestamp for the log if it's not set yet
-				if (logInfo.timestamp.empty()) {
-					logInfo.timestamp = currentTimestamp;
-				}
-			}
-		}
+                if (logInfo.timestamp.empty()) {
+                    logInfo.timestamp = currentTimestamp;
+                }
+            }
+        }
 
-		// Still collect output lines for compatibility with data saving/loading
-		if (currentLineView.find("[FLog::Output]"sv) != string_view::npos) {
-			logInfo.outputLines.emplace_back(currentLineView);
-		}
+        processOutputLine(logInfo, line);
+        processChannel(logInfo, line);
+        processVersion(logInfo, line);
+        processJoinTime(logInfo, line);
+        processJobId(logInfo, line, currentTimestamp, currentSession);
+        processPlaceId(logInfo, line, currentSession);
+        processUniverseId(logInfo, line, currentSession);
+        processServerInfo(logInfo, line, currentSession);
+        processUserId(logInfo, line);
 
-		if (logInfo.channel.empty()) {
-			constexpr auto channelToken = "The channel is "sv;
-			auto channelTokenIndex = currentLineView.find(channelToken);
-			if (channelTokenIndex != string_view::npos) {
-				size_t valueStartIndex = channelTokenIndex + channelToken.length();
-				auto valueEndIndex = currentLineView.find_first_of(" \t\n\r"sv, valueStartIndex);
-				logInfo.channel = string(currentLineView.substr(valueStartIndex,
-				                                                (valueEndIndex == string_view::npos
-					                                                 ? currentLineView.length()
-					                                                 : valueEndIndex) -
-				                                                valueStartIndex));
-			}
-		}
+        pos = lineEnd + 1;
+    }
 
-		if (logInfo.version.empty()) {
-			constexpr auto versionToken = "\"version\":\""sv;
-			auto versionTokenIndex = currentLineView.find(versionToken);
-			if (versionTokenIndex != string_view::npos) {
-				size_t valueStartIndex = versionTokenIndex + versionToken.length();
-				auto valueEndIndex = currentLineView.find('"', valueStartIndex);
-				if (valueEndIndex != string_view::npos)
-					logInfo.version = string(currentLineView.substr(valueStartIndex, valueEndIndex - valueStartIndex));
-			}
-		}
-
-		if (logInfo.joinTime.empty()) {
-			constexpr auto joinTimeToken = "join_time:"sv;
-			auto joinTimeTokenIndex = currentLineView.find(joinTimeToken);
-			if (joinTimeTokenIndex != string_view::npos) {
-				size_t valueStartIndex = joinTimeTokenIndex + joinTimeToken.length();
-				auto valueEndIndex = currentLineView.find_first_not_of("0123456789."sv, valueStartIndex);
-				logInfo.joinTime = string(currentLineView.substr(valueStartIndex,
-				                                                 (valueEndIndex == string_view::npos
-					                                                  ? currentLineView.length()
-					                                                  : valueEndIndex) -
-				                                                 valueStartIndex));
-			}
-		}
-
-		// Detect new game session by job ID
-		static const regex s_guid_regex(R"([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})");
-		constexpr auto jobIdToken = "Joining game '"sv;
-		auto jobIdTokenIndex = currentLineView.find(jobIdToken);
-		if (jobIdTokenIndex != string_view::npos) {
-			size_t valueStartIndex = jobIdTokenIndex + jobIdToken.length();
-			auto valueEndIndex = currentLineView.find('\'', valueStartIndex); // Find closing quote
-			if (valueEndIndex != string_view::npos) {
-				string_view guidCandidateView = currentLineView.substr(
-					valueStartIndex, valueEndIndex - valueStartIndex);
-				
-				string jobId;
-				if (regex_match(guidCandidateView.begin(), guidCandidateView.end(), s_guid_regex)) {
-					jobId = string(guidCandidateView);
-					
-					// Found a new game session
-					GameSession newSession;
-					newSession.timestamp = currentTimestamp;
-					newSession.jobId = jobId;
-					
-					// Add this new session
-					logInfo.sessions.push_back(newSession);
-					currentSession = &logInfo.sessions.back();
-					
-					// For backward compatibility
-					if (logInfo.jobId.empty()) {
-						logInfo.jobId = jobId;
-					}
-				}
-			}
-		}
-
-		// Look for place ID
-		constexpr auto placeToken = "place "sv;
-		auto placeTokenIndex = currentLineView.find(placeToken);
-		if (placeTokenIndex != string_view::npos && currentSession != nullptr) {
-			size_t valueStartIndex = placeTokenIndex + placeToken.length();
-			auto valueEndIndex = currentLineView.find_first_not_of("0123456789"sv, valueStartIndex);
-			string placeId = string(currentLineView.substr(valueStartIndex,
-												(valueEndIndex == string_view::npos
-													? currentLineView.length()
-													: valueEndIndex) -
-												valueStartIndex));
-			
-			// If we have a current session, associate this place ID with it
-			if (!placeId.empty()) {
-				currentSession->placeId = placeId;
-				
-				// For backward compatibility
-				if (logInfo.placeId.empty()) {
-					logInfo.placeId = placeId;
-				}
-			}
-		}
-
-		// Look for universe ID
-		constexpr auto universeToken = "universeid:"sv;
-		auto universeTokenIndex = currentLineView.find(universeToken);
-		if (universeTokenIndex != string_view::npos && currentSession != nullptr) {
-			size_t valueStartIndex = universeTokenIndex + universeToken.length();
-			auto valueEndIndex = currentLineView.find_first_not_of("0123456789"sv, valueStartIndex);
-			string universeId = string(currentLineView.substr(valueStartIndex,
-												(valueEndIndex == string_view::npos
-													? currentLineView.length()
-													: valueEndIndex) -
-												valueStartIndex));
-			
-			// If we have a current session, associate this universe ID with it
-			if (!universeId.empty()) {
-				currentSession->universeId = universeId;
-				
-				// For backward compatibility
-				if (logInfo.universeId.empty()) {
-					logInfo.universeId = universeId;
-				}
-			}
-		}
-
-		// Look for server information
-		constexpr auto serverToken = "UDMUX Address = "sv;
-		auto serverTokenIndex = currentLineView.find(serverToken);
-		if (serverTokenIndex != string_view::npos && currentSession != nullptr) {
-			size_t valueStartIndex = serverTokenIndex + serverToken.length();
-			auto valueEndIndex = currentLineView.find(", Port = "sv, valueStartIndex);
-			if (valueEndIndex != string_view::npos) {
-				string ip = string(currentLineView.substr(valueStartIndex, valueEndIndex - valueStartIndex));
-				
-				constexpr auto portPrefixToken = ", Port = "sv;
-				size_t portValueStartIndex = valueEndIndex + portPrefixToken.length();
-				auto portValueEndIndex = currentLineView.find_first_not_of("0123456789"sv, portValueStartIndex);
-				string port = string(currentLineView.substr(portValueStartIndex,
-												(portValueEndIndex == string_view::npos
-													? currentLineView.length()
-													: portValueEndIndex) -
-												portValueStartIndex));
-				
-				// If we have a current session, associate this server info with it
-				if (!ip.empty() && !port.empty()) {
-					currentSession->serverIp = ip;
-					currentSession->serverPort = port;
-					
-					// For backward compatibility
-					if (logInfo.serverIp.empty()) {
-						logInfo.serverIp = ip;
-						logInfo.serverPort = port;
-					}
-				}
-			}
-		}
-
-		if (logInfo.userId.empty()) {
-			constexpr auto userIdToken = "userId = "sv;
-			auto userIdTokenIndex = currentLineView.find(userIdToken);
-			if (userIdTokenIndex != string_view::npos) {
-				size_t valueStartIndex = userIdTokenIndex + userIdToken.length();
-				auto valueEndIndex = currentLineView.find_first_not_of("0123456789"sv, valueStartIndex);
-				logInfo.userId = string(currentLineView.substr(valueStartIndex,
-				                                               (valueEndIndex == string_view::npos
-					                                                ? currentLineView.length()
-					                                                : valueEndIndex) -
-				                                               valueStartIndex));
-			}
-		}
-
-		currentScanPosition = endOfLineIndex + 1;
-	}
-	
-	// If we didn't find any sessions but have jobId/placeId from old parsing logic,
-	// create a synthetic session for backward compatibility
-	if (logInfo.sessions.empty() && (!logInfo.jobId.empty() || !logInfo.placeId.empty())) {
-		GameSession backwardCompatSession;
-		backwardCompatSession.timestamp = logInfo.timestamp;
-		backwardCompatSession.jobId = logInfo.jobId;
-		backwardCompatSession.placeId = logInfo.placeId;
-		backwardCompatSession.universeId = logInfo.universeId;
-		backwardCompatSession.serverIp = logInfo.serverIp;
-		backwardCompatSession.serverPort = logInfo.serverPort;
-		logInfo.sessions.push_back(backwardCompatSession);
-	}
-	
-	// Sort sessions in descending order of timestamps (newest first, oldest last)
-	std::sort(logInfo.sessions.begin(), logInfo.sessions.end(), [](const GameSession& a, const GameSession& b) {
-		return a.timestamp > b.timestamp;
-	});
+    createBackwardCompatSession(logInfo);
+    sortSessions(logInfo);
 }

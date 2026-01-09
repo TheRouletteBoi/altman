@@ -18,7 +18,6 @@
 #include "core/app_state.h"
 #include "../../utils/system/multi_instance.h"
 #include "../console/console.h"
-#include "core/logging.hpp"
 #include "../../utils/network/client_manager.h"
 
 static bool g_requestOpenConsoleModal = false;
@@ -50,7 +49,7 @@ namespace {
 
 		std::error_code ec;
 		if (!std::filesystem::exists(documentsPath, ec)) {
-			LOG_INFO(std::format("Documents folder does not exist: {}", documentsPath));
+			LOG_INFO("Documents folder does not exist: {}", documentsPath);
 			return;
 		}
 
@@ -58,9 +57,9 @@ namespace {
 		const int result = std::system(command.c_str());
 
 		if (result == 0) {
-			LOG_INFO(std::format("Opened documents folder for: {}", acc.username));
+			LOG_INFO("Opened documents folder for: {}", acc.username);
 		} else {
-			LOG_ERROR(std::format("Failed to open documents folder for: {}", acc.username));
+			LOG_ERROR("Failed to open documents folder for: {}", acc.username);
 		}
 	}
 
@@ -72,7 +71,7 @@ namespace {
 
 		std::error_code ec;
 		if (!std::filesystem::exists(envPath, ec)) {
-			LOG_INFO(std::format("Environment folder does not exist: {}", envPath));
+			LOG_INFO("Environment folder does not exist: {}", envPath);
 			return;
 		}
 
@@ -80,9 +79,9 @@ namespace {
 		const int result = std::system(command.c_str());
 
 		if (result == 0) {
-			LOG_INFO(std::format("Opened environment folder for: {}", acc.username));
+			LOG_INFO("Opened environment folder for: {}", acc.username);
 		} else {
-			LOG_ERROR(std::format("Failed to open environment folder for: {}", acc.username));
+			LOG_ERROR("Failed to open environment folder for: {}", acc.username);
 		}
 	}
 
@@ -133,7 +132,7 @@ namespace {
                         if (ImGui::Selectable(clientName.c_str(), isSelected)) {
                             acc.customClientBase = (clientName == "Vanilla") ? "" : clientName;
                             Data::SaveAccounts();
-                            LOG_INFO(std::format("Set {} to use base client: {}", acc.username, clientName));
+                            LOG_INFO("Set {} to use base client: {}", acc.username, clientName);
                         }
 
                         if (isSelected) {
@@ -359,13 +358,13 @@ void RenderSettingsTab() {
 				if (ImGui::InputText("##Key", buffer.data(), buffer.size(), ImGuiInputTextFlags_EnterReturnsTrue)) {
 					key = std::string(buffer.data());
 					Data::SaveSettings();
-					LOG_INFO(std::format("Updated key for {}", clientStr));
+					LOG_INFO("Updated key for {}", clientStr);
 				}
 
 				if (ImGui::IsItemDeactivatedAfterEdit()) {
 					key = std::string(buffer.data());
 					Data::SaveSettings();
-					LOG_INFO(std::format("Updated key for {}", clientStr));
+					LOG_INFO("Updated key for {}", clientStr);
 				}
 			} else {
 				ImGui::TextDisabled("No key required");
