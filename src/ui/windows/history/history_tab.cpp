@@ -26,7 +26,7 @@
 #include "components/data.h"
 #include "ui/widgets/bottom_right_status.h"
 #include "system/roblox_launcher.h"
-#include "utils/threading.h"
+#include "utils/thread_task.h"
 #include "ui/widgets/modal_popup.h"
 #ifdef _WIN32
     #include <windows.h>
@@ -174,7 +174,7 @@ static void refreshLogs() {
     }
 
     g_logs_loading = true;
-    Threading::newThread([]() {
+    ThreadTask::fireAndForget([]() {
         LOG_INFO("Scanning Roblox logs folder...");
         std::vector<LogInfo> tempLogs;
         std::string dir = logsFolder();

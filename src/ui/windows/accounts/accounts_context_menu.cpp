@@ -28,24 +28,23 @@
 #include <format>
 #include <span>
 
-#include "ui/ui.h"
-#include "utils/account_utils.h"
-#include "network/roblox/common.h"
-#include "ui/widgets/context_menus.h"
-#include "components/data.h"
 #include "accounts_join_ui.h"
+#include "components/data.h"
 #include "console/console.h"
-#include "ui/widgets/bottom_right_status.h"
-#include "system/multi_instance.h"
-#include "system/roblox_launcher.h"
-#include "utils/threading.h"
-#include "ui/widgets/modal_popup.h"
-#include "ui/webview/webview.h"
-#include "network/roblox/common.h"
 #include "network/roblox/auth.h"
+#include "network/roblox/common.h"
 #include "network/roblox/games.h"
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
+#include "system/multi_instance.h"
+#include "system/roblox_launcher.h"
+#include "ui/ui.h"
+#include "ui/webview/webview.h"
+#include "ui/widgets/bottom_right_status.h"
+#include "ui/widgets/context_menus.h"
+#include "ui/widgets/modal_popup.h"
+#include "utils/thread_task.h"
+#include "utils/account_utils.h"
 
 	namespace {
     constexpr int MULTI_EDIT_SENTINEL = -2;
@@ -146,7 +145,7 @@
         if (g_presenceFetchInFlight.contains(accountId)) return;
         
         g_presenceFetchInFlight.insert(accountId);
-        Threading::newThread([accountId, userIdStr = std::string(userId), cookieCopy = std::string(cookie)]() {
+        ThreadTask::fireAndForget([accountId, userIdStr = std::string(userId), cookieCopy = std::string(cookie)]() {
             try {
                 const uint64_t uid = std::stoull(userIdStr);
                 const auto presenceMap = Roblox::getPresences({uid}, cookieCopy);
@@ -190,7 +189,7 @@
         
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
         if (ImGui::MenuItem("Launch Link", nullptr, false, hasCookie)) {
-            Threading::newThread([cookie = account.cookie, 
+            ThreadTask::fireAndForget([cookie = account.cookie,
                                  placeId = std::string(join_value_buf),
                                  jobId = std::string(join_jobid_buf)]() {
                 const auto ticket = Roblox::fetchAuthTicket(cookie);
@@ -249,7 +248,7 @@
                 }
             }
             
-            Threading::newThread([accounts, 
+            ThreadTask::fireAndForget([accounts,
                                  placeId = std::string(join_value_buf),
                                  jobId = std::string(join_jobid_buf)]() {
                 std::string result;
@@ -475,7 +474,7 @@
                 accounts.emplace_back(account.id, account.cookie);
             }
             if (!accounts.empty()) {
-                Threading::newThread([placeId, accounts]() {
+                ThreadTask::fireAndForget([placeId, accounts]() {
                     launchRobloxSequential(LaunchParams::standard(placeId), accounts);
                 });
             }
@@ -488,7 +487,7 @@
                 accounts.emplace_back(account.id, account.cookie);
             }
             if (!accounts.empty()) {
-                Threading::newThread([placeId, jobId, accounts]() {
+                ThreadTask::fireAndForget([placeId, jobId, accounts]() {
                     launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
                 });
             }

@@ -14,7 +14,6 @@
 #include <ranges>
 #include <format>
 
-#include "main_thread.h"
 #include "ui/webview/webview.h"
 
 #include "console/console.h"
@@ -25,7 +24,7 @@
 #include "network/roblox/games.h"
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
-#include "utils/threading.h"
+#include "utils/thread_task.h"
 
 #include "ui/windows/components.h"
 #include "ui/ui.h"
@@ -100,7 +99,7 @@ namespace {
 
         LOG_INFO("Opening browser for account: {} (ID: {})",
                             account.displayName, account.id);
-        Threading::newThread([account]() { 
+        ThreadTask::fireAndForget([account]() {
             LaunchBrowserWithCookie(account); 
         });
     }
@@ -129,9 +128,9 @@ namespace {
         const int accountId = account.id;
         const std::string cookie = account.cookie;
 
-        Threading::newThread([accountId, cookie]() {
+        ThreadTask::fireAndForget([accountId, cookie]() {
             const auto voiceStatus = Roblox::getVoiceChatStatus(cookie);
-            MainThread::Post([accountId, voiceStatus]() {
+            ThreadTask::RunOnMain([accountId, voiceStatus]() {
                 const auto it = std::ranges::find_if(g_accounts, 
                     [accountId](const auto& a) { return a.id == accountId; });
                 
@@ -400,7 +399,7 @@ namespace {
                 [](const auto& a) { return a.id == g_urlPopup.accountId; });
             
             if (it != g_accounts.end()) {
-                Threading::newThread([account = *it, url = std::string(g_urlPopup.buffer)]() {
+                ThreadTask::fireAndForget([account = *it, url = std::string(g_urlPopup.buffer)]() {
                     LaunchWebview(url, account);
                 });
             }

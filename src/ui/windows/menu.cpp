@@ -25,7 +25,7 @@
 #include "network/roblox/social.h"
 #include "system/multi_instance.h"
 #include "system/roblox_control.h"
-#include "utils/threading.h"
+#include "utils/thread_task.h"
 #include "ui/widgets/modal_popup.h"
 #include "ui/webview/webview.h"
 
@@ -67,7 +67,7 @@ namespace {
     }
 
     void RefreshAccountStatuses() {
-        Threading::newThread([] {
+        ThreadTask::fireAndForget([] {
             LOG_INFO("Refreshing account statuses...");
 
             for (auto& acct : g_accounts) {
@@ -333,7 +333,7 @@ bool RenderMainMenu() {
             if (RobloxControl::IsRobloxRunning()) {
                 s_openClearCachePopup = true;
             } else {
-                Threading::newThread(RobloxControl::ClearRobloxCache);
+                ThreadTask::fireAndForget(RobloxControl::ClearRobloxCache);
             }
         }
 
@@ -357,12 +357,12 @@ bool RenderMainMenu() {
 
         if (ImGui::Button("Kill", ImVec2(killW, 0))) {
             RobloxControl::KillRobloxProcesses();
-            Threading::newThread(RobloxControl::ClearRobloxCache);
+            ThreadTask::fireAndForget(RobloxControl::ClearRobloxCache);
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x);
         if (ImGui::Button("Don't kill", ImVec2(dontW, 0))) {
-            Threading::newThread(RobloxControl::ClearRobloxCache);
+            ThreadTask::fireAndForget(RobloxControl::ClearRobloxCache);
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x);

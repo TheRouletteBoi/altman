@@ -10,7 +10,7 @@
 
 #include "ui/windows/components.h"
 #include "network/http.h"
-#include "utils/threading.h"
+#include "utils/thread_task.h"
 #include "auth.h"
 #include "console/console.h"
 
@@ -194,7 +194,7 @@ FriendDetail getUserDetails(const std::string& userId, const std::string& cookie
             cv.notify_one();
     };
 
-    Threading::newThread([&, userId] {
+    ThreadTask::fireAndForget([&, userId] {
         auto resp = HttpClient::get(
             "https://users.roblox.com/v1/users/" + userId,
             {{"Accept", "application/json"}}
@@ -210,7 +210,7 @@ FriendDetail getUserDetails(const std::string& userId, const std::string& cookie
         signalDone();
     });
 
-    Threading::newThread([&, userId] {
+    ThreadTask::fireAndForget([&, userId] {
         auto resp = HttpClient::get(
             "https://friends.roblox.com/v1/users/" + userId + "/followers/count",
             {}
@@ -225,7 +225,7 @@ FriendDetail getUserDetails(const std::string& userId, const std::string& cookie
         signalDone();
     });
 
-    Threading::newThread([&, userId] {
+    ThreadTask::fireAndForget([&, userId] {
         auto resp = HttpClient::get(
             "https://friends.roblox.com/v1/users/" + userId + "/followings/count",
             {}
@@ -240,7 +240,7 @@ FriendDetail getUserDetails(const std::string& userId, const std::string& cookie
         signalDone();
     });
 
-    Threading::newThread([&, userId] {
+    ThreadTask::fireAndForget([&, userId] {
         auto resp = HttpClient::get(
             "https://friends.roblox.com/v1/users/" + userId + "/friends/count",
             {}

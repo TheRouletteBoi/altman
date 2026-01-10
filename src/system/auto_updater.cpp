@@ -12,9 +12,9 @@
 
 #include "version.h"
 #include "console/console.h"
-#include "main_thread.h"
+#include "utils/thread_task.h"
 #include "network/http.h"
-#include "threading.h"
+#include "utils/thread_task.h"
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/notifications.h"
 
@@ -386,7 +386,7 @@ const DownloadState& AutoUpdater::GetDownloadState() noexcept {
 }
 
 void AutoUpdater::StartBackgroundChecker() {
-    Threading::newThread([]() {
+    ThreadTask::fireAndForget([]() {
         while (config.autoCheck) {
             const auto now = std::chrono::system_clock::now();
             const auto elapsed = std::chrono::duration_cast<std::chrono::hours>(now - config.lastCheck);
@@ -403,7 +403,7 @@ void AutoUpdater::StartBackgroundChecker() {
 }
 
 void AutoUpdater::CheckForUpdates(bool silent) {
-    Threading::newThread([silent]() {
+    ThreadTask::fireAndForget([silent]() {
         const auto endpoint = GetReleaseEndpoint(config.channel);
         const auto resp = HttpClient::get(endpoint, {
             {"User-Agent", "AltMan"},
@@ -422,7 +422,7 @@ void AutoUpdater::CheckForUpdates(bool silent) {
                         ModalPopup::AddInfo("Failed to check for updates. Please try again later.");
                     }
                 };
-                MainThread::Post(showError);
+                ThreadTask::RunOnMain(showError);
             }
             return;
         }
@@ -456,12 +456,12 @@ void AutoUpdater::CheckForUpdates(bool silent) {
                         ModalPopup::AddInfo("You're using the latest version!");
                     }
                 };
-                MainThread::Post(showUpToDate);
+                ThreadTask::RunOnMain(showUpToDate);
             }
             return;
         }
 
-        MainThread::Post([updateInfo, silent]() {
+        ThreadTask::RunOnMain([updateInfo, silent]() {
             HandleUpdateAvailable(updateInfo, silent);
         });
     });
@@ -507,7 +507,7 @@ void AutoUpdater::HandleUpdateAvailable(const UpdateInfo& info, bool silent) {
 }
 
 void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInstall) {
-    Threading::newThread([info, autoInstall]() {
+    ThreadTask::fireAndForget([info, autoInstall]() {
         const auto tempPath = std::filesystem::temp_directory_path() / "altman_update.tmp";
         bool useDelta = !info.deltaUrl.empty();
         bool success = false;
@@ -519,7 +519,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
                     3.0f);
             }
         };
-        MainThread::Post(showDownloadStart);
+        ThreadTask::RunOnMain(showDownloadStart);
 
         if (useDelta) {
             const auto patchPath = std::filesystem::temp_directory_path() / "altman_update.patch";
@@ -538,7 +538,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
                             "Applying delta patch...", 3.0f);
                     }
                 };
-                MainThread::Post(showPatchApply);
+                ThreadTask::RunOnMain(showPatchApply);
 
                 const auto currentExe = GetCurrentExecutablePath();
                 success = ApplyDeltaPatch(currentExe, patchPath, tempPath);
@@ -569,7 +569,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
                     ModalPopup::AddInfo("Download failed. Please try again later.");
                 }
             };
-            MainThread::Post(showError);
+            ThreadTask::RunOnMain(showError);
             return;
         }
 
@@ -579,25 +579,25 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
                     "Update downloaded successfully!", 3.0f);
             }
         };
-        MainThread::Post(showComplete);
+        ThreadTask::RunOnMain(showComplete);
 
         pendingUpdatePath = tempPath;
         config.lastInstalledVersion = info.version;
 
         if (autoInstall || config.autoInstall) {
-            MainThread::Post([tempPath]() {
+            ThreadTask::RunOnMain([tempPath]() {
                 InstallUpdate(tempPath);
             });
         } else {
             if (config.showNotifications) {
-                MainThread::Post([tempPath]() {
+                ThreadTask::RunOnMain([tempPath]() {
                     UpdateNotification::ShowPersistent("Update Ready",
                         "Click to install and restart", [tempPath]() {
                             InstallUpdate(tempPath);
                         });
                 });
             } else {
-                MainThread::Post([tempPath]() {
+                ThreadTask::RunOnMain([tempPath]() {
                     ModalPopup::AddYesNo("Update ready! Restart now to install?",
                         [tempPath]() {
                             InstallUpdate(tempPath);
@@ -664,7 +664,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
          ? static_cast<int>((startOffset * 100) / currentDownload.totalBytes)
          : 0;
 
-       MainThread::Post([progressCallback, percentage, total = currentDownload.totalBytes]() {
+       ThreadTask::RunOnMain([progressCallback, percentage, total = currentDownload.totalBytes]() {
          progressCallback(percentage, 0, total);
       });
     }
@@ -711,7 +711,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
             ? (currentDownload.downloadedBytes - startOffset) / static_cast<size_t>(elapsed)
             : 0;
 
-          MainThread::Post([progressCallback, percentage, bytesPerSecond, total = currentDownload.totalBytes]() {
+          ThreadTask::RunOnMain([progressCallback, percentage, bytesPerSecond, total = currentDownload.totalBytes]() {
             progressCallback(percentage, bytesPerSecond, total);
          });
        }
@@ -729,7 +729,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
          ? (currentDownload.downloadedBytes - startOffset) / static_cast<size_t>(elapsed)
          : 0;
 
-       MainThread::Post([progressCallback, bytesPerSecond, total = currentDownload.totalBytes]() {
+       ThreadTask::RunOnMain([progressCallback, bytesPerSecond, total = currentDownload.totalBytes]() {
          progressCallback(100, bytesPerSecond, total);
       });
     }
@@ -771,11 +771,11 @@ void AutoUpdater::RollbackToPreviousVersion() {
                 ModalPopup::AddInfo("No backup found. Cannot rollback.");
             }
         };
-        MainThread::Post(showError);
+        ThreadTask::RunOnMain(showError);
         return;
     }
 
-    Threading::newThread([]() {
+    ThreadTask::fireAndForget([]() {
         const auto currentExe = GetCurrentExecutablePath();
         const auto tempBackup = std::filesystem::path(currentExe).concat(".rollback_tmp");
 
@@ -789,7 +789,7 @@ void AutoUpdater::RollbackToPreviousVersion() {
                     std::exit(0);
                 });
         };
-        MainThread::Post(confirmRollback);
+        ThreadTask::RunOnMain(confirmRollback);
     });
 }
 

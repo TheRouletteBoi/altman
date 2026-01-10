@@ -5,11 +5,10 @@
 #include <nlohmann/json.hpp>
 
 #include "auto_updater.h"
-#include "main_thread.h"
 #include "network/client_manager.h"
 #include "system/multi_instance.h"
 #include "console/console.h"
-#include "threading.h"
+#include "utils/thread_task.h"
 #include "ui/widgets/notifications.h"
 
 namespace ClientUpdateChecker {
@@ -123,7 +122,7 @@ void UpdateChecker::CheckClientForUpdate(const std::string& clientName) {
         
         SaveVersionInfo();
 
-        MainThread::Post([clientName, info]() {
+        ThreadTask::RunOnMain([clientName, info]() {
             NotifyAndUpdate(clientName, info);
         });
     } else {
@@ -166,14 +165,14 @@ void UpdateChecker::NotifyAndUpdate(const std::string& clientName, const ClientV
             info.updateAvailable = false;
             SaveVersionInfo();
             
-            MainThread::Post([clientName]() {
+            ThreadTask::RunOnMain([clientName]() {
                 UpdateNotification::Show("Update Complete", 
                     std::format("{} has been updated successfully!", clientName), 5.0f);
             });
         } else {
             LOG_ERROR("{} update failed: {}", clientName, message);
             
-            MainThread::Post([clientName, message]() {
+            ThreadTask::RunOnMain([clientName, message]() {
                 UpdateNotification::Show("Update Failed", 
                     std::format("{}: {}", clientName, message), 5.0f);
             });
@@ -246,13 +245,13 @@ void UpdateChecker::Shutdown() {
 }
 
 void UpdateChecker::CheckNow(const std::string& clientName) {
-    Threading::newThread([clientName]() {
+    ThreadTask::fireAndForget([clientName]() {
         CheckClientForUpdate(clientName);
     });
 }
 
 void UpdateChecker::CheckAllNow() {
-    Threading::newThread([]() {
+    ThreadTask::fireAndForget([]() {
         std::vector<std::string> clients = {"Vanilla", "MacSploit", "Hydrogen", "Delta"};
         for (const auto& clientName : clients) {
             if (clientName != "Vanilla" && !MultiInstance::isBaseClientInstalled(clientName)) {

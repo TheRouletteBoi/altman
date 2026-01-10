@@ -15,8 +15,7 @@
 #include <format>
 
 #include "ui/widgets/image.h"
-#include "utils/threading.h"
-#include "utils/main_thread.h"
+#include "utils/thread_task.h"
 #include "components/data.h"
 
 namespace {
@@ -153,7 +152,7 @@ namespace {
         g_avatarState.started = true;
         g_avatarState.loading = true;
 
-        Threading::newThread([userId] {
+        ThreadTask::fireAndForget([userId] {
             const std::string metaUrl = std::format(
                 "https://thumbnails.roblox.com/v1/users/avatar?userIds={}&size=420x420&format=Png",
                 userId
@@ -161,7 +160,7 @@ namespace {
 
             auto metaResp = HttpClient::get(metaUrl);
             if (metaResp.status_code != 200 || metaResp.text.empty()) {
-                MainThread::Post([] {
+                ThreadTask::RunOnMain([] {
                     g_avatarState.loading = false;
                     g_avatarState.failed = true;
                 });
@@ -182,7 +181,7 @@ namespace {
             }
 
             if (avatarUrl.empty()) {
-                MainThread::Post([] {
+                ThreadTask::RunOnMain([] {
                     g_avatarState.loading = false;
                     g_avatarState.failed = true;
                 });
@@ -191,7 +190,7 @@ namespace {
 
             auto imgResp = HttpClient::get(avatarUrl);
             if (imgResp.status_code != 200 || imgResp.text.empty()) {
-                MainThread::Post([] {
+                ThreadTask::RunOnMain([] {
                     g_avatarState.loading = false;
                     g_avatarState.failed = true;
                 });
@@ -199,7 +198,7 @@ namespace {
             }
 
             std::string data = std::move(imgResp.text);
-            MainThread::Post([data = std::move(data)]() mutable {
+            ThreadTask::RunOnMain([data = std::move(data)]() mutable {
                 g_avatarState.failed = !LoadTextureFromMemory(
                     data.data(), data.size(),
                     &g_avatarState.texture,
@@ -214,7 +213,7 @@ namespace {
     void FetchCategories(uint64_t userId, std::string cookie) {
         g_categoryState.loading = true;
 
-        Threading::newThread([userId, cookie = std::move(cookie)] {
+        ThreadTask::fireAndForget([userId, cookie = std::move(cookie)] {
             const std::string url = std::format(
                 "https://inventory.roblox.com/v1/users/{}/categories",
                 userId
@@ -222,7 +221,7 @@ namespace {
 
             auto resp = HttpClient::get(url, {{"Cookie", std::format(".ROBLOSECURITY={}", cookie)}});
             if (resp.status_code != 200 || resp.text.empty()) {
-                MainThread::Post([] {
+                ThreadTask::RunOnMain([] {
                     g_categoryState.loading = false;
                     g_categoryState.failed = true;
                 });
@@ -234,7 +233,7 @@ namespace {
             try {
                 j = HttpClient::decode(resp);
             } catch (...) {
-                MainThread::Post([] {
+                ThreadTask::RunOnMain([] {
                     g_categoryState.loading = false;
                     g_categoryState.failed = true;
                 });
@@ -266,7 +265,7 @@ namespace {
             } catch (...) {
             }
 
-            MainThread::Post([categories = std::move(categories)]() mutable {
+            ThreadTask::RunOnMain([categories = std::move(categories)]() mutable {
                 g_categoryState.categories = std::move(categories);
                 g_categoryState.loading = false;
                 g_categoryState.failed = g_categoryState.categories.empty();
@@ -278,7 +277,7 @@ namespace {
         g_equippedState.loading = true;
         g_equippedState.failed = false;
 
-        Threading::newThread([userId] {
+        ThreadTask::fireAndForget([userId] {
             const std::string url = std::format(
                 "https://avatar.roblox.com/v1/users/{}/currently-wearing",
                 userId
@@ -286,7 +285,7 @@ namespace {
 
             auto resp = HttpClient::get(url);
             if (resp.status_code != 200 || resp.text.empty()) {
-                MainThread::Post([userId] {
+                ThreadTask::RunOnMain([userId] {
                     g_equippedState.userId = userId;
                     g_equippedState.failed = true;
                     g_equippedState.loading = false;
@@ -299,7 +298,7 @@ namespace {
             try {
                 j = HttpClient::decode(resp);
             } catch (...) {
-                MainThread::Post([userId] {
+                ThreadTask::RunOnMain([userId] {
                     g_equippedState.userId = userId;
                     g_equippedState.failed = true;
                     g_equippedState.loading = false;
@@ -325,7 +324,7 @@ namespace {
             } catch (...) {
             }
 
-            MainThread::Post([userId, ids = std::move(ids)]() mutable {
+            ThreadTask::RunOnMain([userId, ids = std::move(ids)]() mutable {
                 if (userId != g_categoryState.userId) {
                     return;
                 }
@@ -343,9 +342,9 @@ namespace {
         thumb.loading = true;
         ++g_activeThumbLoads;
 
-        Threading::newThread([assetId] {
+        ThreadTask::fireAndForget([assetId] {
             auto finish = [assetId](bool success) {
-                MainThread::Post([assetId, success] {
+                ThreadTask::RunOnMain([assetId, success] {
                     auto& ti = g_thumbCache[assetId];
                     ti.loading = false;
                     ti.failed = !success;
@@ -391,7 +390,7 @@ namespace {
             }
 
             std::string data = std::move(imgResp.text);
-            MainThread::Post([assetId, data = std::move(data)]() mutable {
+            ThreadTask::RunOnMain([assetId, data = std::move(data)]() mutable {
                 auto& ti = g_thumbCache[assetId];
                 const bool ok = LoadTextureFromMemory(
                     data.data(), data.size(),
@@ -408,7 +407,7 @@ namespace {
         g_inventoryState.loading = true;
         g_inventoryState.failed = false;
 
-        Threading::newThread([userId, cookie = std::move(cookie), assetTypeId] {
+        ThreadTask::fireAndForget([userId, cookie = std::move(cookie), assetTypeId] {
             std::vector<InventoryItem> items;
             std::string cursor;
             bool anyError = false;
@@ -463,7 +462,7 @@ namespace {
                 }
             }
 
-            MainThread::Post([assetTypeId, anyError, items = std::move(items)]() mutable {
+            ThreadTask::RunOnMain([assetTypeId, anyError, items = std::move(items)]() mutable {
                 if (!anyError) {
                     g_inventoryState.cachedInventories[assetTypeId] = std::move(items);
                     g_inventoryState.failed = false;

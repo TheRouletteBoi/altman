@@ -17,11 +17,10 @@
 #include "network/roblox/social.h"
 #include "ui/widgets/notifications.h"
 #include "ui/widgets/modal_popup.h"
-#include "utils/main_thread.h"
+#include "utils/thread_task.h"
 #include "system/auto_updater.h"
 #include "system/client_update_checker.h"
 #include "console/console.h"
-#include "utils/threading.h"
 
 #include "assets/fonts/embedded_rubik.h"
 #include "assets/fonts/embedded_fa_solid.h"
@@ -221,7 +220,7 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 }
 
 - (void)drawInMTKView:(MTKView *)view {
-    MainThread::Process();
+    ThreadTask::RunOnMainProcess();
 
     ImGuiIO &io = ImGui::GetIO();
     io.DisplaySize.x = view.bounds.size.width;
@@ -421,7 +420,7 @@ int main(int argc, const char * argv[]) {
 
             if (!invalidIds.empty()) {
                 std::string namesCopy = names;
-                MainThread::Post([invalidIds, namesCopy]() {
+                ThreadTask::RunOnMain([invalidIds, namesCopy]() {
                     char buf[512];
                     snprintf(buf, sizeof(buf), "Invalid cookies for: %s. Remove them?", namesCopy.c_str());
                     ModalPopup::AddYesNo(buf, [invalidIds]() {
@@ -437,7 +436,7 @@ int main(int argc, const char * argv[]) {
             }
         };
 
-        Threading::newThread([refreshAccounts] {
+        ThreadTask::fireAndForget([refreshAccounts] {
             refreshAccounts();
             while (true) {
                 std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));

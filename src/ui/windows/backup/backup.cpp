@@ -1,16 +1,16 @@
 #include "backup.h"
-#include "data.h"
 #include "console/console.h"
-#include "utils/threading.h"
-#include "network/roblox/common.h"
+#include "data.h"
 #include "network/roblox/auth.h"
+#include "network/roblox/common.h"
 #include "network/roblox/games.h"
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
-#include <nlohmann/json.hpp>
-#include <fstream>
-#include <filesystem>
+#include "utils/thread_task.h"
 #include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace {
 std::string xorEncrypt(const std::string &data, const std::string &password) {

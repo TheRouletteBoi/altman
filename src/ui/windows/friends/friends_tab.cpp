@@ -23,7 +23,7 @@
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
 #include "system/roblox_launcher.h"
-#include "utils/threading.h"
+#include "utils/thread_task.h"
 #include "ui/widgets/modal_popup.h"
 #include "ui/webview/webview.h"
 
@@ -136,7 +136,7 @@ namespace {
             cursor = reset ? "" : g_requests.nextCursor;
         }
 
-        Threading::newThread([cookieCopy = std::string(cookie), cursor]() {
+        ThreadTask::fireAndForget([cookieCopy = std::string(cookie), cursor]() {
             auto page = Roblox::getIncomingFriendRequests(cookieCopy, cursor, 100);
             {
                 std::lock_guard lock(g_requests.mutex);
@@ -278,7 +278,7 @@ namespace {
 
         if (doSend) {
             g_addFriend.loading = true;
-            Threading::newThread([specs, cookie = account.cookie]() {
+            ThreadTask::fireAndForget([specs, cookie = account.cookie]() {
                 for (const auto& spec : specs) {
                     const uint64_t uid = spec.isId ? spec.id : Roblox::getUserIdFromUsername(spec.username);
                     std::string resp;
@@ -329,7 +329,7 @@ namespace {
                     }
                 }
                 if (!accounts.empty()) {
-                    Threading::newThread([placeId, accounts]() { 
+                    ThreadTask::fireAndForget([placeId, accounts]() {
                         launchRobloxSequential(LaunchParams::standard(placeId), accounts); 
                     });
                 }
@@ -343,7 +343,7 @@ namespace {
                     }
                 }
                 if (!accounts.empty()) {
-                    Threading::newThread([frend, accounts]() { 
+                    ThreadTask::fireAndForget([frend, accounts]() {
                         launchRobloxSequential(LaunchParams::gameJob(frend.placeId, frend.jobId), accounts); 
                     });
                 }
@@ -359,7 +359,7 @@ namespace {
             ModalPopup::AddYesNo(
                 std::format("Unfriend {}?", frend.username),
                 [frend, cookie = account.cookie, accountId = account.id]() {
-                    Threading::newThread([frend, cookie, accountId]() {
+                    ThreadTask::fireAndForget([frend, cookie, accountId]() {
                         std::string resp;
                         if (Roblox::unfriend(std::to_string(frend.id), cookie, &resp)) {
                             std::erase_if(g_friends, [&](const auto& f) { return f.id == frend.id; });
@@ -431,7 +431,7 @@ namespace {
                 if (g_state.selectedFriend.id != frend.id) {
                     g_state.selectedFriend = {};
                     if (const auto* acc = findAccount(g_state.viewAccountId)) {
-                        Threading::newThread(FriendsActions::FetchFriendDetails,
+                        ThreadTask::fireAndForget(FriendsActions::FetchFriendDetails,
                                            std::to_string(frend.id),
                                            acc->cookie,
                                            std::ref(g_state.selectedFriend),
@@ -481,7 +481,7 @@ namespace {
                         if (const auto* acc = findAccount(g_state.viewAccountId)) {
                             const uint64_t uid = unfriend.id;
                             const std::string cookie = acc->cookie;
-                            Threading::newThread([uid, cookie]() {
+                            ThreadTask::fireAndForget([uid, cookie]() {
                                 std::string resp;
                                 Roblox::sendFriendRequest(std::to_string(uid), cookie, &resp);
                             });
@@ -633,7 +633,7 @@ namespace {
                 }
             }
             if (!accounts.empty()) {
-                Threading::newThread([frend, accounts]() {
+                ThreadTask::fireAndForget([frend, accounts]() {
                     const uint64_t uid = frend.id;
                     const auto pres = Roblox::getPresences({uid}, accounts.front().second);
                     const auto it = pres.find(uid);
@@ -741,7 +741,7 @@ void RenderFriendsTab() {
         g_requests.detailsLoading = false;
 
         if (!account->userId.empty()) {
-            Threading::newThread(FriendsActions::RefreshFullFriendsList,
+            ThreadTask::fireAndForget(FriendsActions::RefreshFullFriendsList,
                                account->id, account->userId, account->cookie,
                                std::ref(g_friends), std::ref(g_state.friendsLoading));
             
@@ -764,7 +764,7 @@ void RenderFriendsTab() {
         g_state.selectedFriend = {};
         
         if (g_state.viewMode == VIEW_MODE_FRIENDS) {
-            Threading::newThread(FriendsActions::RefreshFullFriendsList,
+            ThreadTask::fireAndForget(FriendsActions::RefreshFullFriendsList,
                                account->id, account->userId, account->cookie,
                                std::ref(g_friends), std::ref(g_state.friendsLoading));
         } else {

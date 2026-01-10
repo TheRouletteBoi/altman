@@ -27,7 +27,7 @@
 #include "network/roblox/social.h"
 #include "system/roblox_control.h"
 #include "system/roblox_launcher.h"
-#include "threading.h"
+#include "utils/thread_task.h"
 #include "ui/widgets/modal_popup.h"
 
 #ifdef _WIN32
@@ -223,7 +223,7 @@ namespace {
         auto accounts = getUsableSelectedAccounts();
         if (accounts.empty()) return;
 
-        Threading::newThread([userInput = std::move(userInput), accounts = std::move(accounts)]() mutable {
+        ThreadTask::fireAndForget([userInput = std::move(userInput), accounts = std::move(accounts)]() mutable {
             try {
                 UserSpecifier spec{};
                 if (!parseUserSpecifier(userInput, spec)) {
@@ -254,7 +254,7 @@ namespace {
         auto accounts = getUsableSelectedAccounts();
         if (accounts.empty()) return;
 
-        Threading::newThread([serverLink = std::move(serverLink), accounts = std::move(accounts)]() mutable {
+        ThreadTask::fireAndForget([serverLink = std::move(serverLink), accounts = std::move(accounts)]() mutable {
             try {
                 launchRobloxSequential(LaunchParams::privateServer(serverLink), std::move(accounts));
             } catch (const std::exception& e) {
@@ -268,7 +268,7 @@ namespace {
         auto accounts = getUsableSelectedAccounts();
         if (accounts.empty()) return;
 
-        Threading::newThread([placeId, jobId = std::move(jobId), accounts = std::move(accounts)]() mutable {
+        ThreadTask::fireAndForget([placeId, jobId = std::move(jobId), accounts = std::move(accounts)]() mutable {
             launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), std::move(accounts));
         });
     }
