@@ -24,6 +24,8 @@
     #include <unistd.h>
     #ifdef __APPLE__
         #include <mach-o/dyld.h>
+		#include <Security/Security.h>
+		#include <CoreFoundation/CoreFoundation.h>
     #endif
 #endif
 
@@ -831,3 +833,35 @@ std::filesystem::path AutoUpdater::GetCurrentExecutablePath() {
     return std::filesystem::read_symlink("/proc/self/exe");
 #endif
 }
+
+#ifdef __APPLE__
+std::string GetApplicationNameFromBundleId() {
+	CFBundleRef mainBundle = CFBundleGetMainBundle();
+	if (!mainBundle) return "";
+
+	auto nameRef = static_cast<CFStringRef>(
+		CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey));
+	if (!nameRef) return "";
+
+	std::array<char, 256> buffer{};
+	if (!CFStringGetCString(nameRef, buffer.data(), buffer.size(), kCFStringEncodingUTF8)) {
+		return "";
+	}
+	return std::string(buffer.data());
+}
+
+std::string GetCurrentExecutableRealPath() {
+	std::array<char, PATH_MAX> buffer{};
+	uint32_t size = buffer.size();
+
+	if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+		return "";
+	}
+
+	std::array<char, PATH_MAX> resolved{};
+	if (!realpath(buffer.data(), resolved.data())) {
+		return "";
+	}
+	return std::string(resolved.data());
+}
+#endif

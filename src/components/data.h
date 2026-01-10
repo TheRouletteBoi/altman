@@ -67,12 +67,6 @@ inline bool g_clearCacheOnLaunch = false;
 inline bool g_multiRobloxEnabled = false;
 inline std::unordered_map<std::string, std::string> g_clientKeys;
 
-#ifdef __APPLE__
-std::string GetApplicationDir();
-std::string GetApplicationName();
-std::string GetExecutablePath();
-#endif
-
 namespace Data {
     void LoadSettings(std::string_view filename = "settings.json");
     void SaveSettings(std::string_view filename = "settings.json");

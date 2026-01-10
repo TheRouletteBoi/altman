@@ -5,10 +5,6 @@
     #include <windows.h>
     #include <dpapi.h>
     #pragma comment(lib, "Crypt32.lib")
-#elif __APPLE__
-    #include <Security/Security.h>
-    #include <CoreFoundation/CoreFoundation.h>
-    #include <mach-o/dyld.h>
 #endif
 
 #include <nlohmann/json.hpp>
@@ -82,58 +78,6 @@ namespace {
 
     std::string decryptData(std::span<const std::uint8_t> encryptedData) {
         return std::string(encryptedData.begin(), encryptedData.end());
-    }
-
-    std::string GetApplicationDir() {
-        std::array<char, PATH_MAX> buffer{};
-        uint32_t size = buffer.size();
-
-        if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
-            return "";
-        }
-
-        std::array<char, PATH_MAX> resolved{};
-        if (!realpath(buffer.data(), resolved.data())) {
-            return "";
-        }
-
-        std::string exePath(resolved.data());
-        constexpr std::string_view marker = "/Contents/MacOS/";
-
-        if (const auto pos = exePath.rfind(marker); pos != std::string::npos) {
-            return exePath.substr(0, pos);
-        }
-        return "";
-    }
-
-    std::string GetApplicationName() {
-        CFBundleRef mainBundle = CFBundleGetMainBundle();
-        if (!mainBundle) return "";
-
-        auto nameRef = static_cast<CFStringRef>(
-            CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey));
-        if (!nameRef) return "";
-
-        std::array<char, 256> buffer{};
-        if (!CFStringGetCString(nameRef, buffer.data(), buffer.size(), kCFStringEncodingUTF8)) {
-            return "";
-        }
-        return std::string(buffer.data());
-    }
-
-    std::string GetExecutablePath() {
-        std::array<char, PATH_MAX> buffer{};
-        uint32_t size = buffer.size();
-
-        if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
-            return "";
-        }
-
-        std::array<char, PATH_MAX> resolved{};
-        if (!realpath(buffer.data(), resolved.data())) {
-            return "";
-        }
-        return std::string(resolved.data());
     }
 #endif
 
