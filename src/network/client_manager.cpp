@@ -282,6 +282,8 @@ bool CleanupRobloxApp(const std::string& clientsDir, ProgressCallback progressCb
     return true;
 }
 
+// TODO(roulette): recompile binary to be universal
+// NOTE: NOT A UNIVERSAL BINARY. WILL CAUSE PROBLEMS
 bool DownloadInsertDylib(const std::string& outputPath, ProgressCallback progressCb) {
     const std::string url = "https://github.com/DollarNoob/Macsploit-Mirror/raw/main/insert_dylib";
 

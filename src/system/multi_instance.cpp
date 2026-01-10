@@ -462,57 +462,60 @@ namespace MultiInstance {
         return std::filesystem::exists(clientPath);
     }
 
-    const std::vector<std::string>& getAvailableClients(bool forceRefresh) {
-        static std::vector<std::string> cached;
-        static std::filesystem::file_time_type lastScan{};
-        static bool initialized = false;
+	const std::vector<std::string>& getAvailableClients(bool forceRefresh) {
+	    static std::vector<std::string> cached;
+    	static std::filesystem::file_time_type lastScan{};
+    	static bool initialized = false;
+    	static std::mutex m;
 
-        std::string appDataDir = getAppDataDirectory();
-        if (appDataDir.empty()) return cached;
+    	std::lock_guard<std::mutex> lock(m);
 
-        std::filesystem::path clientsDir = std::filesystem::path(appDataDir) / "clients";
+    	std::string appDataDir = getAppDataDirectory();
+    	if (appDataDir.empty()) return cached;
 
-        std::error_code ec;
-        auto currentWriteTime =
-            std::filesystem::exists(clientsDir, ec)
-                ? std::filesystem::last_write_time(clientsDir, ec)
-                : std::filesystem::file_time_type{};
+    	std::filesystem::path clientsDir = std::filesystem::path(appDataDir) / "clients";
 
-        if (!initialized || forceRefresh || currentWriteTime != lastScan) {
-            cached.clear();
+    	std::error_code ec;
+    	bool exists = std::filesystem::exists(clientsDir, ec);
+    	auto currentWriteTime = exists
+			? std::filesystem::last_write_time(clientsDir, ec)
+			: std::filesystem::file_time_type{};
 
-            if (std::filesystem::exists(clientsDir)) {
-                for (const auto& entry : std::filesystem::directory_iterator(clientsDir, ec)) {
-                    if (entry.is_directory() && entry.path().extension() == ".app") {
-                        cached.push_back(entry.path().stem().string());
-                    }
-                }
-            }
+    	if (!initialized || forceRefresh || currentWriteTime != lastScan) {
+    		cached.clear();
 
-            std::sort(cached.begin(), cached.end());
-            lastScan = currentWriteTime;
-            initialized = true;
-        }
+    		if (exists) {
+    			for (const auto& entry : std::filesystem::directory_iterator(clientsDir, ec)) {
+    				const auto& path = entry.path();
+    				if (entry.is_directory() && path.extension() == ".app") {
+    					cached.push_back(path.stem().string());
+    				}
+    			}
+    		}
 
-        return cached;
+    		std::sort(cached.begin(), cached.end());
+    		lastScan = currentWriteTime;
+    		initialized = true;
+    	}
+
+    	return cached;
     }
 
-    const std::vector<std::string>& getAvailableClientsForUI(bool refresh) {
-        static std::vector<std::string> cached;
+	const std::vector<std::string>& getAvailableClientsForUI(bool refresh) {
+    	static std::vector<std::string> cached;
 
-        if (refresh || cached.empty()) {
-            cached.clear();
-            cached.push_back("Vanilla");
+    	if (refresh || cached.empty()) {
+    		cached.clear();
+    		cached.push_back("Vanilla");
 
-            auto diskClients = getAvailableClients(false);
-            for (const auto& c : diskClients) {
-                if (c != "Vanilla") {
-                    cached.push_back(c);
-                }
-            }
-        }
+    		for (const auto& c : getAvailableClients(refresh)) {
+    			if (c != "Vanilla") {
+    				cached.push_back(c);
+    			}
+    		}
+    	}
 
-        return cached;
+    	return cached;
     }
 
     std::string getClientPath(const std::string& username, const std::string& clientName) {

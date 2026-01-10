@@ -20,7 +20,7 @@
 
 static bool g_requestOpenConsoleModal = false;
 
-static constexpr std::array<std::string_view, 4> g_availableClients = {
+static constexpr std::array<std::string_view, 4> g_availableClientsNames = {
     "Vanilla",
     "MacSploit",
     "Hydrogen",
@@ -94,9 +94,9 @@ namespace {
     }
 
     void RenderClientSelector() {
-    	const auto& availableClients = MultiInstance::getAvailableClientsForUI(false);
+    	const auto& availableClientsForUI = MultiInstance::getAvailableClientsForUI(false);
 
-        if (availableClients.empty()) {
+        if (availableClientsForUI.empty()) {
             ImGui::TextDisabled("No clients available");
             ImGui::SameLine();
             if (ImGui::Button("Install Clients")) {
@@ -118,7 +118,7 @@ namespace {
 
                 ImGui::SetNextItemWidth(150.0f);
                 if (ImGui::BeginCombo("##ClientSelect", currentBase.c_str())) {
-                    for (const auto& clientName : availableClients) {
+                    for (const auto& clientName : availableClientsForUI) {
                         const bool isInstalled = MultiInstance::isBaseClientInstalled(clientName);
 
                         if (!isInstalled && clientName != "Vanilla") {
@@ -327,7 +327,7 @@ void RenderSettingsTab() {
 		static std::unordered_map<std::string, std::array<char, 256>> keyBuffers;
 		static std::unordered_map<std::string, bool> buffersInitialized;
 
-		for (std::string_view clientName : g_availableClients) {
+		for (std::string_view clientName : g_availableClientsNames) {
 			const std::string clientStr(clientName);
 			const bool isInstalled = MultiInstance::isBaseClientInstalled(clientStr);
 			const bool needsKey = (clientName != "Vanilla") && (clientName != "MacSploit");
@@ -403,10 +403,10 @@ void RenderSettingsTab() {
 							LOG_ERROR(message);
 							g_installState.statusMessage = std::format("Error: {}", message);
 						}
-					});
 
-					// update client list
-					MultiInstance::getAvailableClientsForUI(true);
+						// Refresh client list
+						MultiInstance::getAvailableClientsForUI(true);
+					});
 				}
 			} else {
 				if (ImGui::Button("Install", ImVec2(-FLT_MIN, 0))) {
@@ -434,14 +434,14 @@ void RenderSettingsTab() {
 							LOG_ERROR(message);
 							g_installState.statusMessage = std::format("Error: {}", message);
 						}
+
+						// Refresh client list
+						MultiInstance::getAvailableClientsForUI(true);
 					};
 
 					ClientManager::InstallClientAsync(g_installState.currentClient,
 													 progressCallback,
 													 completionCallback);
-
-					// update client list
-					MultiInstance::getAvailableClientsForUI(true);
 				}
 
 				if (disableInstall && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {

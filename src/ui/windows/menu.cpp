@@ -283,6 +283,7 @@ bool RenderMainMenu() {
                 if (canAdd && ImGui::MenuItem("Add Cookie", nullptr, false, canAdd)) {
                     if (ValidateAndAddCookie(s_cookieInputBuffer.data())) {
                         s_cookieInputBuffer.fill('\0');
+                    	Data::rebuildAccountIndexCache();
                     } else {
                         s_cookieInputBuffer.fill('\0');
                     }
@@ -295,6 +296,7 @@ bool RenderMainMenu() {
 					[](const std::string& extractedCookie) {
 						if (!extractedCookie.empty()) {
 							ValidateAndAddCookie(extractedCookie);
+							Data::rebuildAccountIndexCache();
 						}
 					});
         	}

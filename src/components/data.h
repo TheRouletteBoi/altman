@@ -51,6 +51,7 @@ struct FriendInfo {
 
 inline std::vector<AccountData> g_accounts;
 inline std::set<int> g_selectedAccountIds;
+// TODO(@Roulette): delete this variable and replace with something that we already use. this is going to cause problems when launching clients
 inline std::unordered_map<int, size_t> g_accountIndexById;
 inline std::vector<FavoriteGame> g_favorites;
 inline std::vector<FriendInfo> g_friends;

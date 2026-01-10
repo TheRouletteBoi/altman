@@ -223,6 +223,29 @@ void UpdateChecker::Initialize() {
     }
 
     LoadVersionInfo();
+
+	if (!MultiInstance::isBaseClientInstalled("Vanilla")) {
+		LOG_INFO("Vanilla client not installed, downloading automatically...");
+
+		auto progressCallback = [](float progress, const std::string& msg) {
+			// LOG_INFO("Vanilla download progress: {:.0f}% - {}", progress * 100.0f, msg);
+		};
+
+		auto completionCallback = [](bool success, const std::string& message) {
+			if (success) {
+				LOG_INFO("Vanilla client installed successfully");
+				MarkClientAsInstalled("Vanilla", GetClientVersion("Vanilla"));
+			} else {
+				LOG_ERROR("Vanilla client installation failed: {}", message);
+				ThreadTask::RunOnMain([message]() {
+					UpdateNotification::Show("Installation Failed",
+						std::format("Failed to install Vanilla client: {}", message), 5.0f);
+				});
+			}
+		};
+
+		ClientManager::InstallClientAsync("Vanilla", progressCallback, completionCallback);
+	}
     
     shouldStop = false;
     isRunning = true;
@@ -297,8 +320,6 @@ void UpdateChecker::MarkClientAsInstalled(const std::string& clientName, const s
     info.updateAvailable = false;
     info.lastChecked = std::chrono::system_clock::now();
     SaveVersionInfo();
-    
-    LOG_INFO("Marked {} as installed: {}", clientName, version);
 }
 
 }
