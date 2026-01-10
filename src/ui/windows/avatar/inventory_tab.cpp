@@ -118,34 +118,32 @@ namespace {
         ClearTextureCache();
     }
 
-    std::pair<uint64_t, std::string> GetCurrentUserInfo() {
-        uint64_t userId = 0;
-        std::string cookie;
+	std::pair<uint64_t, std::string> GetCurrentUserInfo() {
+    	uint64_t userId = 0;
+    	std::string cookie;
 
-        auto findUser = [&](int accountId) {
-            auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                [accountId](const AccountData& acc) {
-                    return acc.id == accountId && !acc.userId.empty();
-                });
+    	auto tryGetUserInfo = [&](int accountId) -> bool {
+    		if (const AccountData* acc = getAccountById(accountId)) {
+    			if (!acc->userId.empty()) {
+    				try {
+    					userId = std::stoull(acc->userId);
+    					cookie = acc->cookie;
+    					return true;
+    				} catch (...) {
+    					userId = 0;
+    				}
+    			}
+    		}
+    		return false;
+    	};
 
-            if (it != g_accounts.end()) {
-                std::exception_ptr exPtr;
-                try {
-                    userId = std::stoull(it->userId);
-                    cookie = it->cookie;
-                } catch (...) {
-                    userId = 0;
-                }
-            }
-        };
+    	if (!g_selectedAccountIds.empty()) {
+    		tryGetUserInfo(*g_selectedAccountIds.begin());
+    	} else if (g_defaultAccountId != -1) {
+    		tryGetUserInfo(g_defaultAccountId);
+    	}
 
-        if (!g_selectedAccountIds.empty()) {
-            findUser(*g_selectedAccountIds.begin());
-        } else if (g_defaultAccountId != -1) {
-            findUser(g_defaultAccountId);
-        }
-
-        return {userId, cookie};
+    	return {userId, cookie};
     }
 
     void FetchAvatarImage(uint64_t userId) {

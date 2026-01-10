@@ -164,6 +164,9 @@ bool Backup::Import(const std::string &file, const std::string &password, std::s
         acct.voiceBanExpiry = vs.bannedUntil;
         g_accounts.push_back(std::move(acct));
     }
+
+	invalidateAccountIndex();
+
     if (j.contains("settings")) {
         std::ofstream s(Data::StorageFilePath("settings.json"));
         s << j["settings"].dump(4);

@@ -17,6 +17,7 @@
 #include <optional>
 #include <span>
 
+#include "utils/account_utils.h"
 #include "utils/base64.h"
 #include "console/console.h"
 
@@ -260,19 +261,92 @@ namespace {
         }
         return mapping;
     }
+}
 
+std::unordered_map<int, size_t> s_accountIndexCache;
+bool s_accountIndexDirty = true;
+
+void ensureAccountIndexValid() {
+	if (!s_accountIndexDirty) return;
+
+	s_accountIndexCache.clear();
+	s_accountIndexCache.reserve(g_accounts.size());
+
+	for (size_t i = 0; i < g_accounts.size(); ++i) {
+		s_accountIndexCache[g_accounts[i].id] = i;
+	}
+	s_accountIndexDirty = false;
+}
+
+void invalidateAccountIndex() {
+	s_accountIndexDirty = true;
+}
+
+AccountData* getAccountById(int id) {
+	ensureAccountIndexValid();
+
+	auto it = s_accountIndexCache.find(id);
+	if (it == s_accountIndexCache.end() || it->second >= g_accounts.size()) {
+		return nullptr;
+	}
+	return &g_accounts[it->second];
+}
+
+std::vector<AccountData*> getUsableSelectedAccounts() {
+	std::vector<AccountData*> result;
+	result.reserve(g_selectedAccountIds.size());
+
+	for (int id : g_selectedAccountIds) {
+		if (AccountData* acc = getAccountById(id)) {
+			if (AccountFilters::IsAccountUsable(*acc)) {
+				result.push_back(acc);
+			}
+		}
+	}
+	return result;
+}
+
+std::vector<const AccountData*> getSelectedAccountsOrdered() {
+	std::vector<const AccountData*> result;
+	result.reserve(g_selectedAccountIds.size());
+	for (const auto& acc : g_accounts) {
+		if (g_selectedAccountIds.contains(acc.id)) {
+			result.push_back(&acc);
+		}
+	}
+	return result;
+}
+
+std::vector<AccountData*> getSelectedAccountsOrderedMutable() {
+	std::vector<AccountData*> result;
+	result.reserve(g_selectedAccountIds.size());
+	for (auto& acc : g_accounts) {
+		if (g_selectedAccountIds.contains(acc.id)) {
+			result.push_back(&acc);
+		}
+	}
+	return result;
+}
+
+int getAccountIndexById(int id) {
+	ensureAccountIndexValid();
+	auto it = s_accountIndexCache.find(id);
+	if (it == s_accountIndexCache.end() || it->second >= g_accounts.size()) {
+		return -1;
+	}
+	return static_cast<int>(it->second);
+}
+
+std::string getPrimaryAccountCookie() {
+	if (g_selectedAccountIds.empty()) return {};
+
+	if (const AccountData* acc = getAccountById(*g_selectedAccountIds.begin())) {
+		return acc->cookie;
+	}
+	return {};
 }
 
 namespace Data {
-
-    void rebuildAccountIndexCache() {
-        g_accountIndexById.clear();
-        g_accountIndexById.reserve(g_accounts.size());
-
-        for (size_t i = 0; i < g_accounts.size(); ++i) {
-            g_accountIndexById[g_accounts[i].id] = i;
-        }
-    }
 
     void LoadAccounts(std::string_view filename) {
         const auto path = makePath(filename);
@@ -294,7 +368,7 @@ namespace Data {
                 g_accounts.push_back(parseAccount(item));
             }
 
-            rebuildAccountIndexCache();
+            invalidateAccountIndex();
 
             LOG_INFO("Loaded {} accounts", g_accounts.size());
         } catch (const nlohmann::json::parse_error& e) {

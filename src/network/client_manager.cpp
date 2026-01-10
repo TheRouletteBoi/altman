@@ -13,8 +13,9 @@
 #include "console/console.h"
 #include "http.h"
 #include "ipa_installer.h"
-#include "system/multi_instance.h"
 #include "system/client_update_checker.h"
+#include "system/multi_instance.h"
+#include "thread_task.h"
 
 namespace ClientManager {
 
@@ -521,7 +522,7 @@ bool CodeSign(const std::string& appPath, bool remove, ProgressCallback progress
 void InstallClientAsync(const std::string& clientName,
                         ProgressCallback progressCb,
                         CompletionCallback completionCb) {
-	std::thread([clientName, progressCb, completionCb]() {
+	ThreadTask::fireAndForget([clientName, progressCb, completionCb]() {
 		const std::string appDataDir = MultiInstance::getAppDataDirectory();
 		if (appDataDir.empty()) {
 			if (completionCb) completionCb(false, "Failed to get app data directory");
@@ -727,10 +728,10 @@ void InstallClientAsync(const std::string& clientName,
 				if (!clientVersion.empty()) {
 					ClientUpdateChecker::UpdateChecker::MarkClientAsInstalled(clientName, clientVersion);
 				}
-			}).detach();
+			});
 }
 void RemoveClientAsync(const std::string& clientName, CompletionCallback completionCb) {
-	std::thread([clientName, completionCb] {
+	ThreadTask::fireAndForget([clientName, completionCb] {
 	const std::string clientPath = MultiInstance::getBaseClientPath(clientName);
 	if (clientPath.empty() || !std::filesystem::exists(clientPath)) {
 	if (completionCb) completionCb(false, "Client not found");
@@ -747,6 +748,6 @@ void RemoveClientAsync(const std::string& clientName, CompletionCallback complet
 
 		LOG_INFO("Removed client: {}", clientName);
 		if (completionCb) completionCb(true, "Client removed successfully");
-	}).detach();
+	});
 }
 }

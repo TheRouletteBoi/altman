@@ -83,81 +83,80 @@ namespace {
 		}
 	}
 
-    template <typename Fn>
-    void ProcessSelectedAccounts(Fn&& operation) {
-        for (const int accountId : g_selectedAccountIds) {
-            const auto it = g_accountIndexById.find(accountId);
-            if (it != g_accountIndexById.end()) {
-                operation(g_accounts[it->second]);
-            }
-        }
-    }
+	template <typename Fn>
+	void ProcessSelectedAccounts(Fn&& operation) {
+		for (const int accountId : g_selectedAccountIds) {
+			if (AccountData* acc = getAccountById(accountId)) {
+				operation(*acc);
+			}
+		}
+	}
 
     void RenderClientSelector() {
-    	const auto& availableClientsForUI = MultiInstance::getAvailableClientsForUI(false);
+		const auto& availableClientsForUI = MultiInstance::getAvailableClientsForUI(false);
 
-        if (availableClientsForUI.empty()) {
-            ImGui::TextDisabled("No clients available");
-            ImGui::SameLine();
-            if (ImGui::Button("Install Clients")) {
-                ImGui::SetScrollHereY(1.0f);
-            }
-            return;
-        }
+		if (availableClientsForUI.empty()) {
+			ImGui::TextDisabled("No clients available");
+			ImGui::SameLine();
+			if (ImGui::Button("Install Clients")) {
+				ImGui::SetScrollHereY(1.0f);
+			}
+			return;
+		}
 
-        for (const int accountId : g_selectedAccountIds) {
-            const auto it = g_accountIndexById.find(accountId);
-            if (it != g_accountIndexById.end()) {
-                auto& acc = g_accounts[it->second];
-                std::string currentBase = acc.customClientBase.empty() ? "Vanilla" : acc.customClientBase;
+		for (const int accountId : g_selectedAccountIds) {
+			AccountData* acc = getAccountById(accountId);
+			if (!acc)
+				continue;
 
-                ImGui::PushID(acc.id);
+			std::string currentBase = acc->customClientBase.empty() ? "Vanilla" : acc->customClientBase;
 
-                ImGui::Text("%s:", acc.username.c_str());
-                ImGui::SameLine();
+			ImGui::PushID(acc->id);
 
-                ImGui::SetNextItemWidth(150.0f);
-                if (ImGui::BeginCombo("##ClientSelect", currentBase.c_str())) {
-                    for (const auto& clientName : availableClientsForUI) {
-                        const bool isInstalled = MultiInstance::isBaseClientInstalled(clientName);
+			ImGui::Text("%s:", acc->username.c_str());
+			ImGui::SameLine();
 
-                        if (!isInstalled && clientName != "Vanilla") {
-                            ImGui::BeginDisabled();
-                        }
+			ImGui::SetNextItemWidth(150.0f);
+			if (ImGui::BeginCombo("##ClientSelect", currentBase.c_str())) {
+				for (const auto& clientName : availableClientsForUI) {
+					const bool isInstalled = MultiInstance::isBaseClientInstalled(clientName);
 
-                        bool isSelected = (currentBase == clientName);
+					if (!isInstalled && clientName != "Vanilla") {
+						ImGui::BeginDisabled();
+					}
 
-                        if (ImGui::Selectable(clientName.c_str(), isSelected)) {
-                            acc.customClientBase = (clientName == "Vanilla") ? "" : clientName;
-                            Data::SaveAccounts();
-                            LOG_INFO("Set {} to use base client: {}", acc.username, clientName);
-                        }
+					bool isSelected = (currentBase == clientName);
 
-                        if (isSelected) {
-                            ImGui::SetItemDefaultFocus();
-                        }
+					if (ImGui::Selectable(clientName.c_str(), isSelected)) {
+						acc->customClientBase = (clientName == "Vanilla") ? "" : clientName;
+						Data::SaveAccounts();
+						LOG_INFO("Set {} to use base client: {}", acc->username, clientName);
+					}
 
-                        if (!isInstalled && clientName != "Vanilla") {
-                            ImGui::EndDisabled();
-                        }
-                    }
-                    ImGui::EndCombo();
-                }
+					if (isSelected) {
+						ImGui::SetItemDefaultFocus();
+					}
 
-                ImGui::SameLine();
-                std::string userClientName = "Roblox_" + acc.username;
-                bool userCopyExists = MultiInstance::isClientInstalled(acc.username, userClientName);
+					if (!isInstalled && clientName != "Vanilla") {
+						ImGui::EndDisabled();
+					}
+				}
+				ImGui::EndCombo();
+			}
 
-                if (userCopyExists) {
-                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Ready");
-                } else {
-                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Will copy on launch");
-                }
+			ImGui::SameLine();
+			std::string userClientName = "Roblox_" + acc->username;
+			bool userCopyExists = MultiInstance::isClientInstalled(acc->username, userClientName);
 
-                ImGui::PopID();
-            }
-        }
-    }
+			if (userCopyExists) {
+				ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Ready");
+			} else {
+				ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Will copy on launch");
+			}
+
+			ImGui::PopID();
+		}
+	}
 }
 
 void RenderSettingsTab() {

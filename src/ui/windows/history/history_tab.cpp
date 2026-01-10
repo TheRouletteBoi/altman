@@ -400,84 +400,52 @@ static void DisplayLogDetails(const LogInfo& logInfo) {
                                !session.jobId.empty() &&
                                !g_selectedAccountIds.empty();
 
-                if (canLaunch) {
-                    ImGui::Spacing();
-                    if (ImGui::Button(std::format("{} Launch Instance##{}", ICON_JOIN, i).c_str())) {
-                        uint64_t place_id_val = 0;
-                        if (session.placeId.find_first_not_of("0123456789") == std::string::npos) {
-                            place_id_val = std::stoull(session.placeId);
-                        }
+            	if (canLaunch) {
+            		ImGui::Spacing();
+            		if (ImGui::Button(std::format("{} Launch Instance##{}", ICON_JOIN, i).c_str())) {
+            			uint64_t place_id_val = 0;
+            			if (session.placeId.find_first_not_of("0123456789") == std::string::npos) {
+            				place_id_val = std::stoull(session.placeId);
+            			}
 
-                        if (place_id_val > 0) {
-                            std::vector<std::pair<int, std::string>> accounts;
-                            for (int id : g_selectedAccountIds) {
-                                auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                                    [&](const AccountData& a) { return a.id == id; });
-                                if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it)) {
-                                    accounts.emplace_back(it->id, it->cookie);
-                                }
-                            }
-                            if (!accounts.empty()) {
-                                LOG_INFO("Launching game instance from history...");
-                                std::thread([place_id_val, jobId = session.jobId, accounts]() {
-                                    launchRobloxSequential(LaunchParams::gameJob(place_id_val, jobId), accounts);
-                                }).detach();
-                            } else {
-                                LOG_INFO("Selected account not found.");
-                            }
-                        } else {
-                            LOG_INFO("Invalid Place ID in instance.");
-                        }
-                    }
+            			if (place_id_val > 0) {
+            				launchWithSelectedAccounts(LaunchParams::gameJob(place_id_val, session.jobId));
+            			} else {
+            				LOG_INFO("Invalid Place ID in instance.");
+            			}
+            		}
 
-                    if (ImGui::BeginPopupContextItem(std::format("LaunchButtonCtx##{}", i).c_str(),
-                                                     ImGuiPopupFlags_MouseButtonRight)) {
-                        uint64_t pid = 0;
-                        if (session.placeId.find_first_not_of("0123456789") == std::string::npos) {
-                            pid = std::stoull(session.placeId);
-                        }
+            		if (ImGui::BeginPopupContextItem(std::format("LaunchButtonCtx##{}", i).c_str(),
+													 ImGuiPopupFlags_MouseButtonRight)) {
+            			uint64_t pid = 0;
+            			if (session.placeId.find_first_not_of("0123456789") == std::string::npos) {
+            				pid = std::stoull(session.placeId);
+            			}
 
-                        StandardJoinMenuParams menu{};
-                        menu.placeId = pid;
-                        if (!session.universeId.empty() &&
-                            session.universeId.find_first_not_of("0123456789") == std::string::npos) {
-                            menu.universeId = std::stoull(session.universeId);
-                        }
-                        menu.jobId = session.jobId;
-                        menu.onLaunchGame = [pid]() {
-                            if (pid == 0 || g_selectedAccountIds.empty()) return;
-                            std::vector<std::pair<int, std::string>> accounts;
-                            for (int id : g_selectedAccountIds) {
-                                auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                                    [&](const AccountData& a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
-                                if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
-                            }
-                            if (!accounts.empty()) {
-                                std::thread([pid, accounts]() {
-                                    launchRobloxSequential(LaunchParams::standard(pid), accounts);
-                                }).detach();
-                            }
-                        };
-                        menu.onLaunchInstance = [pid, jid = session.jobId]() {
-                            if (pid == 0 || jid.empty() || g_selectedAccountIds.empty()) return;
-                            std::vector<std::pair<int, std::string>> accounts;
-                            for (int id : g_selectedAccountIds) {
-                                auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                                    [&](const AccountData& a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
-                                if (it != g_accounts.end()) accounts.emplace_back(it->id, it->cookie);
-                            }
-                            if (!accounts.empty()) {
-                                std::thread([pid, jid, accounts]() {
-                                    launchRobloxSequential(LaunchParams::gameJob(pid, jid), accounts);
-                                }).detach();
-                            }
-                        };
-                        menu.onFillGame = [pid]() { if (pid) FillJoinOptions(pid, ""); };
-                        menu.onFillInstance = [pid, jid = session.jobId]() { if (pid) FillJoinOptions(pid, jid); };
-                        RenderStandardJoinMenu(menu);
-                        ImGui::EndPopup();
-                    }
-                }
+            			StandardJoinMenuParams menu{};
+            			menu.placeId = pid;
+            			if (!session.universeId.empty() &&
+							session.universeId.find_first_not_of("0123456789") == std::string::npos) {
+            				menu.universeId = std::stoull(session.universeId);
+							}
+            			menu.jobId = session.jobId;
+
+            			menu.onLaunchGame = [pid]() {
+            				if (pid == 0) return;
+            				launchWithSelectedAccounts(LaunchParams::standard(pid));
+            			};
+
+            			menu.onLaunchInstance = [pid, jid = session.jobId]() {
+            				if (pid == 0 || jid.empty()) return;
+            				launchWithSelectedAccounts(LaunchParams::gameJob(pid, jid));
+            			};
+
+            			menu.onFillGame = [pid]() { if (pid) FillJoinOptions(pid, ""); };
+            			menu.onFillInstance = [pid, jid = session.jobId]() { if (pid) FillJoinOptions(pid, jid); };
+            			RenderStandardJoinMenu(menu);
+            			ImGui::EndPopup();
+													 }
+            	}
 
                 ImGui::TreePop();
             } else {

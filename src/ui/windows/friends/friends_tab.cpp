@@ -149,30 +149,6 @@ namespace {
         });
     }
 
-    const AccountData* findAccount(int accountId) {
-        const auto it = std::ranges::find_if(g_accounts,
-            [accountId](const auto& a) { return a.id == accountId; });
-        return it != g_accounts.end() ? &(*it) : nullptr;
-    }
-
-    const AccountData* findUsableAccount(int accountId) {
-        const auto it = std::ranges::find_if(g_accounts,
-            [accountId](const auto& a) {
-                return a.id == accountId && AccountFilters::IsAccountUsable(a);
-            });
-        return it != g_accounts.end() ? &(*it) : nullptr;
-    }
-
-    std::pair<std::string, std::string> getPrimaryAccountCredentials() {
-        if (g_selectedAccountIds.empty()) return {};
-        
-        const auto primaryId = *g_selectedAccountIds.begin();
-        if (const auto* acc = findAccount(primaryId)) {
-            return {acc->cookie, acc->userId};
-        }
-        return {};
-    }
-
     void renderAccountSelector(const AccountData& currentAccount) {
         std::vector<std::string> labels;
         labels.reserve(g_accounts.size());
@@ -315,39 +291,21 @@ namespace {
         }
 
         const bool inGame = frend.presence == "InGame" && frend.placeId && !frend.jobId.empty();
-        if (inGame) {
-            ImGui::Separator();
-            StandardJoinMenuParams menu{};
-            menu.placeId = frend.placeId;
-            menu.jobId = frend.jobId;
-            menu.onLaunchGame = [placeId = frend.placeId]() {
-                if (g_selectedAccountIds.empty()) return;
-                std::vector<std::pair<int, std::string>> accounts;
-                for (const int id : g_selectedAccountIds) {
-                    if (const auto* acc = findUsableAccount(id)) {
-                        accounts.emplace_back(acc->id, acc->cookie);
-                    }
-                }
-                if (!accounts.empty()) {
-                    ThreadTask::fireAndForget([placeId, accounts]() {
-                        launchRobloxSequential(LaunchParams::standard(placeId), accounts); 
-                    });
-                }
-            };
-            menu.onLaunchInstance = [frend]() {
-                if (g_selectedAccountIds.empty()) return;
-                std::vector<std::pair<int, std::string>> accounts;
-                for (const int id : g_selectedAccountIds) {
-                    if (const auto* acc = findUsableAccount(id)) {
-                        accounts.emplace_back(acc->id, acc->cookie);
-                    }
-                }
-                if (!accounts.empty()) {
-                    ThreadTask::fireAndForget([frend, accounts]() {
-                        launchRobloxSequential(LaunchParams::gameJob(frend.placeId, frend.jobId), accounts); 
-                    });
-                }
-            };
+    	if (inGame) {
+    		ImGui::Separator();
+    		StandardJoinMenuParams menu{};
+    		menu.placeId = frend.placeId;
+    		menu.jobId = frend.jobId;
+
+    		menu.onLaunchGame = [placeId = frend.placeId]() {
+    			launchWithSelectedAccounts(LaunchParams::standard(placeId));
+    		};
+
+    		menu.onLaunchInstance = [placeId = frend.placeId, jobId = frend.jobId]() {
+    			if (jobId.empty()) return;
+    			launchWithSelectedAccounts(LaunchParams::gameJob(placeId, jobId));
+    		};
+
             menu.onFillGame = [placeId = frend.placeId]() { FillJoinOptions(placeId, ""); };
             menu.onFillInstance = [frend]() { FillJoinOptions(frend.placeId, frend.jobId); };
             RenderStandardJoinMenu(menu);
@@ -408,7 +366,7 @@ namespace {
                                                    ImGuiSelectableFlags_SpanAllColumns);
             ImGui::PopStyleColor();
 
-            if (const auto* acc = findAccount(g_state.viewAccountId)) {
+            if (const auto* acc = getAccountById(g_state.viewAccountId)) {
                 renderFriendContextMenu(frend, *acc);
             }
 
@@ -430,7 +388,7 @@ namespace {
                 g_state.selectedFriendIdx = static_cast<int>(idx);
                 if (g_state.selectedFriend.id != frend.id) {
                     g_state.selectedFriend = {};
-                    if (const auto* acc = findAccount(g_state.viewAccountId)) {
+                    if (const auto* acc = getAccountById(g_state.viewAccountId)) {
                         ThreadTask::fireAndForget(FriendsActions::FetchFriendDetails,
                                            std::to_string(frend.id),
                                            acc->cookie,
@@ -478,7 +436,7 @@ namespace {
                     ImGui::Separator();
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.85f, 0.4f, 1.0f));
                     if (ImGui::MenuItem("Add Friend")) {
-                        if (const auto* acc = findAccount(g_state.viewAccountId)) {
+                        if (const auto* acc = getAccountById(g_state.viewAccountId)) {
                             const uint64_t uid = unfriend.id;
                             const std::string cookie = acc->cookie;
                             ThreadTask::fireAndForget([uid, cookie]() {
@@ -625,27 +583,32 @@ namespace {
         const bool canJoin = frend.presence == "InGame" && frend.placeId && !frend.jobId.empty();
 
         ImGui::BeginDisabled(!canJoin);
-        if (ImGui::Button((std::string(ICON_JOIN) + " Launch Instance").c_str()) && canJoin) {
-            std::vector<std::pair<int, std::string>> accounts;
-            for (const int id : g_selectedAccountIds) {
-                if (const auto* acc = findUsableAccount(id)) {
-                    accounts.emplace_back(acc->id, acc->cookie);
-                }
-            }
-            if (!accounts.empty()) {
-                ThreadTask::fireAndForget([frend, accounts]() {
-                    const uint64_t uid = frend.id;
-                    const auto pres = Roblox::getPresences({uid}, accounts.front().second);
-                    const auto it = pres.find(uid);
-                    if (it == pres.end() || it->second.presence != "InGame" ||
-                        it->second.placeId == 0 || it->second.jobId.empty()) {
-                        Status::Error("User is not joinable");
-                        return;
-                    }
-                    launchRobloxSequential(LaunchParams::followUser(std::to_string(uid)), accounts);
-                });
-            }
-        }
+    	if (ImGui::Button((std::string(ICON_JOIN) + " Launch Instance").c_str()) && canJoin) {
+    		auto accountPtrs = getUsableSelectedAccounts();
+    		if (accountPtrs.empty()) {
+    			Status::Error("No usable accounts selected");
+    			return;
+    		}
+
+    		// Copy for thread safety
+    		std::vector<AccountData> accounts;
+    		accounts.reserve(accountPtrs.size());
+    		for (AccountData* acc : accountPtrs) {
+    			accounts.push_back(*acc);
+    		}
+
+    		ThreadTask::fireAndForget([frend, accounts = std::move(accounts)]() {
+				const uint64_t uid = frend.id;
+				const auto pres = Roblox::getPresences({uid}, accounts.front().cookie);
+				const auto it = pres.find(uid);
+				if (it == pres.end() || it->second.presence != "InGame" ||
+					it->second.placeId == 0 || it->second.jobId.empty()) {
+					Status::Error("User is not joinable");
+					return;
+				}
+				launchRobloxSequential(LaunchParams::followUser(std::to_string(uid)), accounts);
+			});
+    	}
         ImGui::EndDisabled();
 
         ImGui::SameLine();
@@ -655,7 +618,15 @@ namespace {
         ImGui::OpenPopupOnItemClick("ProfileContext");
 
         if (ImGui::BeginPopup("ProfileContext")) {
-            const auto [cookie, userId] = getPrimaryAccountCredentials();
+        	std::string cookie;
+        	std::string userId;
+
+        	if (!g_selectedAccountIds.empty()) {
+        		if (const AccountData* acc = getAccountById(*g_selectedAccountIds.begin())) {
+        			cookie = acc->cookie;
+        			userId = acc->userId;
+        		}
+        	}
             const auto uidStr = std::to_string(detail.id);
 
             if (ImGui::MenuItem("Profile")) {
@@ -698,22 +669,24 @@ void RenderFriendsTab() {
         g_state.viewAccountId = -1;
         
         for (const int id : g_selectedAccountIds) {
-            if (const auto* acc = findUsableAccount(id)) {
-                g_state.viewAccountId = acc->id;
-                break;
+            if (AccountData* acc = getAccountById(id)) {
+                if (AccountFilters::IsAccountUsable(*acc)) {
+                    g_state.viewAccountId = acc->id;
+                    break;
+                }
             }
         }
-        
+
         if (g_state.viewAccountId == -1) {
-            if (const auto it = std::ranges::find_if(g_accounts, 
-                [](const auto& a) { return AccountFilters::IsAccountUsable(a); }); 
+            if (const auto it = std::ranges::find_if(g_accounts,
+                [](const auto& a) { return AccountFilters::IsAccountUsable(a); });
                 it != g_accounts.end()) {
                 g_state.viewAccountId = it->id;
             }
         }
     }
 
-    const auto* account = findAccount(g_state.viewAccountId);
+    AccountData* account = getAccountById(g_state.viewAccountId);
     if (!account) {
         ImGui::TextDisabled("Selected account not found.");
         return;

@@ -85,28 +85,6 @@
         dst[len] = '\0';
     }
 
-    std::vector<const AccountData*> getSelectedAccountsOrdered() {
-        std::vector<const AccountData*> result;
-        result.reserve(g_selectedAccountIds.size());
-        for (const auto& acc : g_accounts) {
-            if (g_selectedAccountIds.contains(acc.id)) {
-                result.push_back(&acc);
-            }
-        }
-        return result;
-    }
-
-    std::vector<AccountData*> getSelectedAccountsOrderedMutable() {
-        std::vector<AccountData*> result;
-        result.reserve(g_selectedAccountIds.size());
-        for (auto& acc : g_accounts) {
-            if (g_selectedAccountIds.contains(acc.id)) {
-                result.push_back(&acc);
-            }
-        }
-        return result;
-    }
-
     template<typename Getter>
     std::string joinSelectedField(const std::vector<const AccountData*>& accounts, Getter getter) {
         std::string result;
@@ -468,30 +446,22 @@
         menu.placeId = placeId;
         menu.jobId = jobId;
         
-        menu.onLaunchGame = [placeId, &account]() {
-            std::vector<std::pair<int, std::string>> accounts;
-            if (AccountFilters::IsAccountUsable(account)) {
-                accounts.emplace_back(account.id, account.cookie);
-            }
-            if (!accounts.empty()) {
-                ThreadTask::fireAndForget([placeId, accounts]() {
-                    launchRobloxSequential(LaunchParams::standard(placeId), accounts);
-                });
-            }
-        };
-        
-        menu.onLaunchInstance = [placeId, jobId, &account]() {
-            if (jobId.empty()) return;
-            std::vector<std::pair<int, std::string>> accounts;
-            if (AccountFilters::IsAccountUsable(account)) {
-                accounts.emplace_back(account.id, account.cookie);
-            }
-            if (!accounts.empty()) {
-                ThreadTask::fireAndForget([placeId, jobId, accounts]() {
-                    launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
-                });
-            }
-        };
+    	menu.onLaunchGame = [placeId, account]() {
+    		if (!AccountFilters::IsAccountUsable(account)) return;
+
+    		ThreadTask::fireAndForget([placeId, account]() {
+				launchRobloxSequential(LaunchParams::standard(placeId), {account});
+			});
+    	};
+
+    	menu.onLaunchInstance = [placeId, jobId, account]() {
+    		if (jobId.empty()) return;
+    		if (!AccountFilters::IsAccountUsable(account)) return;
+
+    		ThreadTask::fireAndForget([placeId, jobId, account]() {
+				launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), {account});
+			});
+    	};
         
         menu.onFillGame = [placeId]() { FillJoinOptions(placeId, ""); };
         menu.onFillInstance = [placeId, jobId]() {
@@ -550,15 +520,15 @@
             ImGui::PopItemWidth();
             ImGui::Spacing();
             
-            if (ImGui::Button("Open", ImVec2(openWidth, 0)) && g_multiUrl.buffer[0] != '\0') {
-                for (auto& acc : g_accounts) {
-                    if (g_selectedAccountIds.contains(acc.id) && !acc.cookie.empty()) {
-                        LaunchWebview(g_multiUrl.buffer, acc);
-                    }
-                }
-                g_multiUrl.buffer[0] = '\0';
-                ImGui::CloseCurrentPopup();
-            }
+        	if (ImGui::Button("Open", ImVec2(openWidth, 0)) && g_multiUrl.buffer[0] != '\0') {
+        		for (AccountData* acc : getSelectedAccountsOrderedMutable()) {
+        			if (!acc->cookie.empty()) {
+        				LaunchWebview(g_multiUrl.buffer, *acc);
+        			}
+        		}
+        		g_multiUrl.buffer[0] = '\0';
+        		ImGui::CloseCurrentPopup();
+        	}
             ImGui::SameLine(0, style.ItemSpacing.x);
             if (ImGui::Button("Cancel", ImVec2(cancelWidth, 0))) {
                 g_multiUrl.buffer[0] = '\0';
@@ -659,49 +629,52 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
         const int removeCount = static_cast<int>(g_selectedAccountIds.size());
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
         
-        if (ImGui::MenuItem(std::format("Remove {} Accounts", removeCount).c_str())) {
-            std::vector<int> idsToRemove(g_selectedAccountIds.begin(), g_selectedAccountIds.end());
-            ModalPopup::AddYesNo(
-                std::format("Delete {} accounts?", removeCount),
-                [idsToRemove]() {
-                    const std::unordered_set<int> toRemove(idsToRemove.begin(), idsToRemove.end());
+    	if (ImGui::MenuItem(std::format("Remove {} Accounts", removeCount).c_str())) {
+    		std::vector<int> idsToRemove(g_selectedAccountIds.begin(), g_selectedAccountIds.end());
+    		ModalPopup::AddYesNo(
+				std::format("Delete {} accounts?", removeCount),
+				[idsToRemove]() {
+					const std::unordered_set<int> toRemove(idsToRemove.begin(), idsToRemove.end());
 
-                	for (const auto& acc : g_accounts) {
-						if (toRemove.contains(acc.id)) {
-							MultiInstance::cleanupUserEnvironment(acc.username);
+					for (const int id : idsToRemove) {
+						if (const AccountData* acc = getAccountById(id)) {
+							MultiInstance::cleanupUserEnvironment(acc->username);
 						}
 					}
 
-                    std::erase_if(g_accounts, [&toRemove](const auto& acc) {
-                        return toRemove.contains(acc.id);
-                    });
-                    for (const int id : idsToRemove) {
-                        g_selectedAccountIds.erase(id);
-                    }
-                    Status::Set("Deleted selected accounts");
-                    Data::SaveAccounts();
-                }
-            );
-        }
+					std::erase_if(g_accounts, [&toRemove](const auto& acc) {
+						return toRemove.contains(acc.id);
+					});
+					invalidateAccountIndex();
+
+					for (const int id : idsToRemove) {
+						g_selectedAccountIds.erase(id);
+					}
+					Status::Set("Deleted selected accounts");
+					Data::SaveAccounts();
+				}
+			);
+    	}
         ImGui::PopStyleColor();
     } else {
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
-        if (ImGui::MenuItem("Remove Account")) {
-            ModalPopup::AddYesNo(
-                std::format("Delete {}?", account.displayName),
-                [id = account.id, displayName = account.displayName, username = account.username]() {
-                    LOG_INFO("Attempting to delete account: {} (ID: {})", displayName, id);
-                	if (!MultiInstance::cleanupUserEnvironment(username)) {
+    	if (ImGui::MenuItem("Remove Account")) {
+    		ModalPopup::AddYesNo(
+				std::format("Delete {}?", account.displayName),
+				[id = account.id, displayName = account.displayName, username = account.username]() {
+					LOG_INFO("Attempting to delete account: {} (ID: {})", displayName, id);
+					if (!MultiInstance::cleanupUserEnvironment(username)) {
 						LOG_WARN("Environment cleanup failed for " + username);
 					}
-                    std::erase_if(g_accounts, [id](const auto& acc) { return acc.id == id; });
-                    g_selectedAccountIds.erase(id);
-                    Status::Set("Deleted account " + displayName);
-                    Data::SaveAccounts();
-                    LOG_INFO("Successfully deleted account: {} (ID: {})", displayName, id);
-                }
-            );
-        }
+					std::erase_if(g_accounts, [id](const auto& acc) { return acc.id == id; });
+					invalidateAccountIndex();
+					g_selectedAccountIds.erase(id);
+					Status::Set("Deleted account " + displayName);
+					Data::SaveAccounts();
+					LOG_INFO("Successfully deleted account: {} (ID: {})", displayName, id);
+				}
+			);
+    	}
         ImGui::PopStyleColor();
     }
     

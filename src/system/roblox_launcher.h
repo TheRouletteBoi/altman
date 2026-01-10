@@ -39,8 +39,9 @@ bool copyClientToUserEnvironment(const std::string& username, const std::string&
 bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL);
 #endif
 
-bool startRoblox(const LaunchParams& params, AccountData& acc);
-void launchRobloxSequential(const LaunchParams& params, const std::vector<std::pair<int, std::string>>& accounts);
+bool startRoblox(const LaunchParams& params, AccountData acc);
+void launchRobloxSequential(const LaunchParams& params, const std::vector<AccountData>& accounts);
+void launchWithSelectedAccounts(LaunchParams params);
 
 std::string urlEncode(const std::string& s);
 std::string generateBrowserTrackerId();

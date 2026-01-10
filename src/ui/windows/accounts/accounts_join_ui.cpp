@@ -129,21 +129,6 @@ namespace {
         ImGui::PopStyleVar();
     }
 
-    std::vector<std::pair<int, std::string>> getUsableSelectedAccounts() {
-        std::vector<std::pair<int, std::string>> accounts;
-        accounts.reserve(g_selectedAccountIds.size());
-        
-        for (const int id : g_selectedAccountIds) {
-            const auto it = std::ranges::find_if(g_accounts, 
-                [id](const auto& a) { return a.id == id; });
-            
-            if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it)) {
-                accounts.emplace_back(it->id, it->cookie);
-            }
-        }
-        return accounts;
-    }
-
     struct ValidationResult {
         bool isValid{false};
         bool showError{false};
@@ -219,58 +204,53 @@ namespace {
     }
 
 
-    void handleJoinByUser(std::string userInput) {
-        auto accounts = getUsableSelectedAccounts();
-        if (accounts.empty()) return;
+	void handleJoinByUser(std::string userInput) {
+    	auto accountPtrs = getUsableSelectedAccounts();
+    	if (accountPtrs.empty()) {
+    		Status::Error("No usable accounts selected");
+    		return;
+    	}
 
-        ThreadTask::fireAndForget([userInput = std::move(userInput), accounts = std::move(accounts)]() mutable {
-            try {
-                UserSpecifier spec{};
-                if (!parseUserSpecifier(userInput, spec)) {
-                    Status::Error("Enter username or userId (id=000)");
-                    return;
-                }
+    	// Copy for thread safety
+    	std::vector<AccountData> accounts;
+    	accounts.reserve(accountPtrs.size());
+    	for (AccountData* acc : accountPtrs) {
+    		accounts.push_back(*acc);
+    	}
 
-                const uint64_t uid = spec.isId ? spec.id : Roblox::getUserIdFromUsername(spec.username);
+    	ThreadTask::fireAndForget([userInput = std::move(userInput),
+								   accounts = std::move(accounts)]() {
+			try {
+				UserSpecifier spec{};
+				if (!parseUserSpecifier(userInput, spec)) {
+					Status::Error("Enter username or userId (id=000)");
+					return;
+				}
 
-                const auto presenceMap = Roblox::getPresences({uid}, accounts.front().second);
-                
-                const auto it = presenceMap.find(uid);
-                if (it == presenceMap.end() || it->second.presence != "InGame" ||
-                    it->second.placeId == 0 || it->second.jobId.empty()) {
-                    Status::Error("User is not joinable");
-                    return;
-                }
+				const uint64_t uid = spec.isId ? spec.id : Roblox::getUserIdFromUsername(spec.username);
+				const auto presenceMap = Roblox::getPresences({uid}, accounts.front().cookie);
 
-                launchRobloxSequential(LaunchParams::gameJob(it->second.placeId, it->second.jobId), std::move(accounts));
-            } catch (const std::exception& e) {
-                LOG_ERROR("Join by username failed: {}", e.what());
-                Status::Error("Failed to join by username");
-            }
-        });
+				const auto it = presenceMap.find(uid);
+				if (it == presenceMap.end() || it->second.presence != "InGame" ||
+					it->second.placeId == 0 || it->second.jobId.empty()) {
+					Status::Error("User is not joinable");
+					return;
+				}
+
+				launchRobloxSequential(LaunchParams::gameJob(it->second.placeId, it->second.jobId), accounts);
+			} catch (const std::exception& e) {
+				LOG_ERROR("Join by username failed: {}", e.what());
+				Status::Error("Failed to join by username");
+			}
+		});
     }
 
     void handleJoinByPrivateServer(std::string serverLink) {
-        auto accounts = getUsableSelectedAccounts();
-        if (accounts.empty()) return;
-
-        ThreadTask::fireAndForget([serverLink = std::move(serverLink), accounts = std::move(accounts)]() mutable {
-            try {
-                launchRobloxSequential(LaunchParams::privateServer(serverLink), std::move(accounts));
-            } catch (const std::exception& e) {
-                LOG_ERROR("Join by link failed: {}", e.what());
-                Status::Error("Failed to join by link");
-            }
-        });
+    	launchWithSelectedAccounts(LaunchParams::privateServer(serverLink));
     }
 
     void handleJoinByPlaceId(uint64_t placeId, std::string jobId) {
-        auto accounts = getUsableSelectedAccounts();
-        if (accounts.empty()) return;
-
-        ThreadTask::fireAndForget([placeId, jobId = std::move(jobId), accounts = std::move(accounts)]() mutable {
-            launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), std::move(accounts));
-        });
+    	launchWithSelectedAccounts(LaunchParams::gameJob(placeId, jobId));
     }
 
     void renderInstanceInputs() {

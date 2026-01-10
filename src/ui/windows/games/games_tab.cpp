@@ -133,34 +133,8 @@ namespace {
         gameDetailCache.clear();
     }
 
-    std::vector<std::pair<int, std::string>> GetSelectedAccountsData() {
-        std::vector<std::pair<int, std::string>> accounts;
-
-        for (int id : g_selectedAccountIds) {
-            auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                [id](const AccountData& account) {
-                    return account.id == id && AccountFilters::IsAccountUsable(account);
-                });
-
-            if (it != g_accounts.end()) {
-                accounts.emplace_back(it->id, it->cookie);
-            }
-        }
-
-        return accounts;
-    }
-
     void LaunchGameWithAccounts(uint64_t placeId) {
-        if (g_selectedAccountIds.empty()) {
-            return;
-        }
-
-        auto accounts = GetSelectedAccountsData();
-        if (!accounts.empty()) {
-            std::thread([placeId, accounts]() {
-                launchRobloxSequential(LaunchParams::standard(placeId), accounts);
-            }).detach();
-        }
+    	launchWithSelectedAccounts(LaunchParams::standard(placeId));
     }
 
     void RenderStandardGameMenu(uint64_t placeId, uint64_t universeId) {
@@ -525,19 +499,7 @@ namespace {
         ImGui::Indent(BUTTON_INDENT);
 
         if (ImGui::Button(std::format("{}Launch Game", ICON_LAUNCH).c_str())) {
-            if (g_selectedAccountIds.empty()) {
-                Status::Error("No account selected to launch game.");
-                ModalPopup::AddInfo("Select an account first.");
-            } else {
-                auto accounts = GetSelectedAccountsData();
-                if (accounts.empty()) {
-                    Status::Error("Selected account not found to launch game.");
-                } else {
-                    std::thread([placeId = gameInfo.placeId, accounts]() {
-                        launchRobloxSequential(LaunchParams::standard(placeId), accounts);
-                    }).detach();
-                }
-            }
+        	launchWithSelectedAccounts(LaunchParams::standard(gameInfo.placeId));
         }
 
         ImGui::SameLine();
@@ -556,44 +518,40 @@ namespace {
 
         ImGui::OpenPopupOnItemClick("GamePageMenu");
 
-        if (ImGui::BeginPopup("GamePageMenu")) {
-            std::string primaryCookie;
-            std::string primaryUserId;
+    	if (ImGui::BeginPopup("GamePageMenu")) {
+    		std::string primaryCookie;
+    		std::string primaryUserId;
 
-            if (!g_selectedAccountIds.empty()) {
-                const auto primaryId = *g_selectedAccountIds.begin();
-                auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                    [primaryId](const AccountData& account) { return account.id == primaryId; });
+    		if (!g_selectedAccountIds.empty()) {
+    			if (const AccountData* acc = getAccountById(*g_selectedAccountIds.begin())) {
+    				primaryCookie = acc->cookie;
+    				primaryUserId = acc->userId;
+    			}
+    		}
 
-                if (it != g_accounts.end()) {
-                    primaryCookie = it->cookie;
-                    primaryUserId = it->userId;
-                }
-            }
+    		if (ImGui::MenuItem("Roblox Page")) {
+    			LaunchWebviewImpl(
+					std::format("https://www.roblox.com/games/{}", gameInfo.placeId),
+					"Game Page", primaryCookie, primaryUserId
+				);
+    		}
 
-            if (ImGui::MenuItem("Roblox Page")) {
-                LaunchWebviewImpl(
-                    std::format("https://www.roblox.com/games/{}", gameInfo.placeId),
-                    "Game Page", primaryCookie, primaryUserId
-                );
-            }
+    		if (ImGui::MenuItem("Rolimons")) {
+    			LaunchWebviewImpl(
+					std::format("https://www.rolimons.com/game/{}/", gameInfo.placeId),
+					"Rolimons", primaryCookie, primaryUserId
+				);
+    		}
 
-            if (ImGui::MenuItem("Rolimons")) {
-                LaunchWebviewImpl(
-                    std::format("https://www.rolimons.com/game/{}/", gameInfo.placeId),
-                    "Rolimons", primaryCookie, primaryUserId
-                );
-            }
+    		if (ImGui::MenuItem("RoMonitor")) {
+    			LaunchWebviewImpl(
+					std::format("https://romonitorstats.com/experience/{}/", gameInfo.placeId),
+					"RoMonitor Stats", primaryCookie, primaryUserId
+				);
+    		}
 
-            if (ImGui::MenuItem("RoMonitor")) {
-                LaunchWebviewImpl(
-                    std::format("https://romonitorstats.com/experience/{}/", gameInfo.placeId),
-                    "RoMonitor Stats", primaryCookie, primaryUserId
-                );
-            }
-
-            ImGui::EndPopup();
-        }
+    		ImGui::EndPopup();
+    	}
 
         ImGui::Unindent(BUTTON_INDENT);
     }

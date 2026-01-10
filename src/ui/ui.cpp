@@ -56,22 +56,19 @@ namespace {
         ImVec4 color;
     };
 
-    std::vector<AccountDisplayInfo> getSelectedAccountsInfo() {
-        std::vector<AccountDisplayInfo> result;
-        result.reserve(g_selectedAccountIds.size());
+	std::vector<AccountDisplayInfo> getSelectedAccountsInfo() {
+		std::vector<AccountDisplayInfo> result;
+		result.reserve(g_selectedAccountIds.size());
 
-        for (const int id : g_selectedAccountIds) {
-            const auto it = std::ranges::find_if(g_accounts,
-                [id](const auto& acc) { return acc.id == id; });
+		for (const int id : g_selectedAccountIds) {
+			if (const AccountData* acc = getAccountById(id)) {
+				const auto& label = acc->displayName.empty() ? acc->username : acc->displayName;
+				result.push_back({label, getStatusColor(acc->status)});
+			}
+		}
 
-            if (it == g_accounts.end()) continue;
-
-            const auto& label = it->displayName.empty() ? it->username : it->displayName;
-            result.push_back({label, getStatusColor(it->status)});
-        }
-
-        return result;
-    }
+		return result;
+	}
 
     void renderTabBar() {
 	    auto& style = ImGui::GetStyle();

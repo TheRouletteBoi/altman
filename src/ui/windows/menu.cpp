@@ -167,6 +167,7 @@ namespace {
         newAcct.isFavorite = false;
 
         g_accounts.push_back(std::move(newAcct));
+    	invalidateAccountIndex();
 
         LOG_INFO("Added new account {} - {}", id, displayName);
         Data::SaveAccounts();
@@ -283,7 +284,6 @@ bool RenderMainMenu() {
                 if (canAdd && ImGui::MenuItem("Add Cookie", nullptr, false, canAdd)) {
                     if (ValidateAndAddCookie(s_cookieInputBuffer.data())) {
                         s_cookieInputBuffer.fill('\0');
-                    	Data::rebuildAccountIndexCache();
                     } else {
                         s_cookieInputBuffer.fill('\0');
                     }
@@ -296,7 +296,6 @@ bool RenderMainMenu() {
 					[](const std::string& extractedCookie) {
 						if (!extractedCookie.empty()) {
 							ValidateAndAddCookie(extractedCookie);
-							Data::rebuildAccountIndexCache();
 						}
 					});
         	}
@@ -316,6 +315,7 @@ bool RenderMainMenu() {
                             return g_selectedAccountIds.count(acct.id);
                         }
                     );
+                	invalidateAccountIndex();
                     g_selectedAccountIds.clear();
                     Data::SaveAccounts();
                     LOG_INFO("Deleted selected accounts.");
@@ -498,25 +498,20 @@ bool RenderMainMenu() {
 
         ImGui::Spacing();
 
-        if (ImGui::Button("Update", ImVec2(100, 0))) {
-            auto it = std::find_if(
-                g_accounts.begin(),
-                g_accounts.end(),
-                [](const AccountData& a) { return a.id == g_duplicateAccountModal.existingId; }
-            );
-            if (it != g_accounts.end()) {
-                it->cookie = g_duplicateAccountModal.pendingCookie;
-                it->username = g_duplicateAccountModal.pendingUsername;
-                it->displayName = g_duplicateAccountModal.pendingDisplayName;
-                it->status = g_duplicateAccountModal.pendingPresence;
-                it->voiceStatus = g_duplicateAccountModal.pendingVoiceStatus.status;
-                it->voiceBanExpiry = g_duplicateAccountModal.pendingVoiceStatus.bannedUntil;
+    	if (ImGui::Button("Update", ImVec2(100, 0))) {
+    		if (AccountData* acc = getAccountById(g_duplicateAccountModal.existingId)) {
+    			acc->cookie = g_duplicateAccountModal.pendingCookie;
+    			acc->username = g_duplicateAccountModal.pendingUsername;
+    			acc->displayName = g_duplicateAccountModal.pendingDisplayName;
+    			acc->status = g_duplicateAccountModal.pendingPresence;
+    			acc->voiceStatus = g_duplicateAccountModal.pendingVoiceStatus.status;
+    			acc->voiceBanExpiry = g_duplicateAccountModal.pendingVoiceStatus.bannedUntil;
 
-                LOG_INFO("Updated existing account {} - {}", it->id, it->displayName);
-                Data::SaveAccounts();
-            }
-            ImGui::CloseCurrentPopup();
-        }
+    			LOG_INFO("Updated existing account {} - {}", acc->id, acc->displayName);
+    			Data::SaveAccounts();
+    		}
+    		ImGui::CloseCurrentPopup();
+    	}
 
         ImGui::SameLine();
         if (ImGui::Button("Discard", ImVec2(100, 0))) {

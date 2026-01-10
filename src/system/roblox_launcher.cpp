@@ -25,6 +25,7 @@
 #include "components/data.h"
 #include "roblox_control.h"
 #include "multi_instance.h"
+#include "utils/thread_task.h"
 
 LaunchParams LaunchParams::standard(uint64_t placeId) {
     return {LaunchMode::Job, placeId, ""};
@@ -636,7 +637,7 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
     return true;
 }
 
-bool startRoblox(const LaunchParams& params, AccountData& acc) {
+bool startRoblox(const LaunchParams& params, AccountData acc) {
     auto csrfToken = fetchCsrfToken(acc.cookie);
     if (!csrfToken) {
         LOG_ERROR("Failed to get CSRF token");
@@ -685,46 +686,39 @@ bool startRoblox(const LaunchParams& params, AccountData& acc) {
 }
 #endif // APPLE
 
-namespace {
-	std::vector<AccountData*> getUsableSelectedAccounts() {
-		std::vector<AccountData*> result;
-		result.reserve(g_selectedAccountIds.size());
-		for (int id : g_selectedAccountIds) {
-			auto idxIt = g_accountIndexById.find(id);
-			if (idxIt == g_accountIndexById.end())
-				continue;
-
-			AccountData& acc = g_accounts[idxIt->second];
-
-			if (AccountFilters::IsAccountUsable(acc)) {
-				result.push_back(&acc);
-			}
-		}
-
-		return result;
-	}
-}
-
-void launchRobloxSequential(const LaunchParams& params, const std::vector<std::pair<int, std::string>>& accounts) {
+void launchRobloxSequential(const LaunchParams& params, const std::vector<AccountData>& accounts) {
 	if (g_killRobloxOnLaunch)
 		RobloxControl::KillRobloxProcesses();
 	if (g_clearCacheOnLaunch)
 		RobloxControl::ClearRobloxCache();
 
-	for (AccountData* acc : getUsableSelectedAccounts()) {
-		if (!AccountFilters::IsAccountUsable(*acc))
-			continue;
-
-		const bool success = startRoblox(params, *acc);
+	for (const AccountData acc : accounts) {
+		const bool success = startRoblox(params, acc);
 
 		if (success) {
-			LOG_INFO("Roblox launched successfully for account ID: {}", acc->id);
-		} else {
-			LOG_ERROR("Failed to start Roblox for account ID: {}", acc->id);
-		}
-
-		if (success) {
+			LOG_INFO("Roblox launched for account ID: {}", acc.id);
 			usleep(500000);
+		} else {
+			LOG_ERROR("Failed to start Roblox for account ID: {}", acc.id);
 		}
 	}
+}
+
+void launchWithSelectedAccounts(LaunchParams params) {
+	auto accountPtrs = getUsableSelectedAccounts();
+	if (accountPtrs.empty()) {
+		return;
+	}
+
+	// Copy for thread safety
+	std::vector<AccountData> accounts;
+	accounts.reserve(accountPtrs.size());
+	for (AccountData* acc : accountPtrs) {
+		accounts.push_back(*acc);
+	}
+
+	ThreadTask::fireAndForget([params = std::move(params),
+							   accounts = std::move(accounts)]() {
+		launchRobloxSequential(params, accounts);
+	});
 }

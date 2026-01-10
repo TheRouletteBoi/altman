@@ -32,6 +32,7 @@
 #include "network/roblox/social.h"
 #include "system/roblox_launcher.h"
 #include "ui/widgets/modal_popup.h"
+#include "utils/thread_task.h"
 
 namespace {
 	void renderPublicServers();
@@ -183,21 +184,6 @@ namespace {
 		}
 	}
 
-	std::vector<std::pair<int, std::string>> getUsableSelectedAccounts() {
-		std::vector<std::pair<int, std::string>> accounts;
-		accounts.reserve(g_selectedAccountIds.size());
-
-		for (const int id : g_selectedAccountIds) {
-			const auto it = std::ranges::find_if(g_accounts,
-				[id](const auto& a) { return a.id == id; });
-
-			if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it)) {
-				accounts.emplace_back(it->id, it->cookie);
-			}
-		}
-		return accounts;
-	}
-
 	void sortServers(std::vector<PublicServerInfo>& servers, ServerSortMode mode) {
 		switch (mode) {
 		case ServerSortMode::PingAsc:
@@ -341,17 +327,7 @@ namespace {
 			ImVec2(0, metrics.height)) &&
 			ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 
-			auto accounts = getUsableSelectedAccounts();
-			if (accounts.empty()) {
-				LOG_INFO("No account selected to join server.");
-				Status::Error("No account selected to join server.");
-				ModalPopup::AddInfo("Select an account first.");
-			} else {
-				LOG_INFO("Joining server (double-click)...");
-				std::thread([accounts, placeId = g_state.currentPlaceId, jobId = server.jobId]() {
-					launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
-					}).detach();
-			}
+			launchWithSelectedAccounts(LaunchParams::gameJob(g_state.currentPlaceId, server.jobId));
 			}
 
 		if (ImGui::BeginPopupContextItem("ServerRowContextMenu")) {
@@ -361,21 +337,13 @@ namespace {
 			menu.jobId = server.jobId;
 
 			menu.onLaunchGame = [placeId = g_state.currentPlaceId]() {
-				auto accounts = getUsableSelectedAccounts();
-				if (!accounts.empty()) {
-					std::thread([placeId, accounts]() {
-						launchRobloxSequential(LaunchParams::standard(placeId), accounts);
-						}).detach();
-				}
+				launchWithSelectedAccounts(LaunchParams::standard(placeId));
 			};
 
 			menu.onLaunchInstance = [placeId = g_state.currentPlaceId, jobId = server.jobId]() {
-				auto accounts = getUsableSelectedAccounts();
-				if (!accounts.empty()) {
-					std::thread([placeId, jobId, accounts]() {
-						launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
-						}).detach();
-				}
+				if (jobId.empty())
+					return;
+				launchWithSelectedAccounts(LaunchParams::gameJob(placeId, jobId));
 			};
 
 			menu.onFillGame = [placeId = g_state.currentPlaceId]() {
@@ -418,17 +386,7 @@ namespace {
 		colStartY = ImGui::GetCursorPosY();
 		ImGui::SetCursorPosY(colStartY + metrics.verticalPadding);
 		if (ImGui::Button("Join", ImVec2(-1, 0))) {
-			auto accounts = getUsableSelectedAccounts();
-			if (accounts.empty()) {
-				LOG_INFO("No account selected to join server.");
-				Status::Error("No account selected to join server.");
-				ModalPopup::AddInfo("Select an account first.");
-			} else {
-				LOG_INFO("Joining server via Join button...");
-				std::thread([accounts, placeId = g_state.currentPlaceId, jobId = server.jobId]() {
-					launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
-					}).detach();
-			}
+			launchWithSelectedAccounts(LaunchParams::gameJob(g_state.currentPlaceId, server.jobId));
 		}
 		ImGui::SetCursorPosY(colStartY + metrics.height);
 
@@ -497,7 +455,7 @@ namespace {
 			isLoading = true;
 			errorMessage.clear();
 
-			std::thread([this, tabType, cookie = account.cookie]() {
+			ThreadTask::fireAndForget([this, tabType, cookie = account.cookie]() {
 				try {
 					auto page = Roblox::getAllPrivateServers(tabType, cookie);
 
@@ -547,32 +505,33 @@ namespace {
 				}
 
 				isLoading = false;
-				}).detach();
+				});
 		}
 
 		void joinServer(const PrivateServer& server, const std::string& cookie) {
-			if (g_selectedAccountIds.empty()) {
+			auto accountPtrs = getUsableSelectedAccounts();
+			if (accountPtrs.empty()) {
 				LOG_INFO("No account selected to join server");
 				Status::Error("No account selected to join server");
 				ModalPopup::AddInfo("Select an account first.");
 				return;
 			}
 
-			auto accounts = getUsableSelectedAccounts();
-			if (accounts.empty()) {
-				LOG_INFO("Selected account not usable");
-				return;
+			// Copy for thread safety
+			std::vector<AccountData> accounts;
+			accounts.reserve(accountPtrs.size());
+			for (AccountData* acc : accountPtrs) {
+				accounts.push_back(*acc);
 			}
 
-			LOG_INFO(std::format("Joining private server: {}", server.name));
+			LOG_INFO("Joining private server: {}", server.name);
 
-			std::thread([server, accounts, cookie]() {
+			ThreadTask::fireAndForget([server, accounts = std::move(accounts), cookie]() {
 				try {
 					auto page = Roblox::getPrivateServersForGame(server.placeId, cookie);
 
 					std::string accessCode;
 					for (const auto& gameServer : page.data) {
-
 						if (gameServer.vipServerId == server.vipServerId) {
 							accessCode = gameServer.accessCode;
 							break;
@@ -585,14 +544,13 @@ namespace {
 						return;
 					}
 
-					LaunchParams params = LaunchParams::privateServerDirect(server.placeId, accessCode);
-					launchRobloxSequential(params, accounts);
+					launchRobloxSequential(LaunchParams::privateServerDirect(server.placeId, accessCode), accounts);
 				}
 				catch (const std::exception& ex) {
-					LOG_ERROR(std::format("Failed to join private server: {}", ex.what()));
+					LOG_ERROR("Failed to join private server: {}", ex.what());
 					Status::Error("Failed to join server");
 				}
-				}).detach();
+			});
 		}
 
 		void render(const AccountData& account) {
@@ -789,46 +747,21 @@ namespace {
 		}
 	};
 
-	const AccountData* findAccount(int accountId) {
-		const auto it = std::ranges::find_if(g_accounts,
-			[accountId](const auto& a) { return a.id == accountId; });
-		return it != g_accounts.end() ? &(*it) : nullptr;
-	}
-
-	const AccountData* findUsableAccount(int accountId) {
-		const auto it = std::ranges::find_if(g_accounts,
-			[accountId](const auto& a) {
-				return a.id == accountId && AccountFilters::IsAccountUsable(a);
-			});
-		return it != g_accounts.end() ? &(*it) : nullptr;
-	}
-
-	int getPrimaryAccountCredentialsId() {
-		if (g_selectedAccountIds.empty())
-			return -1;
-
-		const auto primaryId = *g_selectedAccountIds.begin();
-		if (const auto* acc = findAccount(primaryId)) {
-			return acc->id;
-		}
-		return -1;
-	}
-
 	void renderPrivateServers() {
 		if (g_selectedAccountIds.empty()) {
 			ImGui::TextDisabled("Select an account in the Accounts tab to view private servers.");
 			return;
 		}
 
-		int primaryId = getPrimaryAccountCredentialsId();
+		const int primaryId = *g_selectedAccountIds.begin();
+		const AccountData* account = getAccountById(primaryId);
 
-		if (primaryId == -1) {
+		if (!account) {
 			ImGui::TextDisabled("Selected account not found.");
 			return;
 		}
 
-		const auto* account = findAccount(primaryId);
-		if (!account || !AccountFilters::IsAccountUsable(*account)) {
+		if (!AccountFilters::IsAccountUsable(*account)) {
 			ImGui::TextDisabled("Selected account is not usable.");
 			return;
 		}

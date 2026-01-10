@@ -51,8 +51,7 @@ struct FriendInfo {
 
 inline std::vector<AccountData> g_accounts;
 inline std::set<int> g_selectedAccountIds;
-// TODO(@Roulette): delete this variable and replace with something that we already use. this is going to cause problems when launching clients
-inline std::unordered_map<int, size_t> g_accountIndexById;
+
 inline std::vector<FavoriteGame> g_favorites;
 inline std::vector<FriendInfo> g_friends;
 inline std::unordered_map<int, std::vector<FriendInfo>> g_accountFriends;
@@ -68,6 +67,14 @@ inline bool g_clearCacheOnLaunch = false;
 inline bool g_multiRobloxEnabled = false;
 inline std::unordered_map<std::string, std::string> g_clientKeys;
 
+void invalidateAccountIndex();
+AccountData* getAccountById(int id);
+std::vector<AccountData*> getUsableSelectedAccounts();
+std::vector<const AccountData*> getSelectedAccountsOrdered();
+std::vector<AccountData*> getSelectedAccountsOrderedMutable();
+int getAccountIndexById(int id);
+std::string getPrimaryAccountCookie();
+
 namespace Data {
     void LoadSettings(std::string_view filename = "settings.json");
     void SaveSettings(std::string_view filename = "settings.json");
@@ -82,5 +89,4 @@ namespace Data {
     void SaveFriends(std::string_view filename = "friends.json");
 
     std::string StorageFilePath(std::string_view filename);
-    void rebuildAccountIndexCache();
 }
