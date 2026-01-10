@@ -50,7 +50,6 @@ void ReloadFonts(float dpiScale) {
     float iconFontSize = 13.0f * dpiScale;
 
     // Load main font
-    //g_rubikFont = io.Fonts->AddFontFromFileTTF("assets/fonts/rubik-regular.ttf", baseFontSize);
     ImFontConfig rubikCfg;
     rubikCfg.FontDataOwnedByAtlas = false;
     g_rubikFont = io.Fonts->AddFontFromMemoryTTF(
@@ -71,7 +70,6 @@ void ReloadFonts(float dpiScale) {
     iconCfg.PixelSnapH = true;
     iconCfg.FontDataOwnedByAtlas = false;
     static constexpr ImWchar fa_solid_ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
-    //g_iconFont = io.Fonts->AddFontFromFileTTF("assets/fonts/fa-solid.ttf", iconFontSize, &iconCfg, fa_solid_ranges);*/
     g_iconFont = io.Fonts->AddFontFromMemoryTTF(
         (void*)EmbeddedFonts::fa_solid_ttf,
         sizeof(EmbeddedFonts::fa_solid_ttf),
