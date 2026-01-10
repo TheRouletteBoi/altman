@@ -49,22 +49,23 @@ struct FriendInfo {
     std::string jobId;
 };
 
-extern std::vector<AccountData> g_accounts;
-extern std::unordered_map<int, size_t> g_accountIndexById;
-extern std::set<int> g_selectedAccountIds;
-extern std::vector<FavoriteGame> g_favorites;
-extern std::vector<FriendInfo> g_friends;
-extern std::unordered_map<int, std::vector<FriendInfo>> g_accountFriends;
-extern std::unordered_map<int, std::vector<FriendInfo>> g_unfriendedFriends;
+inline std::vector<AccountData> g_accounts;
+inline std::set<int> g_selectedAccountIds;
+inline std::unordered_map<int, size_t> g_accountIndexById;
+inline std::vector<FavoriteGame> g_favorites;
+inline std::vector<FriendInfo> g_friends;
+inline std::unordered_map<int, std::vector<FriendInfo>> g_accountFriends;
+inline std::unordered_map<int, std::vector<FriendInfo>> g_unfriendedFriends;
 
-extern int g_defaultAccountId;
-extern int g_statusRefreshInterval;
-extern bool g_checkUpdatesOnStartup;
-extern bool g_killRobloxOnLaunch;
-extern bool g_clearCacheOnLaunch;
-extern std::unordered_map<std::string, std::string> g_clientKeys;
-extern std::array<char, 128> s_jobIdBuffer;
-extern std::array<char, 128> s_playerBuffer;
+inline int g_defaultAccountId = -1;
+inline std::array<char, 128> s_jobIdBuffer = {};
+inline std::array<char, 128> s_playerBuffer = {};
+inline int g_statusRefreshInterval = 3;
+inline bool g_checkUpdatesOnStartup = true;
+inline bool g_killRobloxOnLaunch = false;
+inline bool g_clearCacheOnLaunch = false;
+inline bool g_multiRobloxEnabled = false;
+inline std::unordered_map<std::string, std::string> g_clientKeys;
 
 #ifdef __APPLE__
 std::string GetApplicationDir();

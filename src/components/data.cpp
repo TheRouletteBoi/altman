@@ -22,25 +22,7 @@
 #include <span>
 
 #include "utils/base64.h"
-#include "utils/app_state.h"
 #include "console/console.h"
-
-std::vector<AccountData> g_accounts;
-std::set<int> g_selectedAccountIds;
-std::unordered_map<int, size_t> g_accountIndexById;
-std::vector<FavoriteGame> g_favorites;
-std::vector<FriendInfo> g_friends;
-std::unordered_map<int, std::vector<FriendInfo>> g_accountFriends;
-std::unordered_map<int, std::vector<FriendInfo>> g_unfriendedFriends;
-
-int g_defaultAccountId = -1;
-std::array<char, 128> s_jobIdBuffer = {};
-std::array<char, 128> s_playerBuffer = {};
-int g_statusRefreshInterval = 3;
-bool g_checkUpdatesOnStartup = true;
-bool g_killRobloxOnLaunch = false;
-bool g_clearCacheOnLaunch = false;
-std::unordered_map<std::string, std::string> g_clientKeys;
 
 namespace {
 #ifdef _WIN32
