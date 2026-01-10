@@ -444,6 +444,7 @@ namespace {
 			int selectedTab = 0;
 	private:
 		std::vector<PrivateServer> servers;
+		std::unordered_map<uint64_t, std::vector<size_t>> serversByPlaceId;
 		char searchFilter[256] = "";
 		bool isLoading = false;
 		std::string errorMessage;
@@ -479,21 +480,30 @@ namespace {
 						server.playing = 0;
 						server.fps = 0.0f;
 						server.ping = 0.0;
+						servers.push_back(std::move(server));
+						//serversByPlaceId[info.placeId].push_back(i);
+					}
 
-						auto page2 = Roblox::getPrivateServersForGame(server.placeId, cookie);
-						for (const auto& gameServer : page2.data) {
-							if (gameServer.vipServerId == server.vipServerId) {
-								server.playing = gameServer.playing;
-								server.fps = gameServer.fps;
-								server.ping = gameServer.ping;
-								server.ownerDisplayName = gameServer.ownerDisplayName;
-								server.maxPlayers = gameServer.maxPlayers;
-								break;
-							}
+					/*for (const auto& [placeId, indices] : serversByPlaceId) {
+						auto gamePage = Roblox::getPrivateServersForGame(placeId, cookie);
+
+						std::unordered_map<uint64_t, const Roblox::GamePrivateServerInfo*> byVipId;
+						for (const auto& gs : gamePage.data) {
+							byVipId[gs.vipServerId] = &gs;
 						}
 
-						servers.push_back(std::move(server));
-					}
+						for (size_t idx : indices) {
+							auto it = byVipId.find(servers[idx].vipServerId);
+							if (it != byVipId.end()) {
+								const auto* gs = it->second;
+								servers[idx].playing = gs->playing;
+								servers[idx].fps = gs->fps;
+								servers[idx].ping = gs->ping;
+								servers[idx].ownerDisplayName = gs->ownerDisplayName;
+								servers[idx].maxPlayers = gs->maxPlayers;
+							}
+						}
+					}*/
 
 					nextPageCursor = page.nextCursor;
 					currentCursor = cursor;
