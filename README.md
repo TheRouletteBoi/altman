@@ -114,6 +114,12 @@ cmake -B build -S . ^
 cmake --build build --config Release -- /m
 ```
 
+Build for MacOS
+
+```bat
+cmake --build cmake-build-release --target AltMan -j 8
+```
+
 The executable will be generated at `build\altman\altman.exe` together with the required `assets` folder.
 
 ### 5. (Optional) Build from CLion
