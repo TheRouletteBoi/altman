@@ -615,6 +615,16 @@ void InstallClientAsync(const std::string& clientName,
 		std::error_code ec;
 		std::filesystem::create_directories(clientsDir, ec);
 
+		// Clean up any existing zip files from previous installations
+		for (const auto& entry : std::filesystem::directory_iterator(clientsDir, ec)) {
+			if (entry.path().extension() == ".zip") {
+				std::filesystem::remove(entry.path(), ec);
+				if (ec) {
+					LOG_WARN("Failed to cleanup old zip: {}", entry.path().string());
+				}
+			}
+		}
+
 		if (!std::filesystem::exists(zipPath)) {
 			if (progressCb) progressCb(0.1f, "Downloading Roblox...");
 
