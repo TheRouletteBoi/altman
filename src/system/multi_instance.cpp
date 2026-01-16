@@ -271,86 +271,114 @@ namespace MultiInstance {
         };
 
         bool spawnProcessWithEnv(
-            const char* program,
-            const std::vector<const char*>& args,
-            const SpawnOptions& opts) {
-            std::vector<std::string> envStorage;
-            std::vector<char*> envp;
+		    const char* program,
+		    const std::vector<const char*>& args,
+		    const SpawnOptions& opts) {
 
-            for (char** env = environ; *env; ++env) {
-                std::string envStr(*env);
-                size_t eqPos = envStr.find('=');
-                if (eqPos != std::string::npos) {
-                    std::string key = envStr.substr(0, eqPos);
-                    if (opts.env.find(key) == opts.env.end()) {
-                        envStorage.emplace_back(envStr);
-                    }
-                }
-            }
+        	std::vector<std::string> envStrings;
+        	envStrings.reserve(opts.env.size() + 32);
 
-            for (const auto& [key, value] : opts.env) {
-                envStorage.emplace_back(key + "=" + value);
-            }
+        	for (char** env = environ; *env; ++env) {
+        		std::string entry(*env);
+        		auto pos = entry.find('=');
+        		if (pos == std::string::npos)
+        			continue;
 
-            for (auto& s : envStorage) {
-                envp.push_back(s.data());
-            }
-            envp.push_back(nullptr);
+        		std::string key = entry.substr(0, pos);
+        		if (!opts.env.contains(key)) {
+        			envStrings.emplace_back(std::move(entry));
+        		}
+        	}
 
-            std::vector<char*> argv;
-            for (auto* arg : args) {
-                argv.push_back(const_cast<char*>(arg));
-            }
-            argv.push_back(nullptr);
+        	for (const auto& [k, v] : opts.env) {
+        		envStrings.emplace_back(k + "=" + v);
+        	}
 
-            posix_spawn_file_actions_t actions;
-            posix_spawn_file_actions_t* actionsPtr = nullptr;
+        	std::vector<std::unique_ptr<char[]>> envBuffers;
+        	std::vector<char*> envp;
+        	envBuffers.reserve(envStrings.size());
+        	envp.reserve(envStrings.size() + 1);
 
-            if (opts.stdoutPath || opts.stderrPath) {
-                posix_spawn_file_actions_init(&actions);
-                actionsPtr = &actions;
+        	for (const auto& s : envStrings) {
+        		auto buf = std::make_unique<char[]>(s.size() + 1);
+        		std::memcpy(buf.get(), s.c_str(), s.size() + 1);
+        		envp.push_back(buf.get());
+        		envBuffers.push_back(std::move(buf));
+        	}
+        	envp.push_back(nullptr);
 
-                if (opts.stdoutPath) {
-                    int outFd = open(opts.stdoutPath->c_str(),
-                                O_CREAT | O_WRONLY | O_APPEND, 0644);
-                    if (outFd != -1) {
-                        posix_spawn_file_actions_adddup2(&actions, outFd, STDOUT_FILENO);
-                        posix_spawn_file_actions_addclose(&actions, outFd);
-                    }
-                }
+        	std::vector<char*> argv;
+        	argv.reserve(args.size() + 1);
 
-                if (opts.stderrPath) {
-                    int errFd = open(opts.stderrPath->c_str(),
-                                O_CREAT | O_WRONLY | O_APPEND, 0644);
-                    if (errFd != -1) {
-                        posix_spawn_file_actions_adddup2(&actions, errFd, STDERR_FILENO);
-                        posix_spawn_file_actions_addclose(&actions, errFd);
-                    }
-                }
-            }
+        	for (const char* arg : args) {
+        		if (arg != nullptr) {
+        			argv.push_back(const_cast<char*>(arg));
+        		}
+        	}
+        	argv.push_back(nullptr);
 
-            pid_t pid;
-            int status = posix_spawn(&pid, program, actionsPtr, nullptr,
-                                argv.data(), envp.data());
+        	posix_spawn_file_actions_t actions;
+        	posix_spawn_file_actions_t* actionsPtr = nullptr;
+        	std::vector<int> openedFds;
 
-            if (actionsPtr) {
-                posix_spawn_file_actions_destroy(&actions);
-            }
+        	if (opts.stdoutPath || opts.stderrPath) {
+        		posix_spawn_file_actions_init(&actions);
+        		actionsPtr = &actions;
 
-            if (status != 0) {
-                LOG_ERROR("posix_spawn failed: {}", strerror(status));
-                return false;
-            }
+        		if (opts.stdoutPath) {
+        			int fd = open(opts.stdoutPath->c_str(),
+								  O_CREAT | O_WRONLY | O_APPEND, 0644);
+        			if (fd != -1) {
+        				posix_spawn_file_actions_adddup2(&actions, fd, STDOUT_FILENO);
+        				posix_spawn_file_actions_addclose(&actions, fd);
+        				openedFds.push_back(fd);
+        			}
+        		}
 
-            if (opts.waitForCompletion) {
-                int wstatus;
-                waitpid(pid, &wstatus, 0);
-                if (!WIFEXITED(wstatus) || WEXITSTATUS(wstatus) != 0) {
-                    return false;
-                }
-            }
+        		if (opts.stderrPath) {
+        			int fd = open(opts.stderrPath->c_str(),
+								  O_CREAT | O_WRONLY | O_APPEND, 0644);
+        			if (fd != -1) {
+        				posix_spawn_file_actions_adddup2(&actions, fd, STDERR_FILENO);
+        				posix_spawn_file_actions_addclose(&actions, fd);
+        				openedFds.push_back(fd);
+        			}
+        		}
+        	}
 
-            return true;
+        	pid_t pid{};
+        	int rc = posix_spawn(&pid,
+								 program,
+								 actionsPtr,
+								 nullptr,
+								 argv.data(),
+								 envp.data());
+
+        	if (actionsPtr) {
+        		posix_spawn_file_actions_destroy(&actions);
+        	}
+
+        	if (rc != 0) {
+        		for (int fd : openedFds) {
+        			close(fd);
+        		}
+        		LOG_ERROR("posix_spawn failed: {}", strerror(rc));
+        		return false;
+        	}
+
+        	if (opts.waitForCompletion) {
+        		int status{};
+        		if (waitpid(pid, &status, 0) == -1) {
+        			LOG_ERROR("waitpid failed: {}", strerror(errno));
+        			return false;
+        		}
+
+        		if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        			return false;
+        		}
+        	}
+
+        	return true;
         }
 
         bool spawnWithEnv(const char* program,
@@ -552,7 +580,7 @@ namespace MultiInstance {
     	}
 
     	return spawnWithEnv("/usr/bin/security",
-			{"security", "create-keychain", "-p", "", keychainPath.string().c_str(), nullptr},
+			{"security", "create-keychain", "-p", "", keychainPath.string().c_str()},
 			profileDir.string()
 		);
     }
@@ -573,7 +601,7 @@ namespace MultiInstance {
 
     	return spawnWithEnv(
 			"/usr/bin/security",
-			{"security", "unlock-keychain", "-p", "", keychainPath.string().c_str(), nullptr},
+			{"security", "unlock-keychain", "-p", "", keychainPath.string().c_str()},
 			profileDir.string()
 		);
     }
@@ -759,14 +787,14 @@ namespace MultiInstance {
 }
 
 bool launchSandboxedClient(const std::string& username,
-                        const std::string& clientName,
-                        const std::string& profileId,
-                        const std::string& profilePath,
-                        const std::string& protocolURL) {
+						   const std::string& clientName,
+						   const std::string& profileId,
+						   const std::string& profilePath,
+						   const std::string& protocolURL) {
     std::string clientPath = getUserClientPath(username, clientName);
     if (clientPath.empty() || !std::filesystem::exists(clientPath)) {
-        LOG_ERROR("Client not installed: {}", clientName);
-        return false;
+    	LOG_ERROR("Client not installed: {}", clientName);
+    	return false;
     }
 
     bool mobileClient = isMobileClient2(clientPath);
@@ -775,29 +803,31 @@ bool launchSandboxedClient(const std::string& username,
     std::error_code ec;
     std::filesystem::create_directories(logDir, ec);
 
-    std::vector<const char*> argv = {"open", "-a", clientPath.c_str()};
+    std::vector<const char*> argv = {
+    	"open",
+		"-a",
+		clientPath.c_str()
+	};
+
     if (!protocolURL.empty()) {
-        argv.push_back(protocolURL.c_str());
+    	argv.push_back(protocolURL.c_str());
     }
-    argv.push_back(nullptr);
 
     SpawnOptions opts;
     opts.env = {{"HOME", profilePath}};
 
     if (mobileClient) {
-        opts.env["CFFIXED_USER_HOME"] = profilePath;
-        opts.env["XDG_DATA_HOME"] = profilePath + "/Documents";
+    	opts.env["CFFIXED_USER_HOME"] = profilePath;
+    	opts.env["XDG_DATA_HOME"] = profilePath + "/Documents";
     }
 
-    opts.stdoutPath = std::format("{}/roblox_stdout.log", logDir);
-    opts.stderrPath = std::format("{}/roblox_stderr.log", logDir);
+    opts.stdoutPath = logDir + "/roblox_stdout.log";
+    opts.stderrPath = logDir + "/roblox_stderr.log";
     opts.waitForCompletion = false;
 
-    bool result = spawnProcessWithEnv("/usr/bin/open", argv, opts);
-
-    if (!result) {
-        LOG_ERROR("Failed to launch client");
-        return false;
+    if (!spawnProcessWithEnv("/usr/bin/open", argv, opts)) {
+    	LOG_ERROR("Failed to launch client");
+    	return false;
     }
 
     return true;
