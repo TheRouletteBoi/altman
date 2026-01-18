@@ -50,15 +50,16 @@ namespace {
     constexpr ImWchar ICON_MAX_16_FA = 0xf3ff;
     constexpr float BASE_FONT_SIZE = 16.0f;
 
+    std::mutex g_selectionMutex;
     std::shared_mutex g_accountsMutex;
+    std::atomic<bool> g_fontReloadPending = false;
+    std::atomic<bool> g_running = true;
 }
 
 void ReloadFonts(float dpiScale) {
     IM_ASSERT([NSThread isMainThread]);
 
     ImGuiIO& io = ImGui::GetIO();
-
-    ImGui_ImplMetal_DestroyDeviceObjects();
 
     io.Fonts->Clear();
 
@@ -102,11 +103,11 @@ void ReloadFonts(float dpiScale) {
     ImGui::StyleColorsDark();
     ImGui::GetStyle().ScaleAllSizes(dpiScale);
 
-    ImGui_ImplMetal_CreateDeviceObjects(g_metalDevice);
+    g_fontReloadPending = true;
 }
 
 [[nodiscard]]
-auto LoadTextureFromMemory(const void* data, size_t data_size) -> std::expected<TextureLoadResult, std::string> {
+std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void* data, size_t data_size) {
     int image_width = 0;
     int image_height = 0;
     unsigned char* image_data = stbi_load_from_memory(
@@ -155,7 +156,7 @@ auto LoadTextureFromMemory(const void* data, size_t data_size) -> std::expected<
 }
 
 [[nodiscard]]
-auto LoadTextureFromFile(const char* file_name) -> std::expected<TextureLoadResult, std::string> {
+std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char* file_name) {
     FILE* f = std::fopen(file_name, "rb");
     if (!f) {
         return std::unexpected(std::format("Failed to open file: {}", file_name));
@@ -184,10 +185,8 @@ auto LoadTextureFromFile(const char* file_name) -> std::expected<TextureLoadResu
 }
 
 namespace AccountProcessor {
-    // Reuse AccountData as the snapshot - it's already a value type
     using AccountSnapshot = AccountData;
 
-    // Only the fields that get updated during processing
     struct ProcessResult {
         int id;
         std::string userId;
@@ -205,13 +204,13 @@ namespace AccountProcessor {
     };
 
     [[nodiscard]]
-    auto takeAccountSnapshots() -> std::vector<AccountSnapshot> {
+    std::vector<AccountSnapshot> takeAccountSnapshots() {
         std::shared_lock lock(g_accountsMutex);
         return {g_accounts.begin(), g_accounts.end()};
     }
 
     [[nodiscard]]
-    auto processAccount(const AccountSnapshot& account) -> ProcessResult {
+    ProcessResult processAccount(const AccountSnapshot& account) {
         ProcessResult result{
             .id = account.id,
             .userId = account.userId,
@@ -227,8 +226,9 @@ namespace AccountProcessor {
         auto userJson = Roblox::getAuthenticatedUser(account.cookie);
         if (userJson.empty()) {
             result.status = "Network Error";
+            result.voiceStatus = "N/A";
             result.shouldDeselect = true;
-            result.isInvalid = true;
+            result.isInvalid = false;
             return result;
         }
 
@@ -246,8 +246,7 @@ namespace AccountProcessor {
         switch (banInfo.status) {
                 case Roblox::BanCheckResult::InvalidCookie:
                     result.isInvalid = true;
-                    result.status = "Invalid Cookie";
-                    return result;
+                    break;
 
                 case Roblox::BanCheckResult::Banned:
                     result.status = "Banned";
@@ -257,58 +256,17 @@ namespace AccountProcessor {
                     return result;
 
                 case Roblox::BanCheckResult::Warned:
-                    result.status = "Warned";
-                    result.voiceStatus = "N/A";
-                    result.shouldDeselect = true;
-                    return result;
+                    break;
 
                 case Roblox::BanCheckResult::Terminated:
-                    result.status = "Terminated";
-                    result.voiceStatus = "N/A";
-                    result.shouldDeselect = true;
-                    return result;
-
-                case Roblox::BanCheckResult::Unbanned: {
-
-                    /*auto userJson = Roblox::getAuthenticatedUser(snapshot.cookie);
-                    if (!userJson.empty()) {
-                        result.userId = std::format("{}", userJson.value("id", 0ULL));
-                        result.username = userJson.value("name", "");
-                        result.displayName = userJson.value("displayName", "");
-                        needsUserInfoUpdate = false;
-
-                        auto uidResult = parseUserId(result.userId);
-                        if (uidResult) {
-                            uint64_t uid = *uidResult;
-
-                            auto presences = Roblox::getPresences({uid}, snapshot.cookie);
-                            if (!presences.empty()) {
-                                if (auto it = presences.find(uid); it != presences.end()) {
-                                    result.status = it->second.presence;
-                                    result.lastLocation = it->second.lastLocation;
-                                    result.placeId = it->second.placeId;
-                                    result.jobId = it->second.jobId;
-                                } else {
-                                    result.status = "Offline";
-                                }
-                            } else {
-                                result.status = Roblox::getPresence(snapshot.cookie, uid);
-                            }
-
-                            auto vs = Roblox::getVoiceChatStatus(snapshot.cookie);
-                            result.voiceStatus = vs.status;
-                            result.voiceBanExpiry = vs.bannedUntil;
-                        } else {
-                            result.status = "Error";
-                        }
-                    }*/
                     break;
-                }
+
+                case Roblox::BanCheckResult::Unbanned:
+                    break;
 
                 case Roblox::BanCheckResult::NetworkError:
-                    result.status = "Network Error";
-                    return result;
-            }
+                    break;
+        }
 
         auto voiceStatus = Roblox::getVoiceChatStatus(account.cookie);
         result.voiceStatus = voiceStatus.status;
@@ -352,11 +310,14 @@ namespace AccountProcessor {
             it->voiceBanExpiry = result.voiceBanExpiry;
 
             if (result.shouldDeselect) {
-                g_selectedAccountIds.erase(result.id);
+                {
+                    std::lock_guard lock(g_selectionMutex);
+                    g_selectedAccountIds.erase(result.id);
+                }
             }
-
-            invalidateAccountIndex();
         }
+
+        invalidateAccountIndex();
     }
 
     void showInvalidCookieModal(std::vector<int> invalidIds, std::string invalidNames) {
@@ -404,9 +365,7 @@ void refreshAccounts() {
             if (!invalidNames.empty()) {
                 invalidNames.append(", ");
             }
-            invalidNames.append(
-                snapshot.displayName.empty() ? snapshot.username : snapshot.displayName
-            );
+            invalidNames.append(snapshot.displayName.empty() ? snapshot.username : snapshot.displayName);
         }
 
         results.push_back(std::move(result));
@@ -427,9 +386,12 @@ void startAccountRefreshLoop() {
     ThreadTask::fireAndForget([] {
         refreshAccounts();
 
-        while (true) {
+        while (g_running.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));
-            LOG_INFO("Refreshing account statuses...");
+
+            if (!g_running.load())
+                break;
+
             refreshAccounts();
         }
     });
@@ -491,6 +453,10 @@ void initializeAutoUpdater() {
 #if !__has_feature(objc_arc)
     [super dealloc];
 #endif
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    g_running = false;
 }
 
 - (void)loadView {
@@ -558,6 +524,11 @@ void initializeAutoUpdater() {
         shouldQuit = RenderUI();
     }
 
+    if (g_fontReloadPending.exchange(false)) {
+        ImGui_ImplMetal_DestroyDeviceObjects();
+        ImGui_ImplMetal_CreateDeviceObjects(g_metalDevice);
+    }
+
     ImGui::PopStyleVar(1);
     ImGui::Render();
 
@@ -584,7 +555,7 @@ void initializeAutoUpdater() {
 
 @end
 
-auto createMainWindow() -> NSWindow* {
+NSWindow* createMainWindow() {
     constexpr CGFloat windowWidth = 1000.0;
     constexpr CGFloat windowHeight = 560.0;
 

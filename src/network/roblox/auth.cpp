@@ -118,10 +118,6 @@ bool canUseCookie(const std::string& cookie) {
         LOG_ERROR("Skipping request: invalid cookie");
         return false;
     }
-	if (status == BanCheckResult::NetworkError) {
-		LOG_ERROR("Skipping request: network error");
-		return false;
-	}
     
     return true;
 }
