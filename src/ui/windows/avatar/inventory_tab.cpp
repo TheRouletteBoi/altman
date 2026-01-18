@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cmath>
 #include <format>
+#include <expected>
 
 #include "ui/widgets/image.h"
 #include "utils/thread_task.h"
@@ -37,22 +38,23 @@ namespace {
     };
 
     struct ThumbInfo {
-        TextureType srv{nullptr};
+        TextureHandle texture;
         int width{0};
         int height{0};
         bool loading{false};
         bool failed{false};
+    	[[nodiscard]] bool hasTexture() const { return static_cast<bool>(texture); }
     };
 
-    // State management
     struct AvatarState {
-        TextureType texture{nullptr};
+        TextureHandle texture;
         int imageWidth{0};
         int imageHeight{0};
         bool loading{false};
         bool failed{false};
         bool started{false};
         uint64_t loadedUserId{0};
+        [[nodiscard]] bool hasTexture() const { return static_cast<bool>(texture); }
     };
 
     struct CategoryState {
@@ -77,7 +79,6 @@ namespace {
         std::vector<uint64_t> assetIds;
     };
 
-    // Global state
     AvatarState g_avatarState;
     CategoryState g_categoryState;
     InventoryState g_inventoryState;
@@ -89,25 +90,11 @@ namespace {
     char g_searchBuffer[SEARCH_BUFFER_SIZE] = "";
 
     void ClearTextureCache() {
-#ifdef _WIN32
-        for (auto& [id, thumb] : g_thumbCache) {
-            if (thumb.srv) {
-                thumb.srv->Release();
-            }
-        }
-#endif
         g_thumbCache.clear();
     }
 
     void ResetAvatarTexture() {
-#ifdef _WIN32
-        if (g_avatarState.texture) {
-            g_avatarState.texture->Release();
-            g_avatarState.texture = nullptr;
-        }
-#else
-        g_avatarState.texture = nullptr;
-#endif
+        g_avatarState.texture.reset();
     }
 
     void ResetAllState() {
@@ -118,32 +105,62 @@ namespace {
         ClearTextureCache();
     }
 
-	std::pair<uint64_t, std::string> GetCurrentUserInfo() {
-    	uint64_t userId = 0;
-    	std::string cookie;
+    [[nodiscard]]
+    std::expected<uint64_t, std::string> parseUserId(const std::string& str) {
+        if (str.empty()) {
+            return std::unexpected("Empty user ID");
+        }
 
-    	auto tryGetUserInfo = [&](int accountId) -> bool {
-    		if (const AccountData* acc = getAccountById(accountId)) {
-    			if (!acc->userId.empty()) {
-    				try {
-    					userId = std::stoull(acc->userId);
-    					cookie = acc->cookie;
-    					return true;
-    				} catch (...) {
-    					userId = 0;
-    				}
-    			}
-    		}
-    		return false;
-    	};
+        char* end = nullptr;
+        const uint64_t result = std::strtoull(str.c_str(), &end, 10);
 
-    	if (!g_selectedAccountIds.empty()) {
-    		tryGetUserInfo(*g_selectedAccountIds.begin());
-    	} else if (g_defaultAccountId != -1) {
-    		tryGetUserInfo(g_defaultAccountId);
-    	}
+        if (end == str.c_str() || *end != '\0') {
+            return std::unexpected("Invalid user ID format");
+        }
 
-    	return {userId, cookie};
+        return result;
+    }
+
+    [[nodiscard]]
+    std::pair<uint64_t, std::string> GetCurrentUserInfo() {
+        uint64_t userId = 0;
+        std::string cookie;
+
+        auto tryGetUserInfo = [&](int accountId) -> bool {
+            if (const AccountData* acc = getAccountById(accountId)) {
+                if (!acc->userId.empty()) {
+                    auto result = parseUserId(acc->userId);
+                    if (result) {
+                        userId = *result;
+                        cookie = acc->cookie;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        if (!g_selectedAccountIds.empty()) {
+            tryGetUserInfo(*g_selectedAccountIds.begin());
+        } else if (g_defaultAccountId != -1) {
+            tryGetUserInfo(g_defaultAccountId);
+        }
+
+        return {userId, cookie};
+    }
+
+    [[nodiscard]]
+    std::expected<nlohmann::json, std::string> parseJsonSafe(const HttpClient::Response& resp) {
+        if (resp.status_code != 200 || resp.text.empty()) {
+            return std::unexpected(std::format("HTTP error: {}", resp.status_code));
+        }
+
+        auto result = HttpClient::decode(resp);
+        if (result.is_null()) {
+            return std::unexpected("Failed to parse JSON");
+        }
+
+        return result;
     }
 
     void FetchAvatarImage(uint64_t userId) {
@@ -157,7 +174,9 @@ namespace {
             );
 
             auto metaResp = HttpClient::get(metaUrl);
-            if (metaResp.status_code != 200 || metaResp.text.empty()) {
+            auto metaJsonResult = parseJsonSafe(metaResp);
+
+            if (!metaJsonResult) {
                 ThreadTask::RunOnMain([] {
                     g_avatarState.loading = false;
                     g_avatarState.failed = true;
@@ -165,17 +184,12 @@ namespace {
                 return;
             }
 
-            nlohmann::json metaJson = HttpClient::decode(metaResp);
+            const auto& metaJson = *metaJsonResult;
             std::string avatarUrl;
 
-            std::exception_ptr exPtr;
-            try {
-                if (metaJson.contains("data") && !metaJson["data"].empty() &&
-                    metaJson["data"][0].contains("imageUrl")) {
-                    avatarUrl = metaJson["data"][0]["imageUrl"].get<std::string>();
-                }
-            } catch (...) {
-                avatarUrl.clear();
+            if (metaJson.contains("data") && !metaJson["data"].empty() &&
+                metaJson["data"][0].contains("imageUrl")) {
+                avatarUrl = metaJson["data"][0]["imageUrl"].get<std::string>();
             }
 
             if (avatarUrl.empty()) {
@@ -197,12 +211,15 @@ namespace {
 
             std::string data = std::move(imgResp.text);
             ThreadTask::RunOnMain([data = std::move(data)]() mutable {
-                g_avatarState.failed = !LoadTextureFromMemory(
-                    data.data(), data.size(),
-                    &g_avatarState.texture,
-                    &g_avatarState.imageWidth,
-                    &g_avatarState.imageHeight
-                );
+                auto result = LoadTextureFromMemory(data.data(), data.size());
+                if (result) {
+                    g_avatarState.texture = std::move(result->texture);
+                    g_avatarState.imageWidth = result->width;
+                    g_avatarState.imageHeight = result->height;
+                    g_avatarState.failed = false;
+                } else {
+                    g_avatarState.failed = true;
+                }
                 g_avatarState.loading = false;
             });
         });
@@ -218,7 +235,9 @@ namespace {
             );
 
             auto resp = HttpClient::get(url, {{"Cookie", std::format(".ROBLOSECURITY={}", cookie)}});
-            if (resp.status_code != 200 || resp.text.empty()) {
+            auto jsonResult = parseJsonSafe(resp);
+
+            if (!jsonResult) {
                 ThreadTask::RunOnMain([] {
                     g_categoryState.loading = false;
                     g_categoryState.failed = true;
@@ -226,41 +245,28 @@ namespace {
                 return;
             }
 
-            nlohmann::json j;
-            std::exception_ptr exPtr;
-            try {
-                j = HttpClient::decode(resp);
-            } catch (...) {
-                ThreadTask::RunOnMain([] {
-                    g_categoryState.loading = false;
-                    g_categoryState.failed = true;
-                });
-                return;
-            }
-
+            const auto& j = *jsonResult;
             std::vector<CategoryInfo> categories;
-            try {
-                if (j.contains("categories")) {
-                    for (auto& cat : j["categories"]) {
-                        CategoryInfo ci;
-                        ci.displayName = cat.value("displayName", "");
 
-                        if (cat.contains("items")) {
-                            for (auto& it : cat["items"]) {
-                                const int id = it.value("id", 0);
-                                const std::string name = it.value("displayName", "");
-                                if (id != 0) {
-                                    ci.assetTypes.emplace_back(id, name);
-                                }
+            if (j.contains("categories")) {
+                for (const auto& cat : j["categories"]) {
+                    CategoryInfo ci;
+                    ci.displayName = cat.value("displayName", "");
+
+                    if (cat.contains("items")) {
+                        for (const auto& it : cat["items"]) {
+                            const int id = it.value("id", 0);
+                            const std::string name = it.value("displayName", "");
+                            if (id != 0) {
+                                ci.assetTypes.emplace_back(id, name);
                             }
                         }
+                    }
 
-                        if (!ci.assetTypes.empty()) {
-                            categories.push_back(std::move(ci));
-                        }
+                    if (!ci.assetTypes.empty()) {
+                        categories.push_back(std::move(ci));
                     }
                 }
-            } catch (...) {
             }
 
             ThreadTask::RunOnMain([categories = std::move(categories)]() mutable {
@@ -282,7 +288,9 @@ namespace {
             );
 
             auto resp = HttpClient::get(url);
-            if (resp.status_code != 200 || resp.text.empty()) {
+            auto jsonResult = parseJsonSafe(resp);
+
+            if (!jsonResult) {
                 ThreadTask::RunOnMain([userId] {
                     g_equippedState.userId = userId;
                     g_equippedState.failed = true;
@@ -291,35 +299,18 @@ namespace {
                 return;
             }
 
-            nlohmann::json j;
-            std::exception_ptr exPtr;
-            try {
-                j = HttpClient::decode(resp);
-            } catch (...) {
-                ThreadTask::RunOnMain([userId] {
-                    g_equippedState.userId = userId;
-                    g_equippedState.failed = true;
-                    g_equippedState.loading = false;
-                });
-                return;
-            }
-
+            const auto& j = *jsonResult;
             std::vector<uint64_t> ids;
-            try {
-                if (j.contains("assetIds")) {
-                    for (auto& v : j["assetIds"]) {
-                        uint64_t id = 0;
-                        std::exception_ptr exPtr2;
-                        try {
-                            id = v.get<uint64_t>();
-                        } catch (...) {
-                        }
+
+            if (j.contains("assetIds")) {
+                for (const auto& v : j["assetIds"]) {
+                    if (v.is_number_unsigned()) {
+                        uint64_t id = v.get<uint64_t>();
                         if (id != 0) {
                             ids.push_back(id);
                         }
                     }
                 }
-            } catch (...) {
             }
 
             ThreadTask::RunOnMain([userId, ids = std::move(ids)]() mutable {
@@ -343,9 +334,11 @@ namespace {
         ThreadTask::fireAndForget([assetId] {
             auto finish = [assetId](bool success) {
                 ThreadTask::RunOnMain([assetId, success] {
-                    auto& ti = g_thumbCache[assetId];
-                    ti.loading = false;
-                    ti.failed = !success;
+                    auto it = g_thumbCache.find(assetId);
+                    if (it != g_thumbCache.end()) {
+                        it->second.loading = false;
+                        it->second.failed = !success;
+                    }
                     --g_activeThumbLoads;
                 });
             };
@@ -356,24 +349,21 @@ namespace {
             );
 
             auto metaResp = HttpClient::get(metaUrl);
-            if (metaResp.status_code != 200 || metaResp.text.empty()) {
+            auto metaJsonResult = parseJsonSafe(metaResp);
+
+            if (!metaJsonResult) {
                 finish(false);
                 return;
             }
 
-            nlohmann::json metaJson = HttpClient::decode(metaResp);
+            const auto& metaJson = *metaJsonResult;
             std::string imageUrl;
 
-            std::exception_ptr exPtr;
-            try {
-                if (metaJson.contains("data") && !metaJson["data"].empty()) {
-                    const auto& d = metaJson["data"][0];
-                    if (d.contains("imageUrl")) {
-                        imageUrl = d["imageUrl"].get<std::string>();
-                    }
+            if (metaJson.contains("data") && !metaJson["data"].empty()) {
+                const auto& d = metaJson["data"][0];
+                if (d.contains("imageUrl")) {
+                    imageUrl = d["imageUrl"].get<std::string>();
                 }
-            } catch (...) {
-                imageUrl.clear();
             }
 
             if (imageUrl.empty()) {
@@ -389,13 +379,22 @@ namespace {
 
             std::string data = std::move(imgResp.text);
             ThreadTask::RunOnMain([assetId, data = std::move(data)]() mutable {
-                auto& ti = g_thumbCache[assetId];
-                const bool ok = LoadTextureFromMemory(
-                    data.data(), data.size(),
-                    &ti.srv, &ti.width, &ti.height
-                );
-                ti.loading = false;
-                ti.failed = !ok;
+                auto it = g_thumbCache.find(assetId);
+                if (it == g_thumbCache.end()) {
+                    --g_activeThumbLoads;
+                    return;
+                }
+
+                auto result = LoadTextureFromMemory(data.data(), data.size());
+                if (result) {
+                    it->second.texture = std::move(result->texture);
+                    it->second.width = result->width;
+                    it->second.height = result->height;
+                    it->second.failed = false;
+                } else {
+                    it->second.failed = true;
+                }
+                it->second.loading = false;
                 --g_activeThumbLoads;
             });
         });
@@ -421,38 +420,27 @@ namespace {
                 }
 
                 auto resp = HttpClient::get(url, {{"Cookie", std::format(".ROBLOSECURITY={}", cookie)}});
-                if (resp.status_code != 200 || resp.text.empty()) {
+                auto jsonResult = parseJsonSafe(resp);
+
+                if (!jsonResult) {
                     anyError = true;
                     break;
                 }
 
-                nlohmann::json j;
-                std::exception_ptr exPtr;
-                try {
-                    j = HttpClient::decode(resp);
-                } catch (...) {
-                    anyError = true;
-                    break;
-                }
+                const auto& j = *jsonResult;
 
-                try {
-                    if (j.contains("data")) {
-                        for (auto& it : j["data"]) {
-                            InventoryItem ii;
-                            ii.assetId = it.value("assetId", 0);
-                            ii.assetName = it.value("assetName", "");
-                            items.push_back(std::move(ii));
-                        }
+                if (j.contains("data")) {
+                    for (const auto& it : j["data"]) {
+                        InventoryItem ii;
+                        ii.assetId = it.value("assetId", uint64_t{0});
+                        ii.assetName = it.value("assetName", "");
+                        items.push_back(std::move(ii));
                     }
-                } catch (...) {
                 }
 
                 cursor.clear();
-                try {
-                    if (j.contains("nextPageCursor") && !j["nextPageCursor"].is_null()) {
-                        cursor = j["nextPageCursor"].get<std::string>();
-                    }
-                } catch (...) {
+                if (j.contains("nextPageCursor") && !j["nextPageCursor"].is_null()) {
+                    cursor = j["nextPageCursor"].get<std::string>();
                 }
 
                 if (cursor.empty()) {
@@ -475,13 +463,13 @@ namespace {
     void RenderAvatarPane(float width, uint64_t userId) {
         ImGui::BeginChild("AvatarImagePane", ImVec2(width, 0), true);
 
-        if (g_avatarState.texture && !g_avatarState.loading) {
+        if (g_avatarState.hasTexture() && !g_avatarState.loading) {
             const float desiredWidth = width - ImGui::GetStyle().ItemSpacing.x * 2;
             const float desiredHeight = (g_avatarState.imageWidth > 0)
                 ? (desiredWidth * static_cast<float>(g_avatarState.imageHeight) / g_avatarState.imageWidth)
                 : 0.0f;
             ImGui::Image(
-                ImTextureID(reinterpret_cast<void*>(g_avatarState.texture)),
+                ImTextureID(g_avatarState.texture.get()),
                 ImVec2(desiredWidth, desiredHeight)
             );
         } else if (g_avatarState.loading) {
@@ -490,7 +478,6 @@ namespace {
             ImGui::TextUnformatted("Failed to load avatar image.");
         }
 
-        // Equipped items
         if (userId != 0 && userId != g_equippedState.userId && !g_equippedState.loading) {
             FetchEquippedItems(userId);
         }
@@ -516,7 +503,7 @@ namespace {
                 }
 
                 auto& thumb = g_thumbCache[assetId];
-                if (!thumb.srv && !thumb.loading && !thumb.failed &&
+                if (!thumb.hasTexture() && !thumb.loading && !thumb.failed &&
                     g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
                     FetchThumbnail(assetId);
                 }
@@ -525,10 +512,10 @@ namespace {
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, THUMB_ROUNDING);
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
 
-                if (thumb.srv) {
+                if (thumb.hasTexture()) {
                     ImGui::ImageButton(
                         "##eq",
-                        ImTextureID(reinterpret_cast<void*>(thumb.srv)),
+                        ImTextureID(thumb.texture.get()),
                         ImVec2(equipCellSize, equipCellSize),
                         ImVec2(0, 0), ImVec2(1, 1),
                         ImVec4(0, 0, 0, 0),
@@ -547,6 +534,7 @@ namespace {
         ImGui::EndChild();
     }
 
+    [[nodiscard]]
     float CalculateComboWidth(const char* text) {
         const ImGuiStyle& style = ImGui::GetStyle();
         return ImGui::CalcTextSize(text).x + style.FramePadding.x * 2.0f + ImGui::GetFrameHeight();
@@ -587,7 +575,7 @@ namespace {
         ImGui::SameLine(0, style.ItemSpacing.x);
         ImGui::PushItemWidth(catComboWidth);
         if (ImGui::Combo("##categoryCombo", &g_categoryState.selectedCategory,
-                        categoryNames.data(), categoryNames.size())) {
+                        categoryNames.data(), static_cast<int>(categoryNames.size()))) {
             g_inventoryState.selectedAssetTypeIndex = 0;
             g_searchBuffer[0] = '\0';
         }
@@ -597,7 +585,7 @@ namespace {
             ImGui::SameLine(0, style.ItemSpacing.x);
             ImGui::PushItemWidth(assetComboWidth);
             ImGui::Combo("##assetTypeCombo", &g_inventoryState.selectedAssetTypeIndex,
-                        assetTypeNames.data(), assetTypeNames.size());
+                        assetTypeNames.data(), static_cast<int>(assetTypeNames.size()));
             ImGui::PopItemWidth();
         }
 
@@ -608,7 +596,7 @@ namespace {
         std::string filterLower;
         {
             std::string sb = g_searchBuffer;
-            std::transform(sb.begin(), sb.end(), sb.begin(), ::tolower);
+            std::ranges::transform(sb, sb.begin(), ::tolower);
             filterLower = std::move(sb);
         }
 
@@ -624,7 +612,7 @@ namespace {
         for (int i = 0; i < static_cast<int>(items.size()); ++i) {
             if (!filterLower.empty()) {
                 std::string nameLower = items[i].assetName;
-                std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
+                std::ranges::transform(nameLower, nameLower.begin(), ::tolower);
                 if (nameLower.find(filterLower) == std::string::npos) {
                     continue;
                 }
@@ -665,7 +653,7 @@ namespace {
                     }
 
                     auto& thumb = g_thumbCache[item.assetId];
-                    if (!thumb.srv && !thumb.loading && !thumb.failed &&
+                    if (!thumb.hasTexture() && !thumb.loading && !thumb.failed &&
                         g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
                         FetchThumbnail(item.assetId);
                     }
@@ -675,7 +663,7 @@ namespace {
                     const bool isEquipped = equippedSet.contains(item.assetId);
                     const bool isSelected = (item.assetId == g_selectedAssetId);
 
-                    if (thumb.srv) {
+                    if (thumb.hasTexture()) {
                         const ImVec4 tint = isSelected ? ImVec4(1, 1, 1, 1) : ImVec4(1, 1, 1, 1);
                         const ImVec4 btnCol = isEquipped
                             ? ImGui::GetStyleColorVec4(ImGuiCol_Button)
@@ -695,7 +683,7 @@ namespace {
 
                         ImGui::ImageButton(
                             "##img",
-                            ImTextureID(reinterpret_cast<void*>(thumb.srv)),
+                            ImTextureID(thumb.texture.get()),
                             ImVec2(cellSize, cellSize),
                             ImVec2(0, 0), ImVec2(1, 1),
                             ImVec4(0, 0, 0, 0),
@@ -763,7 +751,7 @@ namespace {
         }
 
         std::vector<const char*> categoryNames;
-        for (auto& ci : g_categoryState.categories) {
+        for (const auto& ci : g_categoryState.categories) {
             categoryNames.push_back(ci.displayName.c_str());
         }
 
@@ -772,7 +760,7 @@ namespace {
         }
 
         std::vector<const char*> assetTypeNames;
-        for (auto& p : g_categoryState.categories[g_categoryState.selectedCategory].assetTypes) {
+        for (const auto& p : g_categoryState.categories[g_categoryState.selectedCategory].assetTypes) {
             assetTypeNames.push_back(p.second.c_str());
         }
 

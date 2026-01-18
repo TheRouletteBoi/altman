@@ -8,6 +8,7 @@
 namespace Roblox {
 
 	enum class BanCheckResult {
+		NetworkError,
 		InvalidCookie,
 		Unbanned,
 		Banned,
@@ -16,7 +17,7 @@ namespace Roblox {
 	};
 
 	struct BanInfo {
-		BanCheckResult status = BanCheckResult::InvalidCookie;
+		BanCheckResult status = BanCheckResult::NetworkError;
 		time_t endDate = 0;
 		uint64_t punishedUserId = 0;
 	};

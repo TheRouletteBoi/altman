@@ -23,10 +23,15 @@ BanInfo checkBanStatus(const std::string& cookie) {
         {{"Cookie", ".ROBLOSECURITY=" + cookie}}
     );
 
-    if (response.status_code < 200 || response.status_code >= 300) {
-        LOG_ERROR("Failed moderation check: HTTP {}", response.status_code);
-        return {BanCheckResult::InvalidCookie, 0, 0};
-    }
+	if (response.status_code < 200 || response.status_code >= 300) {
+		LOG_ERROR("Failed moderation check: HTTP {}", response.status_code);
+
+		if (response.status_code == 401 || response.status_code == 403) {
+			return {BanCheckResult::InvalidCookie, 0, 0};
+		}
+
+		return {BanCheckResult::NetworkError, 0, 0};
+	}
 
     auto j = HttpClient::decode(response);
     
@@ -113,6 +118,10 @@ bool canUseCookie(const std::string& cookie) {
         LOG_ERROR("Skipping request: invalid cookie");
         return false;
     }
+	if (status == BanCheckResult::NetworkError) {
+		LOG_ERROR("Skipping request: network error");
+		return false;
+	}
     
     return true;
 }
