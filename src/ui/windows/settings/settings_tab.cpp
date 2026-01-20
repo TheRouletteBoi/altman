@@ -18,8 +18,8 @@
 #include "utils/paths.h"
 
 #ifdef __APPLE__
-#include "network/ipa_installer.h"
-#include "network/client_manager.h"
+#include "network/ipa_installer_macos.h"
+#include "network/client_manager_macos.h"
 #endif
 
 static bool g_requestOpenConsoleModal = false;

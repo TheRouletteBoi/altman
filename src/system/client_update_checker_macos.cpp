@@ -1,11 +1,11 @@
-#include "client_update_checker.h"
+#include "client_update_checker_macos.h"
 
 #include <format>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
 #include "auto_updater.h"
-#include "network/client_manager.h"
+#include "network/client_manager_macos.h"
 #include "system/multi_instance.h"
 #include "console/console.h"
 #include "utils/thread_task.h"

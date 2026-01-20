@@ -21,7 +21,7 @@
 #include "ui/widgets/modal_popup.h"
 #include "utils/thread_task.h"
 #include "system/auto_updater.h"
-#include "system/client_update_checker.h"
+#include "system/client_update_checker_macos.h"
 #include "console/console.h"
 #include "image.h"
 

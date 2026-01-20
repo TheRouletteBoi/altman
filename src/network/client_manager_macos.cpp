@@ -1,4 +1,4 @@
-#include "client_manager.h"
+#include "client_manager_macos.h"
 
 #include <filesystem>
 #include <fstream>
@@ -12,8 +12,8 @@
 
 #include "console/console.h"
 #include "http.h"
-#include "ipa_installer.h"
-#include "system/client_update_checker.h"
+#include "ipa_installer_macos.h"
+#include "system/client_update_checker_macos.h"
 #include "system/multi_instance.h"
 #include "thread_task.h"
 #include "utils/paths.h"

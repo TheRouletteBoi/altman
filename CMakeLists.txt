@@ -30,7 +30,7 @@ endif()
 FetchContent_Declare(
         cpr
         GIT_REPOSITORY https://github.com/libcpr/cpr.git
-        GIT_TAG 1.11.0
+        GIT_TAG 1.14.1
 )
 FetchContent_MakeAvailable(cpr)
 
@@ -117,7 +117,7 @@ if(APPLE)
     file(GLOB_RECURSE OBJC_SRC_FILES CONFIGURE_DEPENDS src/*.mm)
     list(APPEND ALL_SRC_FILES ${OBJC_SRC_FILES})
 
-    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*main\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*main_windows\\.cpp$")
     list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*webview_windows\\.cpp$")
     list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*resource\\.rc$")
 
@@ -128,12 +128,12 @@ elseif(WIN32)
     list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*main_macos\\.mm$")
     list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*webview_macos\\.mm$")
     list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*\\.mm$")
-    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*ipa_installer\\.cpp$")
-    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*ipa_installer\\.h$")
-    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_manager\\.cpp$")
-    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_manager\\.h$")
-    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_update_checker\\.cpp$")
-    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_update_checker\\.h$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*ipa_installer_macos\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*ipa_installer_macos\\.h$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_manager_macos\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_manager_macos\\.h$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_update_checker_macos\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_update_checker_macos\\.h$")
 endif()
 
 if(APPLE)
