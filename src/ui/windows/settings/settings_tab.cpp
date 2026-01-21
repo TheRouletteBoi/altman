@@ -390,7 +390,7 @@ void RenderSettingsTab() {
 		for (std::string_view clientName : g_availableClientsNames) {
 			const std::string clientStr(clientName);
 			const bool isInstalled = MultiInstance::isBaseClientInstalled(clientStr);
-			const bool needsKey = (clientName != "Default") && (clientName != "MacSploit");
+			const bool needsKey = (clientName != "Default");
 
 			ImGui::TableNextRow();
 			ImGui::PushID(clientStr.c_str());
