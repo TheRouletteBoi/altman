@@ -802,11 +802,11 @@ bool launchSandboxedClient(const std::string& username,
     opts.env = {
     	{"HOME", profilePath},
     	// uses up too much space for desktop but fixes keychain thing
-    	//{"CFFIXED_USER_HOME", profilePath}
+    	{"CFFIXED_USER_HOME", profilePath}
     };
 
     if (mobileClient) {
-    	opts.env["CFFIXED_USER_HOME"] = profilePath;
+    	//opts.env["CFFIXED_USER_HOME"] = profilePath;
     	opts.env["XDG_DATA_HOME"] = profilePath + "/Documents";
     }
 
