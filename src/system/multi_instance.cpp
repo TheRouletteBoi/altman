@@ -59,20 +59,20 @@ namespace MultiInstance {
     }
 
     void Enable() {
-        if (g_semaphore == SEM_FAILED) {
+        /*if (g_semaphore == SEM_FAILED) {
             g_semaphore = sem_open(SEMAPHORE_NAME, O_CREAT, 0644, 1);
             if (g_semaphore == SEM_FAILED) {
                 return;
             }
-        }
+        }*/
     }
 
     void Disable() {
-        if (g_semaphore != SEM_FAILED) {
+        /*if (g_semaphore != SEM_FAILED) {
             sem_close(g_semaphore);
             sem_unlink(SEMAPHORE_NAME);
             g_semaphore = SEM_FAILED;
-        }
+        }*/
     }
 
     std::pair<int, std::string> executeCommand(const std::string& cmd) {
