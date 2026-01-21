@@ -176,84 +176,6 @@ void RenderSettingsTab() {
 	}
 	ImGui::Spacing();
 
-	if (!g_accounts.empty()) {
-		ImGui::SeparatorText("Accounts");
-		ImGui::Text("Default Account:");
-
-		std::vector<std::string> accountLabels;
-		std::vector<const char*> names;
-		std::vector<size_t> idxMap;
-
-		accountLabels.reserve(g_accounts.size());
-		names.reserve(g_accounts.size());
-		idxMap.reserve(g_accounts.size());
-
-		int current_default_idx = -1;
-
-		for (size_t i = 0; i < g_accounts.size(); ++i) {
-			const auto& acc = g_accounts[i];
-			const std::string label = (acc.displayName == acc.username)
-				? acc.displayName
-				: std::format("{} ({})", acc.displayName, acc.username);
-
-			accountLabels.push_back(label);
-			names.push_back(accountLabels.back().c_str());
-			idxMap.push_back(i);
-
-			if (acc.id == g_defaultAccountId) {
-				current_default_idx = static_cast<int>(names.size() - 1);
-			}
-		}
-
-		int combo_idx = current_default_idx;
-
-		if (!names.empty()) {
-			if (ImGui::Combo("##defaultAccountCombo", &combo_idx, names.data(),
-						   static_cast<int>(names.size()))) {
-				if (combo_idx >= 0 && combo_idx < static_cast<int>(idxMap.size())) {
-					g_defaultAccountId = g_accounts[idxMap[combo_idx]].id;
-					g_selectedAccountIds.clear();
-					g_selectedAccountIds.insert(g_defaultAccountId);
-					Data::SaveSettings();
-				}
-						   }
-		} else {
-			ImGui::TextDisabled("No accounts available.");
-		}
-	} else {
-		ImGui::TextDisabled("No accounts available to set a default.");
-	}
-
-	ImGui::Spacing();
-
-#ifdef __APPLE__
-	ImGui::SeparatorText("Selected Account Settings");
-
-	if (g_selectedAccountIds.empty()) {
-		ImGui::TextDisabled("Select accounts from the Accounts tab to configure");
-	} else {
-		if (ImGui::CollapsingHeader("Folders", ImGuiTreeNodeFlags_DefaultOpen)) {
-			if (ImGui::Button("Open Documents Folder")) {
-				ProcessSelectedAccounts(OpenAccountDocumentsFolder);
-			}
-
-			ImGui::SameLine();
-
-			if (ImGui::Button("Open Environment Folder")) {
-				ProcessSelectedAccounts(OpenAccountEnvironmentFolder);
-			}
-		}
-
-		ImGui::Spacing();
-
-		if (ImGui::CollapsingHeader("Client Configuration", ImGuiTreeNodeFlags_DefaultOpen)) {
-			RenderClientSelector();
-		}
-	}
-
-	ImGui::Spacing();
-#endif // __APPLE__
-
 	ImGui::SeparatorText("General");
 
 	int interval = g_statusRefreshInterval;
@@ -343,7 +265,83 @@ void RenderSettingsTab() {
 
 	ImGui::EndDisabled();
 
+	ImGui::Spacing();
+
+	if (!g_accounts.empty()) {
+		ImGui::SeparatorText("Accounts");
+		ImGui::Text("Default Account:");
+
+		std::vector<std::string> accountLabels;
+		std::vector<const char*> names;
+		std::vector<size_t> idxMap;
+
+		accountLabels.reserve(g_accounts.size());
+		names.reserve(g_accounts.size());
+		idxMap.reserve(g_accounts.size());
+
+		int current_default_idx = -1;
+
+		for (size_t i = 0; i < g_accounts.size(); ++i) {
+			const auto& acc = g_accounts[i];
+			const std::string label = (acc.displayName == acc.username)
+				? acc.displayName
+				: std::format("{} ({})", acc.displayName, acc.username);
+
+			accountLabels.push_back(label);
+			names.push_back(accountLabels.back().c_str());
+			idxMap.push_back(i);
+
+			if (acc.id == g_defaultAccountId) {
+				current_default_idx = static_cast<int>(names.size() - 1);
+			}
+		}
+
+		int combo_idx = current_default_idx;
+
+		if (!names.empty()) {
+			if (ImGui::Combo("##defaultAccountCombo", &combo_idx, names.data(),
+						   static_cast<int>(names.size()))) {
+				if (combo_idx >= 0 && combo_idx < static_cast<int>(idxMap.size())) {
+					g_defaultAccountId = g_accounts[idxMap[combo_idx]].id;
+					g_selectedAccountIds.clear();
+					g_selectedAccountIds.insert(g_defaultAccountId);
+					Data::SaveSettings();
+				}
+						   }
+		} else {
+			ImGui::TextDisabled("No accounts available.");
+		}
+	} else {
+		ImGui::TextDisabled("No accounts available to set a default.");
+	}
+
+	ImGui::Spacing();
+
 #ifdef __APPLE__
+	ImGui::SeparatorText("Selected Account Settings");
+
+	if (g_selectedAccountIds.empty()) {
+		ImGui::TextDisabled("Select accounts from the Accounts tab to configure");
+	} else {
+		if (ImGui::CollapsingHeader("Folders", ImGuiTreeNodeFlags_DefaultOpen)) {
+			if (ImGui::Button("Open Documents Folder")) {
+				ProcessSelectedAccounts(OpenAccountDocumentsFolder);
+			}
+
+			ImGui::SameLine();
+
+			if (ImGui::Button("Open Environment Folder")) {
+				ProcessSelectedAccounts(OpenAccountEnvironmentFolder);
+			}
+		}
+
+		ImGui::Spacing();
+
+		if (ImGui::CollapsingHeader("Client Configuration", ImGuiTreeNodeFlags_DefaultOpen)) {
+			RenderClientSelector();
+		}
+	}
+
 	ImGui::Spacing();
 	ImGui::SeparatorText("Client Management");
 
