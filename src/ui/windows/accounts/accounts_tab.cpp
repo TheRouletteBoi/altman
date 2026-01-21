@@ -189,6 +189,8 @@ namespace {
                 ImGui::TextUnformatted(timeStr.c_str());
             } else if (account.status == "InGame" && !account.lastLocation.empty()) {
                 ImGui::TextUnformatted(account.lastLocation.c_str());
+            } else {
+            	ImGui::TextUnformatted(" ");
             }
             ImGui::EndTooltip();
         }
@@ -216,7 +218,9 @@ namespace {
                 ImGui::TextUnformatted("HTTP request returned an error");
             } else if (account.voiceStatus == "N/A") {
                 ImGui::TextUnformatted("HTTP request unavailable");
-            }
+            } else {
+        		ImGui::TextUnformatted("");
+        	}
             ImGui::EndTooltip();
         }
 

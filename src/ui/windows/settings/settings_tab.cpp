@@ -1121,8 +1121,6 @@ void RenderSettingsTab() {
 		ImGui::EndTable();
 	}
 
-	ImGui::Separator();
-
     ImGui::Spacing();
 
     RenderEnvironmentCleanupSection();
