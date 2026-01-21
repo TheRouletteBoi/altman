@@ -11,7 +11,6 @@ void AddYesNo(const std::string& msg, std::function<void()> onYes, std::function
         std::move(onYes),
         std::move(onNo),
         PopupType::YesNo,
-        0,
         true,
         true,
         true
@@ -25,7 +24,6 @@ void AddOk(const std::string& msg, std::function<void()> onOk) {
         std::move(onOk),
         nullptr,
         PopupType::Ok,
-        0,
         true,
         true,
         true
@@ -39,37 +37,10 @@ void AddInfo(const std::string& msg) {
         nullptr,
         nullptr,
         PopupType::Info,
-        0,
         true,
         true,
         true
     });
-}
-
-void AddProgress(const std::string& msg, int percentage) {
-    if (!queue.empty() && queue.back().progress >= 0 && queue.back().type == PopupType::Info && !queue.back().closeable) {
-        queue.back().message = msg;
-        queue.back().progress = percentage;
-        return;
-    }
-
-    queue.push_back({
-        std::format("##ConfirmPopup{}", nextId++),
-        msg,
-        nullptr,
-        nullptr,
-        PopupType::Info,
-        percentage,
-        true,
-        true,
-        false
-    });
-}
-
-void CloseProgress() {
-    if (!queue.empty() && queue.back().progress >= 0 && !queue.back().closeable) {
-        queue.pop_front();
-    }
 }
 
 void Clear() {
@@ -106,11 +77,6 @@ void Render() {
 
         ImGui::TextWrapped("%s", cur.message.c_str());
         ImGui::Spacing();
-
-        if (cur.progress > 0) {
-            float progress = static_cast<float>(cur.progress) / 100.0f;
-            ImGui::ProgressBar(progress, ImVec2(300, 0), std::format("{}%", cur.progress).c_str());
-        }
 
         switch (cur.type) {
             case PopupType::YesNo: {
