@@ -30,13 +30,39 @@ enum class UpdateChannel : uint8_t {
 struct UpdateInfo {
     std::string version;
     std::string downloadUrl;
-    std::string deltaUrl;
     std::string changelog;
     size_t fullSize{0};
-    size_t deltaSize{0};
     std::string sha256;
     UpdateChannel channel{UpdateChannel::Stable};
     bool isCritical{false};
+
+    // Windows: single delta
+    std::string deltaUrl;
+    size_t deltaSize{0};
+    std::string deltaSha256;
+
+    // macOS: dual deltas for universal binary
+    std::string deltaUrl_arm64;
+    std::string deltaUrl_x86_64;
+    size_t deltaSize_arm64{0};
+    size_t deltaSize_x86_64{0};
+
+    [[nodiscard]] bool hasDelta() const noexcept {
+#ifdef __APPLE__
+        // macOS needs both patches for universal binary
+        return !deltaUrl_arm64.empty() && !deltaUrl_x86_64.empty();
+#else
+        return !deltaUrl.empty();
+#endif
+    }
+
+    [[nodiscard]] size_t totalDeltaSize() const noexcept {
+#ifdef __APPLE__
+        return deltaSize_arm64 + deltaSize_x86_64;
+#else
+        return deltaSize;
+#endif
+    }
 };
 
 struct DownloadState {
@@ -140,6 +166,7 @@ public:
     static void CleanupOldBackups(int keepCount = 3);
 
     [[nodiscard]] static std::filesystem::path GetCurrentExecutablePath();
+    [[nodiscard]] static std::filesystem::path GetAppBundlePath();
 
 private:
     [[nodiscard]] static constexpr std::string_view GetChannelName(UpdateChannel channel) noexcept;
@@ -147,13 +174,27 @@ private:
     [[nodiscard]] static std::string GetDeltaAssetName(std::string_view fromVersion, std::string_view toVersion);
     [[nodiscard]] static std::filesystem::path GetUpdateScriptPath();
 
-    static void CreateUpdateScript(const std::string& newExecutable, const std::string& currentExecutable, const std::string& backupPath);
+    static void CreateUpdateScript(const std::string& newPath, const std::string& currentPath, const std::string& backupPath);
     static void LaunchUpdateScript();
 
     [[nodiscard]] static std::string FormatBytes(size_t bytes) noexcept;
     [[nodiscard]] static std::string FormatSpeed(size_t bytesPerSecond) noexcept;
 
     static bool ApplyDeltaPatch(const std::filesystem::path& oldFile, const std::filesystem::path& patchFile, const std::filesystem::path& newFile);
+
+#ifdef __APPLE__
+    static bool ExtractZipToPath(const std::filesystem::path& zipPath, const std::filesystem::path& destPath);
+
+    [[nodiscard]] static bool IsUniversalBinary(const std::filesystem::path& binaryPath);
+    static bool ExtractSlice(const std::filesystem::path& binaryPath, const std::string& arch, const std::filesystem::path& outputPath);
+    static bool CreateUniversalBinary(const std::filesystem::path& arm64Path, const std::filesystem::path& x86_64Path, const std::filesystem::path& outputPath);
+    static bool ApplyUniversalDeltaUpdate(const std::filesystem::path& arm64PatchPath, const std::filesystem::path& x86_64PatchPath, const std::filesystem::path& outputAppPath);
+#endif
+
+#ifdef _WIN32
+    [[nodiscard]] static std::string GetHardwareArchitecture();
+    [[nodiscard]] static bool IsRunningUnderEmulation();
+#endif
 
     [[nodiscard]] static UpdateInfo ParseReleaseInfo(const nlohmann::json& release, UpdateChannel channel);
     [[nodiscard]] static std::string GetReleaseEndpoint(UpdateChannel channel);

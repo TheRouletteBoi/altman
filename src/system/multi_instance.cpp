@@ -25,12 +25,9 @@ namespace MultiInstance {
 }
 
 #elif __APPLE__
-
 #include <semaphore.h>
-#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <signal.h>
 #include <spawn.h>
 
@@ -47,8 +44,7 @@ namespace MultiInstance {
 
 #include "console/console.h"
 #include "utils/paths.h"
-
-extern char** environ;
+#include "system/system_info.h"
 
 namespace MultiInstance {
     namespace {
@@ -73,21 +69,6 @@ namespace MultiInstance {
             sem_unlink(SEMAPHORE_NAME);
             g_semaphore = SEM_FAILED;
         }*/
-    }
-
-    std::pair<int, std::string> executeCommand(const std::string& cmd) {
-        std::array<char, 128> buffer;
-        std::string result;
-
-        FILE* pipe = popen((cmd + " 2>&1").c_str(), "r");
-        if (!pipe) return {-1, "popen failed"};
-
-        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-            result += buffer.data();
-        }
-
-        int exitCode = pclose(pipe);
-        return {WEXITSTATUS(exitCode), result};
     }
 
     std::string getUserClientPath(const std::string& username, const std::string& clientName) {
@@ -246,133 +227,6 @@ namespace MultiInstance {
             }
 
             return hash;
-        }
-
-        struct SpawnOptions {
-            std::map<std::string, std::string> env;
-            std::optional<std::string> stdoutPath;
-            std::optional<std::string> stderrPath;
-            bool waitForCompletion = true;
-        };
-
-        bool spawnProcessWithEnv(
-		    const char* program,
-		    const std::vector<const char*>& args,
-		    const SpawnOptions& opts) {
-
-        	std::vector<std::string> envStrings;
-        	envStrings.reserve(opts.env.size() + 32);
-
-        	for (char** env = environ; *env; ++env) {
-        		std::string entry(*env);
-        		auto pos = entry.find('=');
-        		if (pos == std::string::npos)
-        			continue;
-
-        		std::string key = entry.substr(0, pos);
-        		if (!opts.env.contains(key)) {
-        			envStrings.emplace_back(std::move(entry));
-        		}
-        	}
-
-        	for (const auto& [k, v] : opts.env) {
-        		envStrings.emplace_back(k + "=" + v);
-        	}
-
-        	std::vector<std::unique_ptr<char[]>> envBuffers;
-        	std::vector<char*> envp;
-        	envBuffers.reserve(envStrings.size());
-        	envp.reserve(envStrings.size() + 1);
-
-        	for (const auto& s : envStrings) {
-        		auto buf = std::make_unique<char[]>(s.size() + 1);
-        		std::memcpy(buf.get(), s.c_str(), s.size() + 1);
-        		envp.push_back(buf.get());
-        		envBuffers.push_back(std::move(buf));
-        	}
-        	envp.push_back(nullptr);
-
-        	std::vector<char*> argv;
-        	argv.reserve(args.size() + 1);
-
-        	for (const char* arg : args) {
-        		if (arg != nullptr) {
-        			argv.push_back(const_cast<char*>(arg));
-        		}
-        	}
-        	argv.push_back(nullptr);
-
-        	posix_spawn_file_actions_t actions;
-        	posix_spawn_file_actions_t* actionsPtr = nullptr;
-        	std::vector<int> openedFds;
-
-        	if (opts.stdoutPath || opts.stderrPath) {
-        		posix_spawn_file_actions_init(&actions);
-        		actionsPtr = &actions;
-
-        		if (opts.stdoutPath) {
-        			int fd = open(opts.stdoutPath->c_str(),
-								  O_CREAT | O_WRONLY | O_APPEND, 0644);
-        			if (fd != -1) {
-        				posix_spawn_file_actions_adddup2(&actions, fd, STDOUT_FILENO);
-        				posix_spawn_file_actions_addclose(&actions, fd);
-        				openedFds.push_back(fd);
-        			}
-        		}
-
-        		if (opts.stderrPath) {
-        			int fd = open(opts.stderrPath->c_str(),
-								  O_CREAT | O_WRONLY | O_APPEND, 0644);
-        			if (fd != -1) {
-        				posix_spawn_file_actions_adddup2(&actions, fd, STDERR_FILENO);
-        				posix_spawn_file_actions_addclose(&actions, fd);
-        				openedFds.push_back(fd);
-        			}
-        		}
-        	}
-
-        	pid_t pid{};
-        	int rc = posix_spawn(&pid,
-								 program,
-								 actionsPtr,
-								 nullptr,
-								 argv.data(),
-								 envp.data());
-
-        	if (actionsPtr) {
-        		posix_spawn_file_actions_destroy(&actions);
-        	}
-
-        	if (rc != 0) {
-        		for (int fd : openedFds) {
-        			close(fd);
-        		}
-        		LOG_ERROR("posix_spawn failed: {}", strerror(rc));
-        		return false;
-        	}
-
-        	if (opts.waitForCompletion) {
-        		int status{};
-        		if (waitpid(pid, &status, 0) == -1) {
-        			LOG_ERROR("waitpid failed: {}", strerror(errno));
-        			return false;
-        		}
-
-        		if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        			return false;
-        		}
-        	}
-
-        	return true;
-        }
-
-        bool spawnWithEnv(const char* program,
-                    const std::vector<const char*>& args,
-                    const std::string& customHome) {
-            SpawnOptions opts;
-            opts.env = {{"HOME", customHome}};
-            opts.waitForCompletion = true;
-            return spawnProcessWithEnv(program, args, opts);
         }
 
         bool isMobileClient2(std::string_view clientPath) {
@@ -564,7 +418,7 @@ namespace MultiInstance {
     		return true;
     	}
 
-    	return spawnWithEnv("/usr/bin/security",
+    	return SystemInfo::SpawnWithCustomHome("/usr/bin/security",
 			{"security", "create-keychain", "-p", "", keychainPath.string().c_str()},
 			profileDir.string()
 		);
@@ -584,7 +438,7 @@ namespace MultiInstance {
     		return false;
     	}
 
-    	return spawnWithEnv(
+    	return SystemInfo::SpawnWithCustomHome(
 			"/usr/bin/security",
 			{"security", "unlock-keychain", "-p", "", keychainPath.string().c_str()},
 			profileDir.string()
@@ -682,7 +536,7 @@ namespace MultiInstance {
             clientPath
         );
 
-        auto [result, output] = executeCommand(codesignCmd);
+        auto [result, output] = SystemInfo::ExecuteCommandWithCode(codesignCmd);
 
         if (result != 0) {
             LOG_ERROR("Codesign failed with code {}: {}", result, output);
@@ -798,7 +652,7 @@ bool launchSandboxedClient(const std::string& username,
     	argv.push_back(protocolURL.c_str());
     }
 
-    SpawnOptions opts;
+    SystemInfo::SpawnOptions opts;
     opts.env = {
     	{"HOME", profilePath},
     	// uses up too much space for desktop but fixes keychain thing
@@ -814,7 +668,7 @@ bool launchSandboxedClient(const std::string& username,
     opts.stderrPath = logDir + "/roblox_stderr.log";
     opts.waitForCompletion = false;
 
-    if (!spawnProcessWithEnv("/usr/bin/open", argv, opts)) {
+    if (!SystemInfo::SpawnProcessWithEnv("/usr/bin/open", argv, opts)) {
     	LOG_ERROR("Failed to launch client");
     	return false;
     }

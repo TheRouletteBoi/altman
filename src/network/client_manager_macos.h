@@ -37,20 +37,6 @@ struct HydrogenVersion {
     PlatformVersion android;
 };
 
-enum class Architecture {
-    Arm64,
-    X86_64,
-    X86_64_Rosetta,
-    Unknown
-};
-
-std::string GetHardwareArchitecture();
-bool IsRunningUnderRosetta();
-std::string GetEffectiveArchitecture();
-Architecture DetectArchitecture();
-
-bool ExecuteCommand(const std::string& command, std::string& output);
-
 std::string GetLatestRobloxVersion();
 MacsploitVersion GetMacsploitVersion();
 HydrogenVersion GetHydrogenVersion();

@@ -399,20 +399,46 @@ void initializeAutoUpdater() {
 
         For delta updates to work, structure releases like this:
 
-        Release v2.0.0
-        ├── AltMan-Windows.exe          (full installer)
-        ├── AltMan-macOS.dmg            (full installer)
-        ├── AltMan-Linux.AppImage       (full installer)
-        ├── AltMan-Delta-1.9.0-to-2.0.0.patch    (delta from 1.9.0)
-        ├── AltMan-Delta-1.8.0-to-2.0.0.patch    (delta from 1.8.0)
-        └── AltMan-Windows-beta.exe     (beta channel)
+        Release v1.1.0
+        ├── macOS/
+        │   ├── AltMan-macOS-arm64.app.zip
+        │   ├── AltMan-macOS-x86_64.app.zip
+        │   └── deltas/
+        │       ├── AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff
+        │       └── AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff
+        │
+        ├── Windows/
+        │   ├── AltMan-Windows-x86_64.exe
+        │   ├── AltMan-Windows-arm64.exe
+        │   └── deltas/
+        │       ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
+        │       └── AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
+        │
+        └── beta/
+            └── AltMan-Windows-x86_64-beta.exe
 
 
         Creating Delta Patches
         Windows (xdelta3):
-        ``bash xdelta3 -e -s AltMan-v1.9.0.exe AltMan-v2.0.0.exe AltMan-Delta-1.9.0-to-2.0.0.patch```
-        Unix (bsdiff):
-        ```bash bsdiff AltMan-v1.9.0.AppImage AltMan-v2.0.0.AppImage AltMan-Delta-1.9.0-to-2.0.0.patch```
+        ```xdelta3 -e -s AltMan-1.0.0-Windows-x86_64.exe AltMan-1.1.0-Windows-x86_64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta```
+        ```xdelta3 -e -s AltMan-1.0.0-Windows-arm64.exe AltMan-1.1.0-Windows-arm64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta```
+        macOS (bsdiff):
+        Extract slices
+        ```lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin arm64 -output old.arm64```
+        ```lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin arm64 -output new.arm64```
+
+        ```lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin x86_64 -output old.x86_64```
+        ```lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin x86_64 -output new.x86_64```
+
+        Create deltas per architecture
+        ```xdelta3 -e -s old.arm64 new.arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.xdelta```
+        ```xdelta3 -e -s old.x86_64 new.x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.xdelta```
+        OR (preferred for macOS binaries):
+        ```bsdiff old.arm64 new.arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff```
+        ```bsdiff old.x86_64 new.x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff```
+
+        Re-assemble after patch
+        ```lipo patched.arm64 patched.x86_64 -create -output AltMan```
      */
     AutoUpdater::Initialize();
     AutoUpdater::SetBandwidthLimit(5_MB);

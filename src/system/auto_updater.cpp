@@ -8,8 +8,6 @@
 #include <array>
 #include <ranges>
 
-#include <imgui.h>
-
 #include "version.h"
 #include "console/console.h"
 #include "utils/thread_task.h"
@@ -17,16 +15,20 @@
 #include "network/http.h"
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/notifications.h"
+#include "system/system_info.h"
 
 #ifdef _WIN32
     #include <windows.h>
 #else
     #include <unistd.h>
+    #include <sys/wait.h>
+    #include <sys/sysctl.h>
     #ifdef __APPLE__
         #include <mach-o/dyld.h>
         #include <Security/Security.h>
         #include <CoreFoundation/CoreFoundation.h>
         #include <spawn.h>
+        #include <sys/stat.h>
         extern char **environ;
     #endif
 #endif
@@ -93,33 +95,43 @@ constexpr std::string_view AutoUpdater::GetChannelName(UpdateChannel channel) no
 }
 
 std::string AutoUpdater::GetPlatformAssetName(UpdateChannel channel) {
-    std::string_view base;
-    std::string_view extension;
+    // Asset naming:
+    // Windows: AltMan-Windows-x86_64.exe, AltMan-Windows-arm64.exe
+    // macOS:   AltMan-macOS.zip (universal binary)
+    // Beta:    AltMan-Windows-x86_64-beta.exe, AltMan-macOS-beta.zip
+
+    const auto platform = SystemInfo::GetPlatformString();
 
 #ifdef _WIN32
-    base = "AltMan-Windows";
-    extension = ".exe";
-#elif __APPLE__
-    base = "AltMan-macOS";
-    extension = ".dmg";
-#else
-    base = "AltMan-Linux";
-    extension = ".AppImage";
-#endif
-
+    const auto arch = SystemInfo::GetArchitectureString();
     if (channel == UpdateChannel::Stable) {
-        return std::format("{}{}", base, extension);
+        return std::format("AltMan-{}-{}.exe", platform, arch);
     }
-    return std::format("{}-{}{}", base, GetChannelName(channel), extension);
+    return std::format("AltMan-{}-{}-{}.exe", platform, arch, GetChannelName(channel));
+#else
+    // macOS ships universal binary - no arch suffix
+    if (channel == UpdateChannel::Stable) {
+        return std::format("AltMan-{}.zip", platform);
+    }
+    return std::format("AltMan-{}-{}.zip", platform, GetChannelName(channel));
+#endif
 }
 
 std::string AutoUpdater::GetDeltaAssetName(std::string_view fromVersion, std::string_view toVersion) {
+    // Delta naming:
+    // Windows: AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
+    // macOS:   Called separately for each arch - this function is only used on Windows
+    //          macOS uses GetDeltaAssetNameForArch() internally
+
+    const auto platform = SystemInfo::GetPlatformString();
+    const auto arch = SystemInfo::GetArchitectureString();
+
 #ifdef _WIN32
-    constexpr std::string_view extension = ".patch";
+    return std::format("AltMan-Delta-{}-to-{}-{}-{}.xdelta", fromVersion, toVersion, platform, arch);
 #else
-    constexpr std::string_view extension = ".bsdiff";
+    // This shouldn't be called on macOS - use ParseReleaseInfo which handles both archs
+    return std::format("AltMan-Delta-{}-to-{}-{}-arm64.bsdiff", fromVersion, toVersion, platform);
 #endif
-    return std::format("AltMan-Delta-{}-to-{}{}", fromVersion, toVersion, extension);
 }
 
 std::filesystem::path AutoUpdater::GetUpdateScriptPath() {
@@ -130,58 +142,138 @@ std::filesystem::path AutoUpdater::GetUpdateScriptPath() {
 #endif
 }
 
-void AutoUpdater::CreateUpdateScript(const std::string& newExecutable, const std::string& currentExecutable, const std::string& backupPath) {
+std::filesystem::path AutoUpdater::GetCurrentExecutablePath() {
+#ifdef _WIN32
+    std::array<wchar_t, MAX_PATH> buffer{};
+    GetModuleFileNameW(nullptr, buffer.data(), MAX_PATH);
+    return std::filesystem::path(buffer.data());
+#elif __APPLE__
+    std::array<char, 1024> buffer{};
+    uint32_t size = buffer.size();
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+        std::array<char, PATH_MAX> resolved{};
+        if (realpath(buffer.data(), resolved.data())) {
+            return std::filesystem::path(resolved.data());
+        }
+        return std::filesystem::path(buffer.data());
+    }
+    return {};
+#else
+    return {};
+#endif
+}
+
+std::filesystem::path AutoUpdater::GetAppBundlePath() {
+#ifdef __APPLE__
+    auto exePath = GetCurrentExecutablePath();
+    // Navigate from Contents/MacOS/AppName up to AppName.app
+    // /path/to/App.app/Contents/MacOS/AppName -> /path/to/App.app
+    auto path = exePath.parent_path().parent_path().parent_path();
+    if (path.extension() == ".app") {
+        return path;
+    }
+    // Fallback: might be running outside a bundle
+    return exePath;
+#else
+    return GetCurrentExecutablePath();
+#endif
+}
+
+void AutoUpdater::CreateUpdateScript(const std::string& newPath, const std::string& currentPath, const std::string& backupPath) {
     const auto scriptPath = GetUpdateScriptPath();
     std::ofstream script(scriptPath);
 
 #ifdef _WIN32
     std::format_to(std::ostreambuf_iterator<char>(script),
         "@echo off\n"
+        "setlocal\n"
         "echo Waiting for application to close...\n"
         "timeout /t 2 /nobreak > nul\n"
+        "\n"
+        "set \"NEW_PATH={}\"\n"
+        "set \"CURRENT_PATH={}\"\n"
+        "set \"BACKUP_PATH={}\"\n"
+        "\n"
         "echo Creating backup...\n"
-        "copy /Y \"{}\" \"{}\"\n"
+        "copy /Y \"%%CURRENT_PATH%%\" \"%%BACKUP_PATH%%\"\n"
+        "if errorlevel 1 (\n"
+        "    echo Failed to create backup!\n"
+        "    pause\n"
+        "    exit /b 1\n"
+        ")\n"
+        "\n"
         "echo Installing update...\n"
-        "move /Y \"{}\" \"{}\"\n"
+        "move /Y \"%%NEW_PATH%%\" \"%%CURRENT_PATH%%\"\n"
         "if errorlevel 1 (\n"
         "    echo Update failed! Restoring backup...\n"
-        "    copy /Y \"{}\" \"{}\"\n"
+        "    copy /Y \"%%BACKUP_PATH%%\" \"%%CURRENT_PATH%%\"\n"
+        "    pause\n"
+        "    exit /b 1\n"
         ")\n"
+        "\n"
+        "echo Update successful!\n"
         "echo Starting application...\n"
-        "start \"\" \"{}\"\n"
-        "del \"%~f0\"\n",
-        currentExecutable, backupPath,
-        newExecutable, currentExecutable,
-        backupPath, currentExecutable,
-        currentExecutable
+        "start \"\" \"%%CURRENT_PATH%%\"\n"
+        "del \"%%~f0\"\n",
+        newPath, currentPath, backupPath
     );
 #else
     std::format_to(std::ostreambuf_iterator<char>(script),
         "#!/bin/bash\n"
+        "set -e\n"
+        "\n"
         "echo 'Waiting for application to close...'\n"
         "sleep 2\n"
+        "\n"
+        "NEW_PATH=\"{}\"\n"
+        "CURRENT_PATH=\"{}\"\n"
+        "BACKUP_PATH=\"{}\"\n"
+        "\n"
         "echo 'Creating backup...'\n"
-        "cp \"{}\" \"{}\"\n"
-        "echo 'Installing update...'\n"
-        "if mv \"{}\" \"{}\"; then\n"
-        "    chmod +x \"{}\"\n"
-        "    echo 'Update successful!'\n"
+        "if [[ -d \"$CURRENT_PATH\" ]]; then\n"
+        "    cp -R \"$CURRENT_PATH\" \"$BACKUP_PATH\"\n"
         "else\n"
-        "    echo 'Update failed! Restoring backup...'\n"
-        "    cp \"{}\" \"{}\"\n"
+        "    cp \"$CURRENT_PATH\" \"$BACKUP_PATH\"\n"
         "fi\n"
+        "\n"
+        "echo 'Installing update...'\n"
+        "if [[ -d \"$NEW_PATH\" ]]; then\n"
+        "    rm -rf \"$CURRENT_PATH\"\n"
+        "    mv \"$NEW_PATH\" \"$CURRENT_PATH\"\n"
+        "else\n"
+        "    mv \"$NEW_PATH\" \"$CURRENT_PATH\"\n"
+        "fi\n"
+        "\n"
+        "echo 'Code signing...'\n"
+        "if [[ -d \"$CURRENT_PATH\" ]]; then\n"
+        "    codesign --force --deep --sign - \"$CURRENT_PATH\" 2>/dev/null || true\n"
+        "else\n"
+        "    codesign --force --sign - \"$CURRENT_PATH\" 2>/dev/null || true\n"
+        "fi\n"
+        "\n"
+        "xattr -rd com.apple.quarantine \"$CURRENT_PATH\" 2>/dev/null || true\n"
+        "\n"
+        "echo 'Update successful!'\n"
         "echo 'Starting application...'\n"
-        "\"{}\" &\n"
+        "if [[ -d \"$CURRENT_PATH\" ]]; then\n"
+        "    open \"$CURRENT_PATH\"\n"
+        "else\n"
+        "    \"$CURRENT_PATH\" &\n"
+        "fi\n"
+        "\n"
         "rm \"$0\"\n",
-        currentExecutable, backupPath,
-        newExecutable, currentExecutable,
-        currentExecutable,
-        backupPath, currentExecutable,
-        currentExecutable
+        newPath, currentPath, backupPath
     );
 #endif
+
     script.close();
-    std::filesystem::permissions(scriptPath, std::filesystem::perms::owner_exec | std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+
+#ifndef _WIN32
+    std::filesystem::permissions(scriptPath,
+        std::filesystem::perms::owner_exec |
+        std::filesystem::perms::owner_read |
+        std::filesystem::perms::owner_write);
+#endif
 }
 
 void AutoUpdater::LaunchUpdateScript() {
@@ -202,12 +294,13 @@ void AutoUpdater::LaunchUpdateScript() {
         nullptr,
         nullptr,
         FALSE,
-        CREATE_NO_WINDOW,
+        CREATE_NO_WINDOW | DETACHED_PROCESS,
         nullptr,
         nullptr,
         &si,
         &pi
     )) {
+        LOG_ERROR("Failed to launch update script: {}", GetLastError());
         return;
     }
 
@@ -217,19 +310,14 @@ void AutoUpdater::LaunchUpdateScript() {
     pid_t pid;
     std::string path = scriptPath.string();
     char* argv[] = {
+        const_cast<char*>("/bin/bash"),
         const_cast<char*>(path.c_str()),
         nullptr
     };
 
-    if (posix_spawn(
-            &pid,
-            path.c_str(),
-            nullptr,
-            nullptr,
-            argv,
-            environ
-        ) != 0) {
-        }
+    if (posix_spawn(&pid, "/bin/bash", nullptr, nullptr, argv, environ) != 0) {
+        LOG_ERROR("Failed to launch update script");
+    }
 #endif
 }
 
@@ -253,18 +341,166 @@ std::string AutoUpdater::FormatSpeed(size_t bytesPerSecond) noexcept {
     return std::format("{}/s", FormatBytes(bytesPerSecond));
 }
 
+#ifdef __APPLE__
+bool AutoUpdater::ExtractZipToPath(const std::filesystem::path& zipPath, const std::filesystem::path& destPath) {
+    LOG_INFO("Extracting {} to {}", zipPath.string(), destPath.string());
+
+    std::filesystem::create_directories(destPath);
+
+    // Use ditto for extraction (preserves resource forks and metadata)
+    const auto cmd = std::format("ditto -xk \"{}\" \"{}\"", zipPath.string(), destPath.string());
+    const int result = std::system(cmd.c_str());
+
+    if (result != 0) {
+        LOG_ERROR("Failed to extract zip: exit code {}", result);
+        return false;
+    }
+
+    return true;
+}
+
+bool AutoUpdater::IsUniversalBinary(const std::filesystem::path& binaryPath) {
+    const auto cmd = std::format("lipo -info \"{}\" 2>/dev/null | grep -q 'Architectures in the fat file'",
+        binaryPath.string());
+    return std::system(cmd.c_str()) == 0;
+}
+
+bool AutoUpdater::ExtractSlice(const std::filesystem::path& binaryPath, const std::string& arch, const std::filesystem::path& outputPath) {
+    LOG_INFO("Extracting {} slice from {}", arch, binaryPath.string());
+
+    const auto cmd = std::format("lipo \"{}\" -thin {} -output \"{}\"",
+        binaryPath.string(), arch, outputPath.string());
+
+    const int result = std::system(cmd.c_str());
+    if (result != 0) {
+        LOG_ERROR("Failed to extract {} slice: exit code {}", arch, result);
+        return false;
+    }
+
+    return true;
+}
+
+bool AutoUpdater::CreateUniversalBinary(const std::filesystem::path& arm64Path, const std::filesystem::path& x86_64Path, const std::filesystem::path& outputPath) {
+    LOG_INFO("Creating universal binary at {}", outputPath.string());
+
+    const auto cmd = std::format("lipo -create \"{}\" \"{}\" -output \"{}\"",
+        arm64Path.string(), x86_64Path.string(), outputPath.string());
+
+    const int result = std::system(cmd.c_str());
+    if (result != 0) {
+        LOG_ERROR("Failed to create universal binary: exit code {}", result);
+        return false;
+    }
+
+    chmod(outputPath.string().c_str(), 0755);
+
+    return true;
+}
+
+bool AutoUpdater::ApplyUniversalDeltaUpdate(const std::filesystem::path& arm64PatchPath,
+                                            const std::filesystem::path& x86_64PatchPath,
+                                            const std::filesystem::path& outputAppPath) {
+    LOG_INFO("Applying universal binary delta update...");
+
+    const auto currentAppPath = GetAppBundlePath();
+    const auto currentBinaryPath = currentAppPath / "Contents" / "MacOS" / "AltMan";
+
+    if (!std::filesystem::exists(currentBinaryPath)) {
+        LOG_ERROR("Current binary not found: {}", currentBinaryPath.string());
+        return false;
+    }
+
+    if (!IsUniversalBinary(currentBinaryPath)) {
+        LOG_ERROR("Current binary is not a universal binary");
+        return false;
+    }
+
+    const auto tempDir = std::filesystem::temp_directory_path() / "altman_delta_work";
+    std::filesystem::remove_all(tempDir);
+    std::filesystem::create_directories(tempDir);
+
+    // Extract both slices from current binary
+    const auto currentArm64 = tempDir / "current_arm64";
+    const auto currentX86_64 = tempDir / "current_x86_64";
+
+    if (!ExtractSlice(currentBinaryPath, "arm64", currentArm64)) {
+        LOG_ERROR("Failed to extract arm64 slice from current binary");
+        std::filesystem::remove_all(tempDir);
+        return false;
+    }
+
+    if (!ExtractSlice(currentBinaryPath, "x86_64", currentX86_64)) {
+        LOG_ERROR("Failed to extract x86_64 slice from current binary");
+        std::filesystem::remove_all(tempDir);
+        return false;
+    }
+
+    const auto patchedArm64 = tempDir / "patched_arm64";
+    const auto patchedX86_64 = tempDir / "patched_x86_64";
+
+    LOG_INFO("Patching arm64 slice...");
+    if (!ApplyDeltaPatch(currentArm64, arm64PatchPath, patchedArm64)) {
+        LOG_ERROR("Failed to patch arm64 slice");
+        std::filesystem::remove_all(tempDir);
+        return false;
+    }
+
+    LOG_INFO("Patching x86_64 slice...");
+    if (!ApplyDeltaPatch(currentX86_64, x86_64PatchPath, patchedX86_64)) {
+        LOG_ERROR("Failed to patch x86_64 slice");
+        std::filesystem::remove_all(tempDir);
+        return false;
+    }
+
+    LOG_INFO("Copying app bundle to output...");
+    std::filesystem::copy(currentAppPath, outputAppPath, std::filesystem::copy_options::recursive);
+
+    // Reassemble universal binary from patched slices
+    const auto outputBinaryPath = outputAppPath / "Contents" / "MacOS" / "AltMan";
+    std::filesystem::remove(outputBinaryPath);
+
+    if (!CreateUniversalBinary(patchedArm64, patchedX86_64, outputBinaryPath)) {
+        LOG_ERROR("Failed to reassemble universal binary");
+        std::filesystem::remove_all(tempDir);
+        std::filesystem::remove_all(outputAppPath);
+        return false;
+    }
+
+    std::filesystem::remove_all(tempDir);
+
+    LOG_INFO("Universal binary delta update applied successfully");
+    return true;
+}
+#endif
+
 bool AutoUpdater::ApplyDeltaPatch(const std::filesystem::path& oldFile, const std::filesystem::path& patchFile, const std::filesystem::path& newFile) {
     LOG_INFO("Applying delta patch...");
+    LOG_INFO("  Old: {}", oldFile.string());
+    LOG_INFO("  Patch: {}", patchFile.string());
+    LOG_INFO("  New: {}", newFile.string());
 
 #ifdef _WIN32
+    // Windows: Use xdelta3
+    // xdelta3 -d -s <old> <patch> <new>
     const auto cmd = std::format("xdelta3 -d -s \"{}\" \"{}\" \"{}\"",
         oldFile.string(), patchFile.string(), newFile.string());
 #else
+    // macOS: Use bspatch
+    // bspatch <old> <new> <patch>
     const auto cmd = std::format("bspatch \"{}\" \"{}\" \"{}\"",
         oldFile.string(), newFile.string(), patchFile.string());
 #endif
 
-    return std::system(cmd.c_str()) == 0;
+    LOG_INFO("Running: {}", cmd);
+    const int result = std::system(cmd.c_str());
+
+    if (result != 0) {
+        LOG_ERROR("Delta patch failed with exit code: {}", result);
+        return false;
+    }
+
+    LOG_INFO("Delta patch applied successfully");
+    return true;
 }
 
 UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json& release, UpdateChannel channel) {
@@ -280,20 +516,52 @@ UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json& release, UpdateCh
     info.isCritical = (info.changelog.find("[CRITICAL]") != std::string::npos ||
                       info.changelog.find("[SECURITY]") != std::string::npos);
 
-    const auto assetName = GetPlatformAssetName(channel);
-    const auto deltaName = GetDeltaAssetName(APP_VERSION, info.version);
+    const auto fullAssetName = GetPlatformAssetName(channel);
+
+#ifdef _WIN32
+    const auto deltaAssetName = GetDeltaAssetName(APP_VERSION, info.version);
+#else
+    // macOS: look for both arm64 and x86_64 delta patches
+    const auto deltaAssetName_arm64 = std::format("AltMan-Delta-{}-to-{}-macOS-arm64.bsdiff",
+        APP_VERSION, info.version);
+    const auto deltaAssetName_x86_64 = std::format("AltMan-Delta-{}-to-{}-macOS-x86_64.bsdiff",
+        APP_VERSION, info.version);
+#endif
+
+    LOG_INFO("Looking for full asset: '{}'", fullAssetName);
+#ifdef _WIN32
+    LOG_INFO("Looking for delta asset: '{}'", deltaAssetName);
+#else
+    LOG_INFO("Looking for delta assets: '{}', '{}'", deltaAssetName_arm64, deltaAssetName_x86_64);
+#endif
 
     if (release.contains("assets")) {
         for (const auto& asset : release["assets"]) {
             const std::string name = asset.value("name", "");
 
-            if (name == assetName) {
+            if (name == fullAssetName) {
                 info.downloadUrl = asset.value("browser_download_url", "");
                 info.fullSize = asset.value("size", 0);
-            } else if (name == deltaName) {
+                LOG_INFO("Found full asset: {} ({} bytes)", name, info.fullSize);
+            }
+#ifdef _WIN32
+            else if (name == deltaAssetName) {
                 info.deltaUrl = asset.value("browser_download_url", "");
                 info.deltaSize = asset.value("size", 0);
+                LOG_INFO("Found delta asset: {} ({} bytes)", name, info.deltaSize);
             }
+#else
+            else if (name == deltaAssetName_arm64) {
+                info.deltaUrl_arm64 = asset.value("browser_download_url", "");
+                info.deltaSize_arm64 = asset.value("size", 0);
+                LOG_INFO("Found arm64 delta: {} ({} bytes)", name, info.deltaSize_arm64);
+            }
+            else if (name == deltaAssetName_x86_64) {
+                info.deltaUrl_x86_64 = asset.value("browser_download_url", "");
+                info.deltaSize_x86_64 = asset.value("size", 0);
+                LOG_INFO("Found x86_64 delta: {} ({} bytes)", name, info.deltaSize_x86_64);
+            }
+#endif
         }
     }
 
@@ -331,6 +599,16 @@ bool AutoUpdater::MatchesChannel(const nlohmann::json& release, UpdateChannel ch
 
 void AutoUpdater::Initialize() {
     config.Load();
+
+    LOG_INFO("AutoUpdater initialized");
+    LOG_INFO("Platform: {}", SystemInfo::GetPlatformString());
+    LOG_INFO("Architecture: {}", SystemInfo::GetArchitectureString());
+    LOG_INFO("Hardware: {}", SystemInfo::GetHardwareArchitecture());
+#ifdef _WIN32
+    LOG_INFO("Emulated: {}", SystemInfo::IsRunningUnderEmulation() ? "yes" : "no");
+#else
+    LOG_INFO("Rosetta: {}", SystemInfo::IsRunningUnderRosetta() ? "yes" : "no");
+#endif
 
     if (config.autoCheck) {
         StartBackgroundChecker();
@@ -399,20 +677,22 @@ void AutoUpdater::StartBackgroundChecker() {
 
 void AutoUpdater::CheckForUpdates(bool silent) {
     ThreadTask::fireAndForget([silent]() {
+        LOG_INFO("Checking for updates (channel: {})", GetChannelName(config.channel));
+
         const auto endpoint = GetReleaseEndpoint(config.channel);
         const auto resp = HttpClient::get(endpoint, {
-            {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"},
+            {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
             {"Accept", "application/vnd.github+json"}
         });
 
         if (resp.status_code != 200) {
-            LOG_INFO("Failed to check for updates: HTTP {}", resp.status_code);
+            LOG_ERROR("Failed to check for updates: HTTP {}", resp.status_code);
 
             if (!silent) {
-                const auto showError = []() {
-                	UpdateNotification::Show("Update Check Failed", "Failed to check for updates. Please try again later.");
-                };
-                ThreadTask::RunOnMain(showError);
+                ThreadTask::RunOnMain([]() {
+                    UpdateNotification::Show("Update Check Failed",
+                        "Failed to check for updates. Please try again later.");
+                });
             }
             return;
         }
@@ -437,14 +717,16 @@ void AutoUpdater::CheckForUpdates(bool silent) {
         }
 
         if (!foundUpdate) {
+            LOG_INFO("No updates available (current: {})", APP_VERSION);
             if (!silent) {
-                const auto showUpToDate = []() {
-                	UpdateNotification::Show("Up to Date", "You're using the latest version!");
-                };
-                ThreadTask::RunOnMain(showUpToDate);
+                ThreadTask::RunOnMain([]() {
+                    UpdateNotification::Show("Up to Date", "You're using the latest version!");
+                });
             }
             return;
         }
+
+        LOG_INFO("Update available: {} -> {}", APP_VERSION, updateInfo.version);
 
         ThreadTask::RunOnMain([updateInfo, silent]() {
             HandleUpdateAvailable(updateInfo, silent);
@@ -453,16 +735,19 @@ void AutoUpdater::CheckForUpdates(bool silent) {
 }
 
 void AutoUpdater::HandleUpdateAvailable(const UpdateInfo& info, bool silent) {
-    const auto channelLabel = std::format(" ({})", GetChannelName(info.channel));
+    const auto channelLabel = (info.channel != UpdateChannel::Stable)
+        ? std::format(" ({})", GetChannelName(info.channel))
+        : "";
+
     std::string msg = std::format("Version {}{} is available!", info.version, channelLabel);
 
     if (info.isCritical) {
         msg = std::format("[CRITICAL UPDATE] {}", msg);
     }
 
-    if (!info.deltaUrl.empty() && info.deltaSize < info.fullSize) {
-        const size_t savingsMB = (info.fullSize - info.deltaSize) / (1024 * 1024);
-        msg = std::format("{}\n\nDelta update available (saves {} MB)", msg, savingsMB);
+    if (info.hasDelta() && info.totalDeltaSize() < info.fullSize) {
+        const size_t savingsMB = (info.fullSize - info.totalDeltaSize()) / (1024 * 1024);
+        msg = std::format("{}\n\nDelta update available (saves ~{} MB)", msg, savingsMB);
     }
 
     if (!info.changelog.empty() && info.changelog.length() < 200) {
@@ -476,14 +761,9 @@ void AutoUpdater::HandleUpdateAvailable(const UpdateInfo& info, bool silent) {
             });
         });
     } else {
-        if (config.autoDownload && !silent) {
-            msg = std::format("{}\n\nDownload automatically?", msg);
-            ModalPopup::AddOk(msg, [info]() {
-                DownloadAndInstallUpdate(info);
-            });
-        } else if (config.autoDownload && config.autoInstall && silent) {
+        if (config.autoDownload && config.autoInstall && silent) {
             DownloadAndInstallUpdate(info, true);
-        } else if (!silent) {
+        } else {
             ModalPopup::AddOk(msg, [info]() {
                 DownloadAndInstallUpdate(info);
             });
@@ -493,74 +773,152 @@ void AutoUpdater::HandleUpdateAvailable(const UpdateInfo& info, bool silent) {
 
 void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInstall) {
     ThreadTask::fireAndForget([info, autoInstall]() {
-        const auto tempPath = std::filesystem::temp_directory_path() / "altman_update.tmp";
-        bool useDelta = !info.deltaUrl.empty();
+        const bool useDelta = info.hasDelta();
         bool success = false;
 
-        const auto showDownloadStart = [useDelta]() {
-        	UpdateNotification::Show("Download Started", useDelta ? "Downloading delta update..." : "Downloading update...", 3.0f);
+        const auto tempDir = std::filesystem::temp_directory_path() / "altman_update";
+        std::filesystem::remove_all(tempDir);
+        std::filesystem::create_directories(tempDir);
+
+#ifdef __APPLE__
+        const auto outputAppPath = tempDir / "AltMan.app";
+#else
+        const auto outputExePath = tempDir / "AltMan.exe";
+#endif
+
+        ThreadTask::RunOnMain([useDelta]() {
+            UpdateNotification::Show("Download Started",
+                useDelta ? "Downloading delta update..." : "Downloading update...", 3.0f);
+        });
+
+        const auto progressCallback = [](int percentage, size_t speed, size_t total) {
+            // Progress is tracked via DownloadState
         };
-        ThreadTask::RunOnMain(showDownloadStart);
 
         if (useDelta) {
-            const auto patchPath = std::filesystem::temp_directory_path() / "altman_update.patch";
+#ifdef __APPLE__
+            const auto arm64PatchPath = tempDir / "patch_arm64.bsdiff";
+            const auto x86_64PatchPath = tempDir / "patch_x86_64.bsdiff";
 
-            const auto progressCallback = [](int percentage, size_t speed, size_t total) {
-                // LOG_INFO("Download progress: {}% - {} - {}", percentage, AutoUpdater::FormatSpeed(speed), AutoUpdater::FormatBytes(total));
-            };
+            LOG_INFO("Downloading arm64 delta patch...");
+            ThreadTask::RunOnMain([]() {
+                UpdateNotification::Show("Downloading", "Downloading arm64 patch...", 2.0f);
+            });
 
+            bool arm64Success = DownloadFileWithResume(info.deltaUrl_arm64, arm64PatchPath, progressCallback);
+
+            if (arm64Success) {
+                LOG_INFO("Downloading x86_64 delta patch...");
+                ThreadTask::RunOnMain([]() {
+                    UpdateNotification::Show("Downloading", "Downloading x86_64 patch...", 2.0f);
+                });
+
+                bool x86_64Success = DownloadFileWithResume(info.deltaUrl_x86_64, x86_64PatchPath, progressCallback);
+
+                if (x86_64Success) {
+                    ThreadTask::RunOnMain([]() {
+                        UpdateNotification::Show("Applying Patch", "Applying delta patches...", 3.0f);
+                    });
+
+                    success = ApplyUniversalDeltaUpdate(arm64PatchPath, x86_64PatchPath, outputAppPath);
+
+                    std::filesystem::remove(arm64PatchPath);
+                    std::filesystem::remove(x86_64PatchPath);
+                }
+            }
+
+            if (!success) {
+                LOG_WARN("Delta patch failed, falling back to full download");
+                std::filesystem::remove(arm64PatchPath);
+                std::filesystem::remove(x86_64PatchPath);
+                if (std::filesystem::exists(outputAppPath)) {
+                    std::filesystem::remove_all(outputAppPath);
+                }
+            }
+#else
+            const auto patchPath = tempDir / "update.xdelta";
             success = DownloadFileWithResume(info.deltaUrl, patchPath, progressCallback);
 
             if (success) {
-                const auto showPatchApply = []() {
-                	UpdateNotification::Show("Applying Patch", "Applying delta patch...", 3.0f);
-                };
-                ThreadTask::RunOnMain(showPatchApply);
+                ThreadTask::RunOnMain([]() {
+                    UpdateNotification::Show("Applying Patch", "Applying delta patch...", 3.0f);
+                });
 
-                const auto currentExe = GetCurrentExecutablePath();
-                success = ApplyDeltaPatch(currentExe, patchPath, tempPath);
+                const auto currentExePath = GetCurrentExecutablePath();
+                success = ApplyDeltaPatch(currentExePath, patchPath, outputExePath);
                 std::filesystem::remove(patchPath);
 
                 if (!success) {
                     LOG_WARN("Delta patch failed, falling back to full download");
-                    useDelta = false;
                 }
             }
+#endif
         }
 
-        if (!useDelta) {
-            const auto progressCallback = [](int percentage, size_t speed, size_t total) {
-                // LOG_INFO("Download progress: {}% - {} - {}", percentage, AutoUpdater::FormatSpeed(speed), AutoUpdater::FormatBytes(total));
-            };
+        if (!useDelta || !success) {
+#ifdef __APPLE__
+            const auto zipPath = tempDir / "update.zip";
+            success = DownloadFileWithResume(info.downloadUrl, zipPath, progressCallback);
 
-            success = DownloadFileWithResume(info.downloadUrl, tempPath, progressCallback);
+            if (success) {
+                ThreadTask::RunOnMain([]() {
+                    UpdateNotification::Show("Extracting", "Extracting update...", 3.0f);
+                });
+
+                const auto extractPath = tempDir / "extracted";
+                success = ExtractZipToPath(zipPath, extractPath);
+                std::filesystem::remove(zipPath);
+
+                if (success) {
+                    for (const auto& entry : std::filesystem::directory_iterator(extractPath)) {
+                        if (entry.path().extension() == ".app") {
+                            if (std::filesystem::exists(outputAppPath)) {
+                                std::filesystem::remove_all(outputAppPath);
+                            }
+                            std::filesystem::rename(entry.path(), outputAppPath);
+                            break;
+                        }
+                    }
+
+                    success = std::filesystem::exists(outputAppPath);
+                }
+            }
+#else
+            success = DownloadFileWithResume(info.downloadUrl, outputExePath, progressCallback);
+#endif
         }
 
         if (!success) {
-            const auto showError = []() {
-            	UpdateNotification::Show("Download Failed", "Download failed. Please try again later.", 5.0f);
-            };
-            ThreadTask::RunOnMain(showError);
+            ThreadTask::RunOnMain([]() {
+                UpdateNotification::Show("Download Failed",
+                    "Download failed. Please try again later.", 5.0f);
+            });
+
+            std::filesystem::remove_all(tempDir);
             return;
         }
 
-        const auto showComplete = []() {
-        	UpdateNotification::Show("Download Complete", "Update downloaded successfully!", 3.0f);
-        };
-        ThreadTask::RunOnMain(showComplete);
+        ThreadTask::RunOnMain([]() {
+            UpdateNotification::Show("Download Complete",
+                "Update downloaded successfully!", 3.0f);
+        });
 
-        pendingUpdatePath = tempPath;
+#ifdef __APPLE__
+        pendingUpdatePath = outputAppPath;
+#else
+        pendingUpdatePath = outputExePath;
+#endif
         config.lastInstalledVersion = info.version;
 
         if (autoInstall || config.autoInstall) {
-            ThreadTask::RunOnMain([tempPath]() {
-                InstallUpdate(tempPath);
+            ThreadTask::RunOnMain([]() {
+                InstallUpdate(pendingUpdatePath);
             });
         } else {
-            ThreadTask::RunOnMain([tempPath]() {
+            ThreadTask::RunOnMain([]() {
                 ModalPopup::AddYesNo("Update ready! Restart now to install?",
-                    [tempPath]() {
-                        InstallUpdate(tempPath);
+                    []() {
+                        InstallUpdate(pendingUpdatePath);
                     });
             });
         }
@@ -568,7 +926,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
 }
 
 bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesystem::path& outputPath,
-                                  std::function<void(int, size_t, size_t)> progressCallback) {
+                                         std::function<void(int, size_t, size_t)> progressCallback) {
     LOG_INFO("Downloading: {}", url);
 
     currentDownload.url = std::string(url);
@@ -592,7 +950,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
     }
 
     std::vector<std::pair<std::string, std::string>> headers = {
-        {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
+        {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     };
 
     HttpClient::DownloadControl control{
@@ -670,17 +1028,20 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
 }
 
 void AutoUpdater::InstallUpdate(const std::filesystem::path& updatePath) {
-    const auto currentExe = GetCurrentExecutablePath();
-    auto backupPath = AltMan::Paths::BackupFile(std::format("altman_v{}_backup", APP_VERSION));
+    LOG_INFO("Installing update from: {}", updatePath.string());
 
-#ifdef _WIN32
-    backupPath.replace_extension(".exe");
+#ifdef __APPLE__
+    const auto currentPath = GetAppBundlePath();
+    auto backupPath = AltMan::Paths::BackupFile(std::format("AltMan_v{}_backup.app", APP_VERSION));
+#else
+    const auto currentPath = GetCurrentExecutablePath();
+    auto backupPath = AltMan::Paths::BackupFile(std::format("AltMan_v{}_backup.exe", APP_VERSION));
 #endif
 
     config.backupPath = backupPath;
     config.Save();
 
-    CreateUpdateScript(updatePath.string(), currentExe.string(), backupPath.string());
+    CreateUpdateScript(updatePath.string(), currentPath.string(), backupPath.string());
     LaunchUpdateScript();
 
     std::exit(0);
@@ -688,40 +1049,50 @@ void AutoUpdater::InstallUpdate(const std::filesystem::path& updatePath) {
 
 void AutoUpdater::RollbackToPreviousVersion() {
     if (config.backupPath.empty() || !std::filesystem::exists(config.backupPath)) {
-        LOG_INFO("No backup available for rollback");
+        LOG_ERROR("No backup available for rollback");
 
-        const auto showError = []() {
-        	UpdateNotification::Show("Rollback Failed", "No backup found. Cannot rollback.", 5.0f);
-        };
-        ThreadTask::RunOnMain(showError);
+        ThreadTask::RunOnMain([]() {
+            UpdateNotification::Show("Rollback Failed",
+                "No backup found. Cannot rollback.", 5.0f);
+        });
         return;
     }
 
     ThreadTask::fireAndForget([]() {
-        const auto currentExe = GetCurrentExecutablePath();
-        const auto tempBackup = std::filesystem::path(currentExe).concat(".rollback_tmp");
+#ifdef __APPLE__
+        const auto currentPath = GetAppBundlePath();
+        const auto tempBackup = std::filesystem::temp_directory_path() / "altman_rollback_tmp.app";
+        std::filesystem::copy(currentPath, tempBackup, std::filesystem::copy_options::recursive);
+#else
+        const auto currentPath = GetCurrentExecutablePath();
+        auto tempBackup = std::filesystem::path(currentPath).concat(".rollback_tmp");
+        std::filesystem::copy_file(currentPath, tempBackup, std::filesystem::copy_options::overwrite_existing);
+#endif
 
-        std::filesystem::copy_file(currentExe, tempBackup, std::filesystem::copy_options::overwrite_existing);
-        CreateUpdateScript(config.backupPath.string(), currentExe.string(), tempBackup.string());
+        CreateUpdateScript(config.backupPath.string(), currentPath.string(), tempBackup.string());
 
-        const auto confirmRollback = []() {
+        ThreadTask::RunOnMain([]() {
             ModalPopup::AddYesNo("Rolling back to previous version. Restart now?",
                 []() {
                     LaunchUpdateScript();
                     std::exit(0);
                 });
-        };
-        ThreadTask::RunOnMain(confirmRollback);
+        });
     });
 }
 
 void AutoUpdater::CleanupOldBackups(int keepCount) {
     const auto backupDir = AltMan::Paths::Backups();
 
+    if (!std::filesystem::exists(backupDir)) {
+        return;
+    }
+
     std::vector<std::filesystem::path> backups;
 
     for (const auto& entry : std::filesystem::directory_iterator(backupDir)) {
-        if (entry.path().filename().string().find("altman_v") != std::string::npos) {
+        const auto filename = entry.path().filename().string();
+        if (filename.find("AltMan") != std::string::npos) {
             backups.push_back(entry.path());
         }
     }
@@ -735,26 +1106,12 @@ void AutoUpdater::CleanupOldBackups(int keepCount) {
     });
 
     for (size_t i = static_cast<size_t>(keepCount); i < backups.size(); ++i) {
-        std::filesystem::remove(backups[i]);
-        LOG_INFO("Removed old backup: {}", backups[i].string());
+        std::error_code ec;
+        std::filesystem::remove_all(backups[i], ec);
+        if (!ec) {
+            LOG_INFO("Removed old backup: {}", backups[i].string());
+        }
     }
-}
-
-std::filesystem::path AutoUpdater::GetCurrentExecutablePath() {
-#ifdef _WIN32
-    std::array<char, MAX_PATH> buffer{};
-    GetModuleFileNameA(nullptr, buffer.data(), MAX_PATH);
-    return std::filesystem::path(buffer.data());
-#elif __APPLE__
-    std::array<char, 1024> buffer{};
-    uint32_t size = buffer.size();
-    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
-        return std::filesystem::path(buffer.data());
-    }
-    return {};
-#else
-    return std::filesystem::read_symlink("/proc/self/exe");
-#endif
 }
 
 #ifdef __APPLE__
@@ -771,20 +1128,5 @@ std::string GetApplicationNameFromBundleId() {
         return "";
     }
     return std::string(buffer.data());
-}
-
-std::string GetCurrentExecutableRealPath() {
-    std::array<char, PATH_MAX> buffer{};
-    uint32_t size = buffer.size();
-
-    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
-        return "";
-    }
-
-    std::array<char, PATH_MAX> resolved{};
-    if (!realpath(buffer.data(), resolved.data())) {
-        return "";
-    }
-    return std::string(resolved.data());
 }
 #endif

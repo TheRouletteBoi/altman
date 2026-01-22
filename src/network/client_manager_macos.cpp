@@ -7,73 +7,18 @@
 #include <array>
 #include <regex>
 #include <algorithm>
-#include <cctype>
-#include <sys/sysctl.h>
 
 #include "console/console.h"
 #include "http.h"
 #include "ipa_installer_macos.h"
 #include "system/client_update_checker_macos.h"
 #include "system/multi_instance.h"
+#include "system/system_info.h"
 #include "utils/thread_task.h"
 #include "utils/paths.h"
 #include "components/data.h"
 
 namespace ClientManager {
-
-std::string GetHardwareArchitecture() {
-    int isArm = 0;
-    size_t size = sizeof(isArm);
-
-    if (sysctlbyname("hw.optional.arm64", &isArm, &size, nullptr, 0) == 0 && isArm) {
-        return "aarch64";
-    }
-    return "x86_64";
-}
-
-bool IsRunningUnderRosetta() {
-    int translated = 0;
-    size_t size = sizeof(translated);
-
-    if (sysctlbyname("sysctl.proc_translated", &translated, &size, nullptr, 0) == 0) {
-        return translated == 1;
-    }
-    return false;
-}
-
-std::string GetEffectiveArchitecture() {
-    if (IsRunningUnderRosetta())
-        return "x86_64 (Rosetta)";
-
-    return GetHardwareArchitecture();
-}
-
-Architecture DetectArchitecture() {
-    if (IsRunningUnderRosetta())
-        return Architecture::X86_64_Rosetta;
-
-    if (GetHardwareArchitecture() == "arm64")
-        return Architecture::Arm64;
-
-    return Architecture::X86_64;
-}
-
-bool ExecuteCommand(const std::string& command, std::string& output) {
-    std::array<char, 128> buffer;
-    output.clear();
-
-    FILE* pipe = popen((command + " 2>&1").c_str(), "r");
-    if (!pipe) {
-        return false;
-    }
-
-    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-        output += buffer.data();
-    }
-
-    const int exitCode = pclose(pipe);
-    return WEXITSTATUS(exitCode) == 0;
-}
 
 std::string GetLatestRobloxVersion() {
     const std::string url = "https://clientsettings.roblox.com/v2/client-version/MacPlayer";
@@ -216,8 +161,8 @@ std::string GetDeltaVersion() {
 
 bool DownloadRoblox(const std::string& version, const std::string& outputPath,
                     ProgressCallback progressCb) {
-    const std::string arch = GetHardwareArchitecture();
-    const std::string url = (arch == "aarch64")
+    const std::string arch = SystemInfo::GetHardwareArchitecture();
+    const std::string url = (arch == "arm64")
         ? std::format("https://setup.rbxcdn.com/mac/arm64/{}-RobloxPlayer.zip", version)
         : std::format("https://setup.rbxcdn.com/mac/{}-RobloxPlayer.zip", version);
 
@@ -254,7 +199,7 @@ bool ExtractRoblox(const std::string& zipPath, const std::string& extractTo,
     const std::string command = std::format("unzip -o -q \"{}\" -d \"{}\"", zipPath, extractTo);
     std::string output;
 
-    if (!ExecuteCommand(command, output)) {
+    if (!SystemInfo::ExecuteCommand(command, output)) {
         LOG_ERROR("Failed to extract: {}", output);
         return false;
     }
@@ -317,16 +262,16 @@ bool DownloadInsertDylib(const std::string& outputPath, ProgressCallback progres
     const std::string command = std::format("chmod +x \"{}\"", outputPath);
     std::string output;
 
-    return ExecuteCommand(command, output);
+    return SystemInfo::ExecuteCommand(command, output);
 }
 
 bool DownloadDylib(const std::string& clientName, const std::string& outputPath,
                    ProgressCallback progressCb) {
-    const std::string arch = GetHardwareArchitecture();
+    const std::string arch = SystemInfo::GetHardwareArchitecture();
 	const auto appDataDir = AltMan::Paths::AppData();
 
     if (clientName == "MacSploit") {
-        const std::string url = (arch == "aarch64")
+        const std::string url = (arch == "arm64")
             ? "https://git.raptor.fun/arm/macsploit.dylib"
             : "https://git.raptor.fun/main/macsploit.dylib";
 
@@ -400,7 +345,7 @@ bool DownloadDylib(const std::string& clientName, const std::string& outputPath,
         );
 
         std::string unzipOutput;
-        if (!ExecuteCommand(unzipCmd, unzipOutput)) {
+        if (!SystemInfo::ExecuteCommand(unzipCmd, unzipOutput)) {
             LOG_ERROR("Failed to unzip {}: {}", clientName, unzipOutput);
             std::filesystem::remove(zipPath);
             return false;
@@ -417,7 +362,7 @@ bool DownloadDylib(const std::string& clientName, const std::string& outputPath,
         }
 
         const std::filesystem::path executableDir = appPath / "Contents" / "MacOS";
-        const std::string dylibFilename = (arch == "aarch64")
+        const std::string dylibFilename = (arch == "arm64")
             ? (clientName + "-arm.dylib")
             : (clientName + "-intel.dylib");
 
@@ -481,7 +426,7 @@ bool InsertDylib(const std::string& insertDylibPath, const std::string& dylibPat
 
     std::string output;
 
-    if (!ExecuteCommand(command, output)) {
+    if (!SystemInfo::ExecuteCommand(command, output)) {
         LOG_ERROR("Failed to insert dylib: {}", output);
         return false;
     }
@@ -509,7 +454,7 @@ bool CodeSign(const std::string& appPath, bool remove, ProgressCallback progress
 
     std::string output;
 
-    if (!ExecuteCommand(command, output)) {
+    if (!SystemInfo::ExecuteCommand(command, output)) {
         LOG_ERROR("Codesign failed: {}", output);
         return false;
     }
@@ -539,9 +484,9 @@ void InstallClientAsync(const std::string& clientName,
 			return;
 		}
 
-		const std::string arch = GetHardwareArchitecture();
+		const std::string arch = SystemInfo::GetHardwareArchitecture();
 
-		if (arch == "aarch64" && clientName == "Delta") {
+		if (arch == "arm64" && clientName == "Delta") {
 			if (progressCb) progressCb(0.0f, "Fetching Delta version...");
 
 			std::string version;
@@ -696,7 +641,7 @@ void InstallClientAsync(const std::string& clientName,
 				return;
 			}
 
-			if (arch == "aarch64") {
+			if (arch == "arm64") {
 				if (progressCb) progressCb(0.8f, "Removing signature...");
 				if (!CodeSign(robloxPlayerPath.string(), true, nullptr)) {
 					if (completionCb) completionCb(false, "Failed to remove signature");

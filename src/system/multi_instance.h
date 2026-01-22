@@ -36,8 +36,6 @@ namespace MultiInstance {
     void Enable();
     void Disable();
 
-    std::pair<int, std::string> executeCommand(const std::string& cmd);
-
     std::string getUserClientPath(const std::string& username, const std::string& clientName);
     std::string getBaseClientPath(const std::string& clientName);
     std::string getClientPath(const std::string& username, const std::string& clientName);
