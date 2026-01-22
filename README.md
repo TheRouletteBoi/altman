@@ -6,7 +6,7 @@
             style="display: block; margin: 0 auto" />
 <h1>AltMan</h1>
 <h3>Roblox Account Manager & Multi-Instance Launcher</h3>
-<p>AltMan is a robust and intuitive <strong>Roblox alt manager</strong> designed to help you manage multiple Roblox accounts effortlessly. Add all your alt accounts into one application, launch multiple Roblox instances simultaneously, and switch between accounts without logging out.</p>
+<p><strong>AltMan</strong> is a cross-platform Roblox account manager focused on stability, transparency, and local user control. It enables managing multiple Roblox accounts, launching multiple instances, and switching accounts without repeated logins.</p>
 
 <p>
     <img src="https://img.shields.io/badge/Roblox-Account%20Manager-red" alt="Roblox Account Manager"/>
@@ -17,33 +17,44 @@
 
 ---
 
+## 🧭 Project Goals
+
+* Provide a stable and predictable Roblox account manager
+* Keep all data local, encrypted, and under user control
+* Support multi-instance workflows without background services
+* Maintain a clear, contributor-friendly codebase
+
+---
+
 ## 🎮 What is AltMan?
 
-AltMan is a **Roblox account manager** that allows you to add multiple accounts into one application, making it easy to play on alt accounts without having to change accounts manually. Similar to other Roblox alt managers, AltMan provides a convenient way to open **multiple Roblox instances** for different accounts and offers a variety of options to manage them efficiently.
+AltMan allows you to manage multiple Roblox accounts within a single application. It simplifies switching between accounts, launching multiple Roblox clients simultaneously, and joining servers through multiple supported methods.
 
-**Keywords:** `roblox account manager` `alt manager` `roblox alt manager` `multi roblox` `multiple roblox instances` `roblox multi instance` `alt manager roblox` `roblox alts` `account switcher`
+The project is designed to be straightforward, auditable, and extensible rather than opaque or over-automated.
 
 ---
 
 ## ✨ Features
 
-- **Multi-Account Management** – Add, organize, and securely store cookies for multiple Roblox accounts.
-- **Multi-Instance Support** – Launch multiple Roblox instances simultaneously on the same PC.
-- **Quick Join** – Instantly join games via **JobID** or **PlaceID** or **Private Server Share Link**
-- **Friends Integration** – View and manage friends per account.
-- **Friend Requests** – Send friend requests directly from the interface.
-- **Server Browser** – Explore active Roblox game servers.
-- **Private Servers**
-  - View Joinable **Private Servers**
-  - Manage **Private Servers** You Are The Owner Of
-- **Advanced Filtering** – Sort servers by ping or player count.
-- **Game Discovery** – Search Roblox games by title or keyword.
-- **Log Parser** – Convert Roblox logs into a human-readable format.
-- **Multiple Client Support (MacOS Only)** – Assign different Roblox clients per account:
-  - Default
-  - Hydrogen
-  - Delta
-  - MacSploit
+* **Multi-Account Management** – Add, organize, and securely store cookies for multiple Roblox accounts
+* **Multi-Instance Support** – Launch multiple Roblox instances on the same machine
+* **Quick Join** – Join games via JobID, PlaceID, or Private Server Links
+* **Friends Integration** – View and manage friends per account
+* **Friend Requests** – Send friend requests directly from the interface
+* **Server Browser** – Browse active Roblox servers
+* **Private Servers**
+
+  * View joinable private servers
+  * Manage private servers you own
+* **Advanced Filtering** – Filter servers by ping or player count
+* **Game Discovery** – Search Roblox games by title or keyword
+* **Log Parser** – Convert Roblox logs into a human-readable format
+* **Multiple Client Support (macOS only)** – Assign different Roblox clients per account:
+
+  * Default
+  * Hydrogen
+  * Delta
+  * MacSploit
 
 ---
 
@@ -57,122 +68,138 @@ AltMan is a **Roblox account manager** that allows you to add multiple accounts 
 
 ### Adding Accounts
 
-1. Launch **AltMan**.
-2. Navigate to `Accounts` on the menu bar.
-3. Click `Add Account` > `Add Via Cookie`.
-4. Paste your cookie and click **Add Cookie**.
+1. Launch **AltMan**
+2. Navigate to `Accounts`
+3. Click `Add Account` → `Add Via Cookie` or `Add Via Login`
+4. Paste your cookie and confirm
 
 ### Joining Games
 
-- **By JobID**: Enter the JobID in the Quick Join field.
-- **By PlaceID**: Use a valid PlaceID to connect to a server.
-- **By Username**: Connect directly to a user's session (if joins are enabled).
-- **By Private Server Link**: Use a private server share link to join instantly.
+* **By JobID** – Join a specific server instance
+* **By PlaceID** – Join a game by place ID
+* **By Username** – Join a user's session (if allowed)
+* **By Private Server Link** – Join using a private server share link
 
-> 💡 **Tip**: You can also join games through the **Servers** or **Games** tabs.
+> 💡 You can also join games via the **Servers** or **Games** tabs
 
 ### Managing Friends
 
-1. Select an account from the list.
-2. Go to the **Friends** tab to see the current friend list.
-3. Use the **Add Friend** button to send requests via username or UserID.
+1. Select an account
+2. Open the **Friends** tab
+3. Send or manage friend requests
+
+---
+
+## 🤝 Contributing
+
+This project is actively maintained and welcomes contributions.
+
+### How to contribute
+
+* Fork the repository
+* Create a feature branch from `main`
+* Keep changes focused and well-scoped
+* Follow existing project structure and code style
+* Open a pull request explaining **what** changed and **why**
+
+### Before submitting
+
+* Open an issue first for large or architectural changes
+* Ensure the project builds successfully on your platform
+* Avoid unrelated refactors in the same pull request
+
+Issues, bug reports, and feature discussions are welcome.
 
 ---
 
 ## 💻 Requirements
 
-- Windows 10 or 11 (Tested for Windows 11 24H2)
-- MacOS 13.3+
-- Active internet connection
+* Windows 10 or 11 (tested on Windows 11 24H2)
+* macOS 13.3+
+* Active internet connection
+
+---
 
 ## 🔨 Building from Source
 
 ### Prerequisites
 
-- Visual Studio 2022 (or Build Tools) with the **Desktop development with C++** workload
-- CMake ≥ 3.25
-- [vcpkg](https://github.com/microsoft/vcpkg) (any location; set the `VCPKG_ROOT` environment variable)
-- Git
+* Visual Studio 2022 (or Build Tools) with **Desktop development with C++**
+* CMake ≥ 3.25
+* [vcpkg](https://github.com/microsoft/vcpkg) (set `VCPKG_ROOT`)
+* Git
 
-### 1. Clone the repository
+### Clone the repository
 
 ```bat
 git clone https://github.com/TheRouletteBoi/altman.git
 cd altman
 ```
 
-### 2. Bootstrap vcpkg (if you do not already have it)
+### Bootstrap vcpkg (if needed)
 
 ```bat
 git clone https://github.com/microsoft/vcpkg.git %USERPROFILE%\vcpkg
 %USERPROFILE%\vcpkg\bootstrap-vcpkg.bat
 ```
 
-### 3. Install dependencies
-
-The project ships with a `vcpkg.json` manifest. With vcpkg on your `%PATH%` simply run:
+### Install dependencies
 
 ```bat
 %USERPROFILE%\vcpkg\vcpkg.exe install
 ```
 
-(If you skip this step vcpkg will build the ports automatically the first time CMake configures.)
-
-### 4. Build with plain CMake (command-line)
+### Build (Windows)
 
 ```bat
 mkdir build
 cmake -B build -S . ^
   -DCMAKE_TOOLCHAIN_FILE=%USERPROFILE%\vcpkg\scripts\buildsystems\vcpkg.cmake ^
   -A x64 -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release -- /m
+cmake --build build --config Release
 ```
 
-Build for MacOS
+### Build (macOS)
 
-```bat
-cmake --build cmake-build-release --target AltMan -j 8
+```bash
+mkdir build
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --target AltMan -j 8
 ```
-
-The executable will be generated at `build\altman\altman.exe` together with the required `assets` folder.
-
-### 5. (Optional) Build from CLion
-
-1. Open the project folder in CLion.
-2. Go to **File ▸ Settings ▸ Build, Execution, Deployment ▸ CMake** and add\
-   `-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake` to _CMake options_.
-3. Make sure the **Toolchain** is set to the _Visual Studio_ toolchain (x86_64).
-4. Press ▶️ to run the `altman` target.
 
 ---
 
-## 🔒 Security
+## 🔒 Security & Transparency
 
-- Your account cookies are **stored locally and encrypted**.
-- All save files are kept inside a **storage** folder in the application's directory.
-- **Never** share your cookies with anyone.
-- Use the tool at your own risk.
+AltMan is designed with a strong emphasis on transparency and user awareness.
+
+* Account cookies are stored **locally** and **encrypted** on your machine
+* No account data is transmitted to third-party servers
 
 ---
 
 ## 📜 License
 
-This project is licensed under the **MIT License**. See the `LICENSE` file for full details.
+This project is licensed under the **MIT License**. See the `LICENSE` file for details.
 
 ---
 
-## 🤝 Contributing
+## ⚠️ Important risk notice
 
-Pull requests are welcome! For substantial changes, please open an issue to discuss the proposed improvements beforehand.
+Using account managers, multi-instance tools, or automation-related features may:
 
----
+* Violate Roblox’s Terms of Service depending on usage
+* Trigger automated moderation or anti-cheat systems
+* Result in warnings, temporary suspensions, or permanent bans
 
-## ⚠️ Disclaimer
+AltMan does **not** attempt to bypass Roblox security systems. However, any tool that manages cookies or launches multiple clients carries inherent risk.
 
-This tool is **not affiliated with Roblox Corporation**. Use responsibly and in compliance with [Roblox's Terms of Service](https://en.help.roblox.com/hc/en-us/articles/203313410-Roblox-Terms-of-Use).
+**You are solely responsible for how you use this app.**
+
+Never share your cookies, executables, or configuration files with anyone.
 
 ---
 
 <div align="center">
-<sub>AltMan • Roblox Account Manager • Alt Manager • Multi Roblox • Multiple Instances</sub>
+<sub>AltMan • Roblox Account Manager • Multi-Instance Launcher</sub>
 </div>
