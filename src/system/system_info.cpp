@@ -105,6 +105,9 @@ bool IsRunningUnderRosetta() {
 
 CpuArchitecture GetCpuArchitecture() {
 #ifdef _WIN32
+	USHORT processMachine = 0;
+	USHORT nativeMachine = 0;
+
 	if (!IsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
 		return CpuArchitecture::Unknown;
 	}
