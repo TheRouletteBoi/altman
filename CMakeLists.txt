@@ -90,12 +90,31 @@ elseif(WIN32)
     FetchContent_MakeAvailable(webview2)
 
     set(WEBVIEW2_INCLUDE_DIR "${webview2_SOURCE_DIR}/build/native/include")
-    if(CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
-        set(WEBVIEW2_LIB_DIR "${webview2_SOURCE_DIR}/build/native/arm64")
-    elseif(CMAKE_GENERATOR_PLATFORM STREQUAL "Win32")
-        set(WEBVIEW2_LIB_DIR "${webview2_SOURCE_DIR}/build/native/x86")
-    else()
+    include(CheckCSourceCompiles)
+    check_c_source_compiles("
+        #if defined(_M_X64)
+        int main() { return 0; }
+        #else
+        #error
+        #endif
+        " TARGET_IS_X64)
+
+    check_c_source_compiles("
+        #if defined(_M_ARM64)
+        int main() { return 0; }
+        #else
+        #error
+        #endif
+        " TARGET_IS_ARM64)
+
+    if(TARGET_IS_X64)
         set(WEBVIEW2_LIB_DIR "${webview2_SOURCE_DIR}/build/native/x64")
+        message(STATUS "Target architecture: x64")
+    elseif(TARGET_IS_ARM64)
+        set(WEBVIEW2_LIB_DIR "${webview2_SOURCE_DIR}/build/native/arm64")
+        message(STATUS "Target architecture: arm64")
+    else()
+        message(FATAL_ERROR "Unsupported MSVC target architecture")
     endif()
 endif()
 

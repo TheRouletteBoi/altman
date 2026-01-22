@@ -38,19 +38,19 @@ std::string_view GetPlatformString() noexcept {
 
 std::string GetHardwareArchitecture() {
 #ifdef _WIN32
-    SYSTEM_INFO si{};
-    GetNativeSystemInfo(&si);
+	USHORT processMachine = 0;
+	USHORT nativeMachine = 0;
 
-    switch (si.wProcessorArchitecture) {
-        case PROCESSOR_ARCHITECTURE_ARM64:
-            return "arm64";
-        case PROCESSOR_ARCHITECTURE_AMD64:
-            return "x86_64";
-        case PROCESSOR_ARCHITECTURE_INTEL:
-            return "x86";
-        default:
-            return "unknown";
-    }
+	if (!IsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
+		return "unknown";
+	}
+
+	switch (nativeMachine) {
+	case IMAGE_FILE_MACHINE_ARM64: return "arm64";
+	case IMAGE_FILE_MACHINE_AMD64: return "x86_64";
+	case IMAGE_FILE_MACHINE_I386:  return "x86";
+	default: return "unknown";
+	}
 #elif __APPLE__
     int isArm = 0;
     size_t size = sizeof(isArm);
@@ -65,21 +65,26 @@ std::string GetHardwareArchitecture() {
 
 bool IsRunningUnderEmulation() {
 #ifdef _WIN32
-    USHORT processMachine = 0;
-    USHORT nativeMachine = 0;
+	USHORT processMachine = 0;
+	USHORT nativeMachine = 0;
 
-    if (!IsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
-        return false;
-    }
-
-	if (processMachine == IMAGE_FILE_MACHINE_UNKNOWN)
+	if (!IsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
 		return false;
+	}
 
-	if (processMachine == IMAGE_FILE_MACHINE_ARM64 &&
-		nativeMachine == IMAGE_FILE_MACHINE_ARM64)
-		return false;
-
-	return true;
+#if defined(_M_X64)
+	// x64 binary on ARM64 → emulated
+	return nativeMachine == IMAGE_FILE_MACHINE_ARM64;
+#elif defined(_M_IX86)
+	// x86 binary on ARM64 or x64 → emulated
+	return nativeMachine == IMAGE_FILE_MACHINE_ARM64 ||
+		   nativeMachine == IMAGE_FILE_MACHINE_AMD64;
+#elif defined(_M_ARM64)
+	// ARM64 / ARM64EC is never emulated
+	return false;
+#else
+	return false;
+#endif
 #elif __APPLE__
     return IsRunningUnderRosetta();
 #else
@@ -100,32 +105,30 @@ bool IsRunningUnderRosetta() {
 
 CpuArchitecture GetCpuArchitecture() {
 #ifdef _WIN32
-    USHORT processMachine = 0;
-    USHORT nativeMachine = 0;
-
-    if (IsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
-        if (processMachine != nativeMachine && processMachine == IMAGE_FILE_MACHINE_AMD64) {
-            return CpuArchitecture::x86_64_Emulated;
-        }
-
-        if (nativeMachine == IMAGE_FILE_MACHINE_ARM64) {
-            return CpuArchitecture::Arm64;
-        }
-
-        if (nativeMachine == IMAGE_FILE_MACHINE_AMD64) {
-            return CpuArchitecture::x86_64;
-        }
-    }
-
-    return CpuArchitecture::Unknown;
-#elif __APPLE__
-	if (GetHardwareArchitecture() == "arm64") {
-		return CpuArchitecture::Arm64;
+	if (!IsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
+		return CpuArchitecture::Unknown;
 	}
 
+#if defined(_M_X64)
+	if (nativeMachine == IMAGE_FILE_MACHINE_ARM64) {
+		return CpuArchitecture::x86_64_Emulated;
+	}
+	return CpuArchitecture::x86_64;
+#elif defined(_M_ARM64)
+	return CpuArchitecture::Arm64;
+#elif defined(_M_IX86)
+	return CpuArchitecture::x86_64_Emulated;
+#else
+	return CpuArchitecture::Unknown;
+#endif
+#elif __APPLE__
     if (IsRunningUnderRosetta()) {
         return CpuArchitecture::x86_64_Emulated;
     }
+
+	if (GetHardwareArchitecture() == "arm64") {
+		return CpuArchitecture::Arm64;
+	}
 
     return CpuArchitecture::x86_64;
 #else
@@ -137,7 +140,7 @@ std::string_view GetArchitectureString() {
     switch (GetCpuArchitecture()) {
         case CpuArchitecture::Arm64: return "arm64";
         case CpuArchitecture::x86_64: return "x86_64";
-        case CpuArchitecture::x86_64_Emulated: return "x86_64";
+        case CpuArchitecture::x86_64_Emulated: return "x86_64_emulated";
         default: return "unknown";
     }
 }
