@@ -100,6 +100,9 @@ static NSMutableDictionary *GetWebByUser() {
 
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
 
+        WKWebpagePreferences *pagePrefs = [[WKWebpagePreferences alloc] init];
+config.defaultWebpagePreferences = pagePrefs;
+
         config.suppressesIncrementalRendering = NO; // Don't wait for full page
 
         if (callback != nil || (cookie && [cookie length] > 0)) {
@@ -107,6 +110,14 @@ static NSMutableDictionary *GetWebByUser() {
         } else {
             config.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
         }
+
+        // Fix for annoying keychain popups when there is a login
+        NSString *blockWebCrypto = @"Object.defineProperty(window, 'crypto', { get: function() { return { subtle: null, getRandomValues: function(arr) { for(var i=0; i<arr.length; i++) arr[i] = Math.floor(Math.random()*256); return arr; } }; }});";
+        WKUserScript *script = [[WKUserScript alloc]
+            initWithSource:blockWebCrypto
+            injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+            forMainFrameOnly:NO];
+        [config.userContentController addUserScript:script];
 
         config.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
 
