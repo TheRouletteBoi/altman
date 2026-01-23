@@ -1,14 +1,5 @@
 #include "accounts_context_menu.h"
 
-#ifdef _WIN32
-#include <dwmapi.h>
-#include <shlobj_core.h>
-#include <wil/com.h>
-#include <wrl.h>
-using Microsoft::WRL::Callback;
-using Microsoft::WRL::ComPtr;
-#endif
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
