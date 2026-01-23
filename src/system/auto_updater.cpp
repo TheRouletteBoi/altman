@@ -916,10 +916,10 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
             });
         } else {
             ThreadTask::RunOnMain([]() {
-                ModalPopup::AddYesNo("Update ready! Restart now to install?",
-                    []() {
-                        InstallUpdate(pendingUpdatePath);
-                    });
+            	UpdateNotification::ShowPersistent("Update Ready",
+						"Click to install and restart", []() {
+							InstallUpdate(pendingUpdatePath);
+            	});
             });
         }
     });
