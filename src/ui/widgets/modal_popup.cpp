@@ -56,7 +56,6 @@ void Render() {
 
     if (cur.shouldOpen) {
         ImGui::OpenPopup(cur.id.c_str());
-        cur.shouldOpen = false;
     }
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse;
@@ -68,57 +67,65 @@ void Render() {
     bool* p_open = cur.closeable ? &cur.isOpen : nullptr;
 
     if (ImGui::BeginPopupModal(cur.id.c_str(), p_open, flags)) {
-        if (cur.closeable && !cur.isOpen) {
-            ImGui::CloseCurrentPopup();
-            queue.pop_front();
-            ImGui::EndPopup();
-            return;
-        }
+        cur.shouldOpen = false;
 
         ImGui::TextWrapped("%s", cur.message.c_str());
         ImGui::Spacing();
 
-        switch (cur.type) {
-            case PopupType::YesNo: {
-                if (ImGui::Button("Yes", ImVec2(120, 0))) {
-                    if (cur.onYes) {
-                        cur.onYes();
-                    }
-                    ImGui::CloseCurrentPopup();
-                    queue.pop_front();
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("No", ImVec2(120, 0))) {
-                    if (cur.onNo) {
-                        cur.onNo();
-                    }
-                    ImGui::CloseCurrentPopup();
-                    queue.pop_front();
-                }
-                break;
-            }
+        bool shouldPop = false;
+        std::function<void()> callback;
 
-            case PopupType::Ok: {
-                if (ImGui::Button("OK", ImVec2(120, 0))) {
-                    if (cur.onYes) {
-                        cur.onYes();
+        if (cur.closeable && !cur.isOpen) {
+            ImGui::CloseCurrentPopup();
+            shouldPop = true;
+        } else {
+            switch (cur.type) {
+                case PopupType::YesNo: {
+                    if (ImGui::Button("Yes", ImVec2(120, 0))) {
+                        callback = cur.onYes;
+                        ImGui::CloseCurrentPopup();
+                        shouldPop = true;
                     }
-                    ImGui::CloseCurrentPopup();
-                    queue.pop_front();
+                    ImGui::SameLine();
+                    if (ImGui::Button("No", ImVec2(120, 0))) {
+                        callback = cur.onNo;
+                        ImGui::CloseCurrentPopup();
+                        shouldPop = true;
+                    }
+                    break;
                 }
-                break;
-            }
 
-            case PopupType::Info: {
-                if (ImGui::Button("OK", ImVec2(120, 0))) {
-                    ImGui::CloseCurrentPopup();
-                    queue.pop_front();
+                case PopupType::Ok: {
+                    if (ImGui::Button("OK", ImVec2(120, 0))) {
+                        callback = cur.onYes;
+                        ImGui::CloseCurrentPopup();
+                        shouldPop = true;
+                    }
+                    break;
                 }
-                break;
+
+                case PopupType::Info: {
+                    if (ImGui::Button("OK", ImVec2(120, 0))) {
+                        ImGui::CloseCurrentPopup();
+                        shouldPop = true;
+                    }
+                    break;
+                }
             }
         }
 
         ImGui::EndPopup();
+
+        if (shouldPop) {
+            queue.pop_front();
+            if (callback) {
+                callback();
+            }
+        }
+    } else {
+        if (!cur.shouldOpen) {
+            queue.pop_front();
+        }
     }
 }
 
