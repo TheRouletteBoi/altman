@@ -766,16 +766,7 @@ void RenderSettingsTab() {
     }
     ImGui::Spacing();
 
-    ImGui::SeparatorText("General");
-
-    int interval = g_statusRefreshInterval;
-    if (ImGui::InputInt("Status Refresh Interval (min)", &interval)) {
-        interval = std::max(1, interval);
-        if (interval != g_statusRefreshInterval) {
-            g_statusRefreshInterval = interval;
-            Data::SaveSettings();
-        }
-    }
+    ImGui::SeparatorText("Updates");
 
     bool checkUpdates = g_checkUpdatesOnStartup;
     if (ImGui::Checkbox("Check for updates on startup", &checkUpdates)) {
@@ -873,10 +864,12 @@ void RenderSettingsTab() {
 
     ImGui::EndDisabled();
 
-    if (ImGui::Checkbox("Low FPS", &clearOnLaunch)) {
+    static bool lowFPS = false;
+    if (ImGui::Checkbox("Low FPS", &lowFPS)) {
         // roblox-player.exe --fps=60
     }
-    if (ImGui::Checkbox("No Sound", &clearOnLaunch)) {
+    static bool noSound = false;
+    if (ImGui::Checkbox("No Sound", &noSound)) {
         // roblox-player.exe --no-sound"
     }
 
@@ -884,6 +877,16 @@ void RenderSettingsTab() {
 
     if (!g_accounts.empty()) {
         ImGui::SeparatorText("Accounts");
+
+        int interval = g_statusRefreshInterval;
+        if (ImGui::InputInt("Status Refresh Interval (min)", &interval)) {
+            interval = std::max(1, interval);
+            if (interval != g_statusRefreshInterval) {
+                g_statusRefreshInterval = interval;
+                Data::SaveSettings();
+            }
+        }
+
         ImGui::Text("Default Account:");
 
         std::vector<std::string> accountLabels;
