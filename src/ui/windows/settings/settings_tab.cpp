@@ -18,6 +18,7 @@
 #include "system/auto_updater.h"
 #include "system/multi_instance.h"
 #include "system/roblox_control.h"
+#include "ui/widgets/bottom_right_status.h"
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/progress_overlay.h"
 #include "utils/paths.h"
@@ -809,6 +810,7 @@ void RenderSettingsTab() {
                 "Enabling Multi Roblox requires closing all running Roblox instances.\n\n"
                 "Do you want to continue?",
                 []() {
+                    BottomRightStatus::Loading("Waiting for Roblox to close");
                     RobloxControl::KillRobloxProcesses();
                     ThreadTask::fireAndForget([] {
                         constexpr int maxAttempts = 50;
@@ -816,6 +818,7 @@ void RenderSettingsTab() {
 
                         for (int i = 0; i < maxAttempts; ++i) {
                             if (!RobloxControl::IsRobloxRunning()) {
+                                BottomRightStatus::Clear();
                                 g_multiRobloxEnabled = true;
                                 MultiInstance::Enable();
                                 Data::SaveSettings();
