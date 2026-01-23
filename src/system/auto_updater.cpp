@@ -20,6 +20,7 @@
 
 #ifdef _WIN32
     #include <windows.h>
+	#include <shellapi.h>
 #else
     #include <unistd.h>
     #include <sys/wait.h>
@@ -138,7 +139,7 @@ std::string AutoUpdater::GetDeltaAssetName(std::string_view fromVersion, std::st
 
 std::filesystem::path AutoUpdater::GetUpdateScriptPath() {
 #ifdef _WIN32
-    return std::filesystem::temp_directory_path() / "update_altman.bat";
+    return std::filesystem::temp_directory_path() / "update_altman.ps1";
 #else
     return std::filesystem::temp_directory_path() / "update_altman.sh";
 #endif
@@ -187,41 +188,34 @@ void AutoUpdater::CreateUpdateScript(const std::string& newPath, const std::stri
 
 #ifdef _WIN32
     std::format_to(std::ostreambuf_iterator<char>(script),
-        "@echo off\n"
-        "setlocal\n"
-        "echo Waiting for application to close...\n"
-        "timeout /t 2 /nobreak > nul\n"
-        "\n"
-        "set \"NEW_PATH={}\"\n"
-        "set \"CURRENT_PATH={}\"\n"
-        "set \"BACKUP_PATH={}\"\n"
-        "\n"
-        "echo Creating backup...\n"
-        "copy /Y \"%%CURRENT_PATH%%\" \"%%BACKUP_PATH%%\"\n"
-        "if errorlevel 1 (\n"
-        "    echo Failed to create backup!\n"
-        "    pause\n"
-        "    exit /b 1\n"
-        ")\n"
-        "\n"
-        "echo Installing update...\n"
-        "move /Y \"%%NEW_PATH%%\" \"%%CURRENT_PATH%%\"\n"
-        "if errorlevel 1 (\n"
-        "    echo Update failed! Restoring backup...\n"
-        "    copy /Y \"%%BACKUP_PATH%%\" \"%%CURRENT_PATH%%\"\n"
-        "    pause\n"
-        "    exit /b 1\n"
-        ")\n"
-        "\n"
-        "echo Update successful!\n"
-        "echo Starting application...\n"
-        "start \"\" \"%%CURRENT_PATH%%\"\n"
-        "del \"%%~f0\"\n",
-        newPath, currentPath, backupPath
+	    "$ErrorActionPreference = 'Stop'\n"
+		"$LogFile = \"$env:TEMP\\altman_update.log\"\n"
+		"\n"
+		"try {{\n"
+		"    Start-Sleep -Seconds 2\n"
+		"\n"
+		"    $NewPath = '{}'\n"
+		"    $CurrentPath = '{}'\n"
+		"    $BackupPath = '{}'\n"
+		"\n"
+		"    $BackupDir = Split-Path -Parent $BackupPath\n"
+		"    if (-not (Test-Path $BackupDir)) {{\n"
+		"        New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null\n"
+		"    }}\n"
+		"\n"
+		"    Copy-Item -Path $CurrentPath -Destination $BackupPath -Force\n"
+		"    Move-Item -Path $NewPath -Destination $CurrentPath -Force\n"
+		"    Start-Process -FilePath $CurrentPath\n"
+		"    Remove-Item -Path $MyInvocation.MyCommand.Source -Force\n"
+		"}}\n"
+		"catch {{\n"
+		"    $_.Exception.Message | Out-File -FilePath $LogFile\n"
+		"}}\n",
+		newPath, currentPath, backupPath
     );
 #else
     std::format_to(std::ostreambuf_iterator<char>(script),
-    "#!/bin/bash\n"
+    	"#!/bin/bash\n"
 		"set -e\n"
 		"\n"
 		"LOG_FILE=\"/tmp/altman_update.log\"\n"
@@ -290,32 +284,25 @@ void AutoUpdater::LaunchUpdateScript() {
     const auto scriptPath = GetUpdateScriptPath();
 
 #ifdef _WIN32
-    std::wstring cmdLine = L"cmd.exe /C \"" + scriptPath.wstring() + L"\"";
+	SHELLEXECUTEINFOW sei{};
+	sei.cbSize = sizeof(sei);
+	sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+	sei.lpVerb = L"open";
+	sei.lpFile = L"powershell.exe";
 
-    STARTUPINFOW si{};
-    PROCESS_INFORMATION pi{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
+	std::wstring args = L"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \""
+		+ scriptPath.wstring() + L"\"";
+	sei.lpParameters = args.c_str();
+	sei.nShow = SW_HIDE;
 
-    if (!CreateProcessW(
-        nullptr,
-        cmdLine.data(),
-        nullptr,
-        nullptr,
-        FALSE,
-        CREATE_NO_WINDOW | DETACHED_PROCESS,
-        nullptr,
-        nullptr,
-        &si,
-        &pi
-    )) {
-        LOG_ERROR("Failed to launch update script: {}", GetLastError());
-        return;
-    }
+	if (!ShellExecuteExW(&sei)) {
+		LOG_ERROR("Failed to launch update script: {}", GetLastError());
+		return;
+	}
 
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
+	if (sei.hProcess) {
+		CloseHandle(sei.hProcess);
+	}
 #else
 	pid_t pid;
 	std::string path = scriptPath.string();
