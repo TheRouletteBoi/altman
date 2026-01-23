@@ -282,7 +282,10 @@ bool SpawnWithCustomHome(
     const std::string& customHome) {
 
     SpawnOptions opts;
-    opts.env = {{"HOME", customHome}};
+    opts.env = {
+    	{"HOME", customHome},
+		{"CFFIXED_USER_HOME", customHome}
+    };
     opts.waitForCompletion = true;
     return SpawnProcessWithEnv(program, args, opts);
 }
