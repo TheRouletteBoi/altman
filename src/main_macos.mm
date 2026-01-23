@@ -432,6 +432,34 @@ void initializeAutoUpdater() {
 
         Re-assemble after patch
         ```lipo patched.arm64 patched.x86_64 -create -output AltMan```
+
+
+
+
+
+        **NEW way**
+        Release v1.1.0
+        ├── AltMan-Windows-x86_64.exe
+        ├── AltMan-Windows-arm64.exe
+        ├── AltMan-macOS.zip                                    # Universal binary .app
+        ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
+        ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
+        ├── AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff      # arm64 slice patch
+        └── AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff     # x86_64 slice patch
+
+
+        # macOS - Extract slices from universal binaries, create per-arch deltas
+        lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin arm64 -output old_arm64
+        lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin arm64 -output new_arm64
+        bsdiff old_arm64 new_arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff
+
+        lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin x86_64 -output old_x86_64
+        lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin x86_64 -output new_x86_64
+        bsdiff old_x86_64 new_x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff
+
+        # Windows - per architecture
+        xdelta3 -e -s old_x86_64.exe new_x86_64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
+        xdelta3 -e -s old_arm64.exe new_arm64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
      */
     AutoUpdater::Initialize();
     AutoUpdater::SetBandwidthLimit(5_MB);

@@ -1103,14 +1103,16 @@ void AutoUpdater::RollbackToPreviousVersion() {
 #ifdef __APPLE__
         const auto currentPath = GetAppBundlePath();
         const auto tempBackup = std::filesystem::temp_directory_path() / "altman_rollback_tmp.app";
-        if (std::filesystem::exists(tempBackup)) {
-            std::filesystem::remove_all(tempBackup);
-        }
-        std::println("rolling back from {} to {}", currentPath.string(), tempBackup.string());
 #else
         const auto currentPath = GetCurrentExecutablePath();
         auto tempBackup = std::filesystem::path(currentPath).concat(".rollback_tmp");
 #endif
+
+        if (std::filesystem::exists(tempBackup)) {
+            std::filesystem::remove_all(tempBackup);
+        }
+
+        LOG_INFO("Rolling back from {} to {}", currentPath.string(), tempBackup.string());
 
         CreateUpdateScript(config.backupPath.string(), currentPath.string(), tempBackup.string());
 
