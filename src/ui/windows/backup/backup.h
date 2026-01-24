@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <future>
 #include <string>
 
 namespace Backup {
@@ -59,6 +60,8 @@ namespace Backup {
 
     [[nodiscard]] std::expected<std::string, Error> Export(const std::string &password);
 
-    [[nodiscard]] std::expected<void, Error> Import(const std::string &filePath, const std::string &password);
+    void ImportAsync(const std::string &filePath, const std::string &password);
+
+    [[nodiscard]] bool IsImportInProgress();
 
 } // namespace Backup

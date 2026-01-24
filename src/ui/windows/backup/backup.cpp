@@ -7,7 +7,10 @@
 #include "network/roblox/games.h"
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
+#include "ui/widgets/bottom_right_status.h"
+#include "ui/widgets/modal_popup.h"
 #include "utils/paths.h"
+#include "utils/thread_task.h"
 
 #include <nlohmann/json.hpp>
 
@@ -18,6 +21,7 @@
 
 namespace {
 
+    static std::atomic<bool> g_importInProgress = false;
     constexpr int kBackupVersion = 2;
 
     std::string buildBackupPath() {
@@ -331,6 +335,34 @@ namespace Backup {
 
         LOG_INFO("Successfully imported backup from: {}", filePath);
         return {};
+    }
+
+    void ImportAsync(const std::string &filePath, const std::string &password) {
+        if (g_importInProgress) {
+            return;
+        }
+
+        g_importInProgress = true;
+        BottomRightStatus::Loading("Importing backup...");
+
+        ThreadTask::fireAndForget([=]() {
+            auto result = Import(filePath, password);
+
+            ThreadTask::RunOnMain([result = std::move(result)]() {
+                g_importInProgress = false;
+
+                if (result) {
+                    BottomRightStatus::Success("Backup imported successfully");
+                } else {
+                    ModalPopup::AddInfo(errorToString(result.error()).data());
+                    BottomRightStatus::Clear();
+                }
+            });
+        });
+    }
+
+    bool IsImportInProgress() {
+        return g_importInProgress;
     }
 
 } // namespace Backup

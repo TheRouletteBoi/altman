@@ -431,10 +431,13 @@ bool RenderMainMenu() {
             s_refreshBackupList = false;
         }
 
+        const bool importInProgress = Backup::IsImportInProgress();
+
         if (s_backupFiles.empty()) {
             ImGui::TextUnformatted("No backups found.");
         } else {
             const char *current = s_backupFiles[s_selectedBackup].c_str();
+            ImGui::BeginDisabled(importInProgress);
             if (ImGui::BeginCombo("File", current)) {
                 for (int i = 0; i < static_cast<int>(s_backupFiles.size()); ++i) {
                     const bool selected = (i == s_selectedBackup);
@@ -449,33 +452,37 @@ bool RenderMainMenu() {
                 }
                 ImGui::EndCombo();
             }
+            ImGui::EndDisabled();
         }
 
+        ImGui::BeginDisabled(importInProgress);
         ImGui::InputText("Password", s_importPassword, IM_ARRAYSIZE(s_importPassword), ImGuiInputTextFlags_Password);
+        ImGui::EndDisabled();
 
+        if (importInProgress) {
+            ImGui::TextUnformatted("Importing...");
+        }
+
+        ImGui::BeginDisabled(importInProgress);
         if (ImGui::Button("Import")) {
-
             if (!s_backupFiles.empty()) {
                 const auto dir = AltMan::Paths::Backups() / s_backupFiles[s_selectedBackup];
-
-                auto result = Backup::Import(dir.string(), s_importPassword);
-
-                if (result) {
-                    ModalPopup::AddInfo("Import completed.");
-                } else {
-                    ModalPopup::AddInfo(Backup::errorToString(result.error()).data());
-                }
+                Backup::ImportAsync(dir.string(), s_importPassword);
+                s_importPassword[0] = '\0';
+                ImGui::CloseCurrentPopup();
             } else {
                 ModalPopup::AddInfo("No backup selected.");
             }
-
-            s_importPassword[0] = '\0';
-            ImGui::CloseCurrentPopup();
         }
+        ImGui::EndDisabled();
+
         ImGui::SameLine();
+        ImGui::BeginDisabled(importInProgress);
         if (ImGui::Button("Cancel")) {
             ImGui::CloseCurrentPopup();
         }
+        ImGui::EndDisabled();
+
         ImGui::EndPopup();
     }
 
