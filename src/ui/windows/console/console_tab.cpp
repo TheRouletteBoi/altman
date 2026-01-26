@@ -149,6 +149,22 @@ namespace Console {
             g_searchBuffer[0] = '\0';
         }
 
+        ImGui::SameLine();
+
+        if (ImGui::Button("Copy")) {
+            std::lock_guard<std::mutex> lock(g_logMutex);
+
+            std::string allLogs;
+            allLogs.reserve(8192);
+
+            for (const auto& entry : g_logMessages) {
+                allLogs += entry.text;
+                allLogs += '\n';
+            }
+
+            ImGui::SetClipboardText(allLogs.c_str());
+        }
+
         ImGui::Separator();
 
         ImGui::BeginChild("LogScrollingRegion", ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
