@@ -16,12 +16,14 @@
 #include <vector>
 
 #include "components/data.h"
+#include "network/roblox/common.h"
 #include "ui/widgets/image.h"
 #include "utils/thread_task.h"
 
 namespace {
     constexpr float THUMB_ROUNDING = 6.0f;
-    constexpr int MAX_CONCURRENT_THUMB_LOADS = 24;
+    constexpr int MAX_CONCURRENT_THUMB_LOADS = 8;
+    constexpr int BATCH_THUMBNAIL_SIZE = 50;
     constexpr float MIN_CELL_SIZE_MULTIPLIER = 6.25f;
     constexpr float MIN_FIELD_MULTIPLIER = 6.25f;
     constexpr float EQUIPPED_MIN_CELL_MULTIPLIER = 3.75f;
@@ -83,10 +85,16 @@ namespace {
             std::vector<uint64_t> assetIds;
     };
 
+    struct BatchThumbState {
+            std::vector<uint64_t> pendingAssetIds;
+            bool batchLoading {false};
+    };
+
     AvatarState g_avatarState;
     CategoryState g_categoryState;
     InventoryState g_inventoryState;
     EquippedState g_equippedState;
+    BatchThumbState g_batchThumbState;
 
     std::unordered_map<uint64_t, ThumbInfo> g_thumbCache;
     uint64_t g_selectedAssetId {0};
@@ -105,6 +113,7 @@ namespace {
         g_categoryState = CategoryState {};
         g_inventoryState = InventoryState {};
         g_equippedState = EquippedState {};
+        g_batchThumbState = BatchThumbState {};
         g_searchBuffer[0] = '\0';
         ClearTextureCache();
     }
@@ -155,6 +164,11 @@ namespace {
 
     [[nodiscard]]
     std::expected<nlohmann::json, std::string> parseJsonSafe(const HttpClient::Response &resp) {
+        if (resp.status_code == 429) {
+            HttpClient::RateLimiter::instance().backoff(std::chrono::seconds(2));
+            return std::unexpected("Rate limited");
+        }
+
         if (resp.status_code != 200 || resp.text.empty()) {
             return std::unexpected(std::format("HTTP error: {}", resp.status_code));
         }
@@ -177,7 +191,7 @@ namespace {
                 userId
             );
 
-            auto metaResp = HttpClient::get(metaUrl);
+            auto metaResp = HttpClient::rateLimitedGet(metaUrl);
             auto metaJsonResult = parseJsonSafe(metaResp);
 
             if (!metaJsonResult) {
@@ -234,11 +248,11 @@ namespace {
         ThreadTask::fireAndForget([userId, cookie = std::move(cookie)] {
             const std::string url = std::format("https://inventory.roblox.com/v1/users/{}/categories", userId);
 
-            auto resp = HttpClient::get(
+            auto resp = HttpClient::rateLimitedGet(
                 url,
                 {
                     {"Cookie", std::format(".ROBLOSECURITY={}", cookie)}
-            }
+                }
             );
             auto jsonResult = parseJsonSafe(resp);
 
@@ -289,7 +303,7 @@ namespace {
         ThreadTask::fireAndForget([userId] {
             const std::string url = std::format("https://avatar.roblox.com/v1/users/{}/currently-wearing", userId);
 
-            auto resp = HttpClient::get(url);
+            auto resp = HttpClient::rateLimitedGet(url);
             auto jsonResult = parseJsonSafe(resp);
 
             if (!jsonResult) {
@@ -328,76 +342,147 @@ namespace {
         });
     }
 
-    void FetchThumbnail(uint64_t assetId) {
-        auto &thumb = g_thumbCache[assetId];
-        thumb.loading = true;
-        ++g_activeThumbLoads;
+    void FetchThumbnailsBatch(std::vector<uint64_t> assetIds) {
+        if (assetIds.empty()) {
+            return;
+        }
 
-        ThreadTask::fireAndForget([assetId] {
-            auto finish = [assetId](bool success) {
-                ThreadTask::RunOnMain([assetId, success] {
-                    auto it = g_thumbCache.find(assetId);
-                    if (it != g_thumbCache.end()) {
-                        it->second.loading = false;
-                        it->second.failed = !success;
-                    }
-                    --g_activeThumbLoads;
-                });
-            };
+        g_batchThumbState.batchLoading = true;
 
-            const std::string metaUrl
-                = std::format("https://thumbnails.roblox.com/v1/assets?assetIds={}&size=75x75&format=Png", assetId);
+        for (uint64_t id : assetIds) {
+            g_thumbCache[id].loading = true;
+        }
+        g_activeThumbLoads += static_cast<int>(assetIds.size());
 
-            auto metaResp = HttpClient::get(metaUrl);
+        ThreadTask::fireAndForget([assetIds = std::move(assetIds)] {
+            std::string assetIdList;
+            for (size_t i = 0; i < assetIds.size(); ++i) {
+                if (i > 0) assetIdList += ",";
+                assetIdList += std::to_string(assetIds[i]);
+            }
+
+            const std::string metaUrl = std::format(
+                "https://thumbnails.roblox.com/v1/assets?assetIds={}&size=75x75&format=Png",
+                assetIdList
+            );
+
+            auto metaResp = HttpClient::rateLimitedGet(metaUrl);
             auto metaJsonResult = parseJsonSafe(metaResp);
 
             if (!metaJsonResult) {
-                finish(false);
+                ThreadTask::RunOnMain([assetIds] {
+                    for (uint64_t id : assetIds) {
+                        auto it = g_thumbCache.find(id);
+                        if (it != g_thumbCache.end()) {
+                            it->second.loading = false;
+                            it->second.failed = true;
+                        }
+                    }
+                    g_activeThumbLoads -= static_cast<int>(assetIds.size());
+                    g_batchThumbState.batchLoading = false;
+                });
                 return;
             }
 
             const auto &metaJson = *metaJsonResult;
-            std::string imageUrl;
 
-            if (metaJson.contains("data") && !metaJson["data"].empty()) {
-                const auto &d = metaJson["data"][0];
-                if (d.contains("imageUrl")) {
-                    imageUrl = d["imageUrl"].get<std::string>();
+            std::unordered_map<uint64_t, std::string> imageUrls;
+            if (metaJson.contains("data")) {
+                for (const auto &item : metaJson["data"]) {
+                    uint64_t targetId = item.value("targetId", 0ULL);
+                    std::string imageUrl = item.value("imageUrl", "");
+                    if (targetId != 0 && !imageUrl.empty()) {
+                        imageUrls[targetId] = imageUrl;
+                    }
                 }
             }
 
-            if (imageUrl.empty()) {
-                finish(false);
-                return;
-            }
+            for (uint64_t assetId : assetIds) {
+                auto urlIt = imageUrls.find(assetId);
+                if (urlIt == imageUrls.end() || urlIt->second.empty()) {
+                    ThreadTask::RunOnMain([assetId] {
+                        auto it = g_thumbCache.find(assetId);
+                        if (it != g_thumbCache.end()) {
+                            it->second.loading = false;
+                            it->second.failed = true;
+                        }
+                        --g_activeThumbLoads;
+                    });
+                    continue;
+                }
 
-            auto imgResp = HttpClient::get(imageUrl);
-            if (imgResp.status_code != 200 || imgResp.text.empty()) {
-                finish(false);
-                return;
-            }
+                auto imgResp = HttpClient::get(urlIt->second);
+                if (imgResp.status_code != 200 || imgResp.text.empty()) {
+                    ThreadTask::RunOnMain([assetId] {
+                        auto it = g_thumbCache.find(assetId);
+                        if (it != g_thumbCache.end()) {
+                            it->second.loading = false;
+                            it->second.failed = true;
+                        }
+                        --g_activeThumbLoads;
+                    });
+                    continue;
+                }
 
-            std::string data = std::move(imgResp.text);
-            ThreadTask::RunOnMain([assetId, data = std::move(data)]() mutable {
-                auto it = g_thumbCache.find(assetId);
-                if (it == g_thumbCache.end()) {
+                std::string data = std::move(imgResp.text);
+                ThreadTask::RunOnMain([assetId, data = std::move(data)]() mutable {
+                    auto it = g_thumbCache.find(assetId);
+                    if (it == g_thumbCache.end()) {
+                        --g_activeThumbLoads;
+                        return;
+                    }
+
+                    auto result = LoadTextureFromMemory(data.data(), data.size());
+                    if (result) {
+                        it->second.texture = std::move(result->texture);
+                        it->second.width = result->width;
+                        it->second.height = result->height;
+                        it->second.failed = false;
+                    } else {
+                        it->second.failed = true;
+                    }
+                    it->second.loading = false;
                     --g_activeThumbLoads;
-                    return;
-                }
+                });
+            }
 
-                auto result = LoadTextureFromMemory(data.data(), data.size());
-                if (result) {
-                    it->second.texture = std::move(result->texture);
-                    it->second.width = result->width;
-                    it->second.height = result->height;
-                    it->second.failed = false;
-                } else {
-                    it->second.failed = true;
-                }
-                it->second.loading = false;
-                --g_activeThumbLoads;
+            ThreadTask::RunOnMain([] {
+                g_batchThumbState.batchLoading = false;
             });
         });
+    }
+
+    void QueueThumbnailForBatch(uint64_t assetId) {
+        auto &thumb = g_thumbCache[assetId];
+        if (thumb.hasTexture() || thumb.loading || thumb.failed) {
+            return;
+        }
+
+        g_batchThumbState.pendingAssetIds.push_back(assetId);
+
+        if (!g_batchThumbState.batchLoading &&
+            (g_batchThumbState.pendingAssetIds.size() >= BATCH_THUMBNAIL_SIZE ||
+             g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS)) {
+
+            std::vector<uint64_t> batch;
+            size_t count = std::min(g_batchThumbState.pendingAssetIds.size(),
+                                    static_cast<size_t>(BATCH_THUMBNAIL_SIZE));
+
+            batch.reserve(count);
+            for (size_t i = 0; i < count; ++i) {
+                batch.push_back(g_batchThumbState.pendingAssetIds[i]);
+            }
+            g_batchThumbState.pendingAssetIds.erase(
+                g_batchThumbState.pendingAssetIds.begin(),
+                g_batchThumbState.pendingAssetIds.begin() + count
+            );
+
+            FetchThumbnailsBatch(std::move(batch));
+        }
+    }
+
+    void FetchThumbnail(uint64_t assetId) {
+        QueueThumbnailForBatch(assetId);
     }
 
     void FetchInventory(uint64_t userId, std::string cookie, int assetTypeId) {
@@ -420,11 +505,11 @@ namespace {
                     url.append(std::format("&cursor={}", cursor));
                 }
 
-                auto resp = HttpClient::get(
+                auto resp = HttpClient::rateLimitedGet(
                     url,
                     {
                         {"Cookie", std::format(".ROBLOSECURITY={}", cookie)}
-                }
+                    }
                 );
                 auto jsonResult = parseJsonSafe(resp);
 
@@ -508,7 +593,7 @@ namespace {
                 auto &thumb = g_thumbCache[assetId];
                 if (!thumb.hasTexture() && !thumb.loading && !thumb.failed
                     && g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
-                    FetchThumbnail(assetId);
+                    QueueThumbnailForBatch(assetId);
                 }
 
                 ImGui::PushID(index);
@@ -620,6 +705,7 @@ namespace {
 
         std::vector<int> visibleIndices;
         visibleIndices.reserve(items.size());
+
         int selectedIndex = -1;
 
         for (int i = 0; i < static_cast<int>(items.size()); ++i) {
@@ -668,7 +754,7 @@ namespace {
                     auto &thumb = g_thumbCache[item.assetId];
                     if (!thumb.hasTexture() && !thumb.loading && !thumb.failed
                         && g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
-                        FetchThumbnail(item.assetId);
+                        QueueThumbnailForBatch(item.assetId);
                     }
 
                     ImGui::PushID(itemIndex);

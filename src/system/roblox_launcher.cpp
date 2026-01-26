@@ -25,6 +25,9 @@
 #include "console/console.h"
 #include "multi_instance.h"
 #include "network/http.h"
+#include "network/roblox/auth.h"
+#include "network/roblox/common.h"
+#include "network/roblox/games.h"
 #include "roblox_control.h"
 #include "ui/widgets/notifications.h"
 #include "utils/account_utils.h"
@@ -78,43 +81,6 @@ std::string getCurrentTimestampMs() {
     return std::to_string(nowMs);
 }
 
-std::optional<std::string> fetchCsrfToken(const std::string &cookie) {
-    auto response = HttpClient::post(
-        "https://auth.roblox.com/v1/authentication-ticket",
-        {
-            {"Cookie", std::format(".ROBLOSECURITY={}", cookie)}
-    }
-    );
-
-    auto it = response.headers.find("x-csrf-token");
-    if (it == response.headers.end()) {
-        LOG_ERROR("Failed to get CSRF token");
-        return std::nullopt;
-    }
-
-    return it->second;
-}
-
-std::optional<std::string> fetchAuthTicket(const std::string &cookie, const std::string &csrfToken) {
-    auto response = HttpClient::post(
-        "https://auth.roblox.com/v1/authentication-ticket",
-        {
-            {"Cookie", std::format(".ROBLOSECURITY={}", cookie)},
-            {"Origin", "https://www.roblox.com"},
-            {"Referer", "https://www.roblox.com/"},
-            {"X-CSRF-TOKEN", csrfToken}
-    }
-    );
-
-    auto it = response.headers.find("rbx-authentication-ticket");
-    if (it == response.headers.end()) {
-        LOG_ERROR("Failed to get authentication ticket");
-        return std::nullopt;
-    }
-
-    return it->second;
-}
-
 struct LaunchUrls {
         std::string desktop;
         std::string mobile;
@@ -124,7 +90,6 @@ struct LaunchUrls {
 bool resolvePrivateServer(
     const std::string &link,
     const std::string &cookie,
-    const std::string &csrfToken,
     uint64_t &placeId,
     std::string &linkCode,
     std::string &accessCode
@@ -148,17 +113,11 @@ bool resolvePrivateServer(
         std::string apiUrl = "https://apis.roblox.com/sharelinks/v1/resolve-link";
         const std::string jsonBody = std::format(R"({{"linkId":"{}","linkType":"Server"}})", shareCode);
 
-        auto apiResponse = HttpClient::post(
+        auto apiResponse = Roblox::authenticatedPost(
             apiUrl,
-            {
-                {"Cookie",       ".ROBLOSECURITY=" + cookie         },
-                {"X-CSRF-TOKEN", csrfToken                          },
-                {"Content-Type", "application/json;charset=UTF-8"   },
-                {"Accept",       "application/json, text/plain, */*"},
-                {"Origin",       "https://www.roblox.com"           },
-                {"Referer",      "https://www.roblox.com/"          },
-        },
-            jsonBody
+            cookie,
+            jsonBody,
+            {{"Content-Type", "application/json;charset=UTF-8"}}
         );
 
         if (apiResponse.status_code != 200) {
@@ -199,16 +158,12 @@ bool resolvePrivateServer(
 
     std::string gameUrl = std::format("https://www.roblox.com/games/{}/?privateServerLinkCode={}", placeId, linkCode);
 
-    auto pageResponse = HttpClient::get(
+    auto pageResponse = HttpClient::rateLimitedGet(
         gameUrl,
         {
-            {"Cookie",       ".ROBLOSECURITY=" + cookie},
-            {"X-CSRF-TOKEN", csrfToken                 },
-            {"User-Agent",   "Mozilla/5.0"             }
-    },
-        {},
-        true,
-        10
+            {"Cookie",     ".ROBLOSECURITY=" + cookie},
+            {"User-Agent", "Mozilla/5.0"             }
+        }
     );
 
     std::regex accessCodeRegex(R"(Roblox\.GameLauncher\.joinPrivateGame\(\d+,\s*'([a-f0-9\-]+)',\s*'(\d+)')");
@@ -227,8 +182,7 @@ bool resolvePrivateServer(
 std::optional<LaunchUrls> buildLaunchUrls(
     const LaunchParams &params,
     const std::string &browserTrackerId,
-    const std::string &cookie,
-    const std::string &csrfToken
+    const std::string &cookie
 ) {
     LaunchUrls urls;
     urls.resolvedPlaceId = params.placeId;
@@ -239,7 +193,7 @@ std::optional<LaunchUrls> buildLaunchUrls(
             std::string linkCode, accessCode;
             uint64_t placeId = params.placeId;
 
-            if (!resolvePrivateServer(params.value, cookie, csrfToken, placeId, linkCode, accessCode)) {
+            if (!resolvePrivateServer(params.value, cookie, placeId, linkCode, accessCode)) {
                 return std::nullopt;
             }
 
@@ -333,14 +287,8 @@ std::string buildProtocolCommand(
 #ifdef _WIN32
 
 bool startRoblox(const LaunchParams &params, AccountData acc) {
-    auto csrfToken = fetchCsrfToken(acc.cookie);
-    if (!csrfToken) {
-        LOG_ERROR("Failed to get CSRF token");
-        return false;
-    }
-
-    auto ticket = fetchAuthTicket(acc.cookie, *csrfToken);
-    if (!ticket) {
+    auto ticket = Roblox::fetchAuthTicket(acc.cookie);
+    if (ticket.empty()) {
         LOG_ERROR("Failed to get authentication ticket");
         return false;
     }
@@ -348,7 +296,7 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
     const auto browserTrackerId = generateBrowserTrackerId();
     const auto timestamp = getCurrentTimestampMs();
 
-    auto urls = buildLaunchUrls(params, browserTrackerId, acc.cookie, *csrfToken);
+    auto urls = buildLaunchUrls(params, browserTrackerId, acc.cookie);
     if (!urls) {
         return false;
     }
@@ -359,7 +307,7 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
     }
 
     const auto &launchUrl = urls->desktop;
-    const auto protocolCommand = buildProtocolCommand(false, *ticket, timestamp, launchUrl, browserTrackerId);
+    const auto protocolCommand = buildProtocolCommand(false, ticket, timestamp, launchUrl, browserTrackerId);
 
     SHELLEXECUTEINFOA executionInfo {sizeof(executionInfo)};
     executionInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
@@ -518,14 +466,8 @@ bool createSandboxedRoblox(AccountData &acc, const std::string &protocolURL) {
 }
 
 bool startRoblox(const LaunchParams &params, AccountData acc) {
-    auto csrfToken = fetchCsrfToken(acc.cookie);
-    if (!csrfToken) {
-        LOG_ERROR("Failed to get CSRF token");
-        return false;
-    }
-
-    auto ticket = fetchAuthTicket(acc.cookie, *csrfToken);
-    if (!ticket) {
+    auto ticket = Roblox::fetchAuthTicket(acc.cookie);
+    if (ticket.empty()) {
         LOG_ERROR("Failed to get authentication ticket");
         return false;
     }
@@ -533,14 +475,14 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
     const auto browserTrackerId = generateBrowserTrackerId();
     const auto timestamp = getCurrentTimestampMs();
 
-    auto urls = buildLaunchUrls(params, browserTrackerId, acc.cookie, *csrfToken);
+    auto urls = buildLaunchUrls(params, browserTrackerId, acc.cookie);
     if (!urls) {
         return false;
     }
 
     const bool isMobile = isMobileClient(acc.customClientBase);
     const auto launchUrl = isMobile ? urls->mobile : urls->desktop;
-    const auto protocolCommand = buildProtocolCommand(isMobile, *ticket, timestamp, launchUrl, browserTrackerId);
+    const auto protocolCommand = buildProtocolCommand(isMobile, ticket, timestamp, launchUrl, browserTrackerId);
 
     if (acc.username.empty()) {
         LOG_ERROR("Username is empty or invalid");

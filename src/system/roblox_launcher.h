@@ -40,5 +40,3 @@ void launchWithSelectedAccounts(LaunchParams params);
 std::string urlEncode(const std::string &s);
 std::string generateBrowserTrackerId();
 std::string getCurrentTimestampMs();
-std::optional<std::string> fetchCsrfToken(const std::string &cookie);
-std::optional<std::string> fetchAuthTicket(const std::string &cookie, const std::string &csrfToken);
