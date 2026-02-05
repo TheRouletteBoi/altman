@@ -64,7 +64,7 @@ void ReloadFonts(float dpiScale) {
 
     io.Fonts->Clear();
 
-    const float scaledFontSize = BASE_FONT_SIZE * dpiScale;
+    const float scaledFontSize = BASE_FONT_SIZE;
 
     ImFontConfig rubikCfg {};
     rubikCfg.FontDataOwnedByAtlas = false;
@@ -102,7 +102,7 @@ void ReloadFonts(float dpiScale) {
     io.FontDefault = g_rubikFont;
 
     ImGui::StyleColorsDark();
-    ImGui::GetStyle().ScaleAllSizes(dpiScale);
+    //ImGui::GetStyle().ScaleAllSizes(dpiScale);
 
     g_fontReloadPending = true;
 }
@@ -492,6 +492,9 @@ void initializeAutoUpdater() {
         # Windows - per architecture
         xdelta3 -e -s old_x86_64.exe new_x86_64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
         xdelta3 -e -s old_arm64.exe new_arm64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
+
+        # Ad-hoc signing
+        codesign --force --deep --sign - AltMan.app
      */
     AutoUpdater::Initialize();
     AutoUpdater::SetBandwidthLimit(5_MB);
@@ -571,7 +574,7 @@ void initializeAutoUpdater() {
 
     CGFloat scale = self.view.window.screen.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
     _lastDPIScale = static_cast<float>(scale);
-    ReloadFonts(_lastDPIScale);
+    ReloadFonts(1.0f);
 }
 
 - (void)drawInMTKView:(MTKView *)view {
@@ -584,14 +587,14 @@ void initializeAutoUpdater() {
     const float currentScale = static_cast<float>(framebufferScale);
     if (std::abs(currentScale - _lastDPIScale) > 0.01f) {
         _lastDPIScale = currentScale;
-        ReloadFonts(_lastDPIScale);
+        ReloadFonts(1.0f);
     }
 
     ImGuiIO &io = ImGui::GetIO();
 
     io.DisplaySize = ImVec2(
-        static_cast<float>(view.drawableSize.width) / currentScale,
-        static_cast<float>(view.drawableSize.height) / currentScale
+        static_cast<float>(view.drawableSize.width),
+        static_cast<float>(view.drawableSize.height)
     );
     io.DisplayFramebufferScale = ImVec2(currentScale, currentScale);
 
