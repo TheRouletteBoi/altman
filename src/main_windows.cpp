@@ -44,7 +44,7 @@
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/notifications.h"
 #include "utils/crypto.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -452,7 +452,7 @@ namespace AccountProcessor {
             return;
         }
 
-        ThreadTask::RunOnMain([ids = std::move(invalidIds), names = std::move(invalidNames)]() {
+        WorkerThreads::RunOnMain([ids = std::move(invalidIds), names = std::move(invalidNames)]() {
             auto message = std::format("Invalid cookies for: {}. Remove them?", names);
 
             ModalPopup::AddYesNo(message.c_str(), [ids]() {
@@ -512,7 +512,7 @@ void refreshAccounts() {
         results.push_back(std::move(result));
     }
 
-    ThreadTask::RunOnMain([results = std::move(results),
+    WorkerThreads::RunOnMain([results = std::move(results),
                            invalidIds = std::move(invalidIds),
                            invalidNames = std::move(invalidNames)]() mutable {
         AccountProcessor::applyResults(results);
@@ -524,11 +524,13 @@ void refreshAccounts() {
 }
 
 void startAccountRefreshLoop() {
-    ThreadTask::fireAndForget([] {
+    WorkerThreads::runBackground([] {
         refreshAccounts();
 
         while (g_running.load(std::memory_order_relaxed)) {
-            std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));
+            if (ShutdownManager::instance().sleepFor(std::chrono::minutes(g_statusRefreshInterval))) {
+                break;
+            }
 
             if (!g_running.load()) {
                 break;
@@ -536,6 +538,8 @@ void startAccountRefreshLoop() {
 
             refreshAccounts();
         }
+
+        LOG_INFO("Account refresh loop exiting");
     });
 }
 
@@ -589,6 +593,8 @@ namespace {
 
             case WM_DESTROY:
                 g_running = false;
+                ShutdownManager::instance().requestShutdown();
+                ShutdownManager::instance().waitForShutdown();
                 PostQuitMessage(0);
                 return 0;
         }
@@ -719,7 +725,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             break;
         }
 
-        ThreadTask::RunOnMainUpdate();
+        WorkerThreads::RunOnMainUpdate();
 
         if (g_swapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
             Sleep(10);
@@ -768,6 +774,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
 
     g_running = false;
+
+    ShutdownManager::instance().requestShutdown();
+    ShutdownManager::instance().waitForShutdown();
 
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();

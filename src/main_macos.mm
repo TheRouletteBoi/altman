@@ -409,9 +409,7 @@ void startAccountRefreshLoop() {
         refreshAccounts();
 
         while (g_running.load(std::memory_order_relaxed)) {
-            // Use interruptible sleep that respects shutdown signals
             if (ShutdownManager::instance().sleepFor(std::chrono::minutes(g_statusRefreshInterval))) {
-                // Shutdown was requested during sleep
                 break;
             }
 
@@ -519,19 +517,10 @@ void initializeAutoUpdater() {
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
-    LOG_INFO("Application terminating - initiating shutdown sequence");
-
-    // Signal all threads to stop
     g_running = false;
     ShutdownManager::instance().requestShutdown();
-
-    // Shutdown background systems
     ClientUpdateChecker::UpdateChecker::Shutdown();
-
-    // Wait for all background threads to complete
     ShutdownManager::instance().waitForShutdown();
-
-    LOG_INFO("Shutdown sequence complete");
 }
 @end
 
