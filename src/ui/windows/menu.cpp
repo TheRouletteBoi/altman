@@ -25,7 +25,7 @@
 #include "ui/widgets/modal_popup.h"
 #include "ui/windows/backup/backup.h"
 #include "utils/paths.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 struct DuplicateAccountModalState {
         bool showModal = false;
@@ -65,7 +65,7 @@ namespace {
     }
 
     void RefreshAccountStatuses() {
-        ThreadTask::fireAndForget([] {
+        WorkerThreads::runBackground([] {
             LOG_INFO("Refreshing account statuses...");
 
             std::vector<std::future<std::pair<int, std::optional<Roblox::FullAccountInfo>>>> futures;
@@ -360,7 +360,7 @@ bool RenderMainMenu() {
             if (RobloxControl::IsRobloxRunning()) {
                 s_openClearCachePopup = true;
             } else {
-                ThreadTask::fireAndForget(RobloxControl::ClearRobloxCache);
+                WorkerThreads::runBackground(RobloxControl::ClearRobloxCache);
             }
         }
 
@@ -384,12 +384,12 @@ bool RenderMainMenu() {
 
         if (ImGui::Button("Kill", ImVec2(killW, 0))) {
             RobloxControl::KillRobloxProcesses();
-            ThreadTask::fireAndForget(RobloxControl::ClearRobloxCache);
+            WorkerThreads::runBackground(RobloxControl::ClearRobloxCache);
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x);
         if (ImGui::Button("Don't kill", ImVec2(dontW, 0))) {
-            ThreadTask::fireAndForget(RobloxControl::ClearRobloxCache);
+            WorkerThreads::runBackground(RobloxControl::ClearRobloxCache);
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x);

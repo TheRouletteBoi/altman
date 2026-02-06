@@ -16,7 +16,7 @@
 #include "system/multi_instance.h"
 #include "system/system_info.h"
 #include "utils/paths.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 namespace ClientManager {
 
@@ -492,7 +492,7 @@ namespace ClientManager {
         ProgressCallback progressCb,
         CompletionCallback completionCb
     ) {
-        ThreadTask::fireAndForget([clientName, progressCb, completionCb]() {
+        WorkerThreads::runBackground([clientName, progressCb, completionCb]() {
             const auto appDataDir = AltMan::Paths::AppData();
             if (appDataDir.empty()) {
                 if (completionCb) {
@@ -779,7 +779,7 @@ namespace ClientManager {
         });
     }
     void RemoveClientAsync(const std::string &clientName, CompletionCallback completionCb) {
-        ThreadTask::fireAndForget([clientName, completionCb] {
+        WorkerThreads::runBackground([clientName, completionCb] {
             const std::string clientPath = MultiInstance::getBaseClientPath(clientName);
             if (clientPath.empty() || !std::filesystem::exists(clientPath)) {
                 if (completionCb) {

@@ -25,7 +25,7 @@
 #include "ui/windows/history/history_log_parser.h"
 #include "ui/windows/history/history_log_types.h"
 #include "utils/account_utils.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 #include "utils/time_utils.h"
 
 #ifdef _WIN32
@@ -182,7 +182,7 @@ static void refreshLogs() {
     }
 
     g_logs_loading = true;
-    ThreadTask::fireAndForget([]() {
+    WorkerThreads::runBackground([]() {
         LOG_INFO("Scanning Roblox logs folder...");
         std::vector<LogInfo> tempLogs;
         auto dir = GetLogsFolder();

@@ -18,7 +18,7 @@
 #include "components/data.h"
 #include "network/roblox/common.h"
 #include "ui/widgets/image.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 namespace {
     constexpr float THUMB_ROUNDING = 6.0f;
@@ -185,7 +185,7 @@ namespace {
         g_avatarState.started = true;
         g_avatarState.loading = true;
 
-        ThreadTask::fireAndForget([userId] {
+        WorkerThreads::runBackground([userId] {
             const std::string metaUrl = std::format(
                 "https://thumbnails.roblox.com/v1/users/avatar?userIds={}&size=420x420&format=Png",
                 userId
@@ -195,7 +195,7 @@ namespace {
             auto metaJsonResult = parseJsonSafe(metaResp);
 
             if (!metaJsonResult) {
-                ThreadTask::RunOnMain([] {
+                WorkerThreads::RunOnMain([] {
                     g_avatarState.loading = false;
                     g_avatarState.failed = true;
                 });
@@ -210,7 +210,7 @@ namespace {
             }
 
             if (avatarUrl.empty()) {
-                ThreadTask::RunOnMain([] {
+                WorkerThreads::RunOnMain([] {
                     g_avatarState.loading = false;
                     g_avatarState.failed = true;
                 });
@@ -219,7 +219,7 @@ namespace {
 
             auto imgResp = HttpClient::get(avatarUrl);
             if (imgResp.status_code != 200 || imgResp.text.empty()) {
-                ThreadTask::RunOnMain([] {
+                WorkerThreads::RunOnMain([] {
                     g_avatarState.loading = false;
                     g_avatarState.failed = true;
                 });
@@ -227,7 +227,7 @@ namespace {
             }
 
             std::string data = std::move(imgResp.text);
-            ThreadTask::RunOnMain([data = std::move(data)]() mutable {
+            WorkerThreads::RunOnMain([data = std::move(data)]() mutable {
                 auto result = LoadTextureFromMemory(data.data(), data.size());
                 if (result) {
                     g_avatarState.texture = std::move(result->texture);
@@ -245,7 +245,7 @@ namespace {
     void FetchCategories(uint64_t userId, std::string cookie) {
         g_categoryState.loading = true;
 
-        ThreadTask::fireAndForget([userId, cookie = std::move(cookie)] {
+        WorkerThreads::runBackground([userId, cookie = std::move(cookie)] {
             const std::string url = std::format("https://inventory.roblox.com/v1/users/{}/categories", userId);
 
             auto resp = HttpClient::rateLimitedGet(
@@ -257,7 +257,7 @@ namespace {
             auto jsonResult = parseJsonSafe(resp);
 
             if (!jsonResult) {
-                ThreadTask::RunOnMain([] {
+                WorkerThreads::RunOnMain([] {
                     g_categoryState.loading = false;
                     g_categoryState.failed = true;
                 });
@@ -288,7 +288,7 @@ namespace {
                 }
             }
 
-            ThreadTask::RunOnMain([categories = std::move(categories)]() mutable {
+            WorkerThreads::RunOnMain([categories = std::move(categories)]() mutable {
                 g_categoryState.categories = std::move(categories);
                 g_categoryState.loading = false;
                 g_categoryState.failed = g_categoryState.categories.empty();
@@ -300,14 +300,14 @@ namespace {
         g_equippedState.loading = true;
         g_equippedState.failed = false;
 
-        ThreadTask::fireAndForget([userId] {
+        WorkerThreads::runBackground([userId] {
             const std::string url = std::format("https://avatar.roblox.com/v1/users/{}/currently-wearing", userId);
 
             auto resp = HttpClient::rateLimitedGet(url);
             auto jsonResult = parseJsonSafe(resp);
 
             if (!jsonResult) {
-                ThreadTask::RunOnMain([userId] {
+                WorkerThreads::RunOnMain([userId] {
                     g_equippedState.userId = userId;
                     g_equippedState.failed = true;
                     g_equippedState.loading = false;
@@ -329,7 +329,7 @@ namespace {
                 }
             }
 
-            ThreadTask::RunOnMain([userId, ids = std::move(ids)]() mutable {
+            WorkerThreads::RunOnMain([userId, ids = std::move(ids)]() mutable {
                 if (userId != g_categoryState.userId) {
                     return;
                 }
@@ -354,7 +354,7 @@ namespace {
         }
         g_activeThumbLoads += static_cast<int>(assetIds.size());
 
-        ThreadTask::fireAndForget([assetIds = std::move(assetIds)] {
+        WorkerThreads::runBackground([assetIds = std::move(assetIds)] {
             std::string assetIdList;
             for (size_t i = 0; i < assetIds.size(); ++i) {
                 if (i > 0) assetIdList += ",";
@@ -370,7 +370,7 @@ namespace {
             auto metaJsonResult = parseJsonSafe(metaResp);
 
             if (!metaJsonResult) {
-                ThreadTask::RunOnMain([assetIds] {
+                WorkerThreads::RunOnMain([assetIds] {
                     for (uint64_t id : assetIds) {
                         auto it = g_thumbCache.find(id);
                         if (it != g_thumbCache.end()) {
@@ -400,7 +400,7 @@ namespace {
             for (uint64_t assetId : assetIds) {
                 auto urlIt = imageUrls.find(assetId);
                 if (urlIt == imageUrls.end() || urlIt->second.empty()) {
-                    ThreadTask::RunOnMain([assetId] {
+                    WorkerThreads::RunOnMain([assetId] {
                         auto it = g_thumbCache.find(assetId);
                         if (it != g_thumbCache.end()) {
                             it->second.loading = false;
@@ -413,7 +413,7 @@ namespace {
 
                 auto imgResp = HttpClient::get(urlIt->second);
                 if (imgResp.status_code != 200 || imgResp.text.empty()) {
-                    ThreadTask::RunOnMain([assetId] {
+                    WorkerThreads::RunOnMain([assetId] {
                         auto it = g_thumbCache.find(assetId);
                         if (it != g_thumbCache.end()) {
                             it->second.loading = false;
@@ -425,7 +425,7 @@ namespace {
                 }
 
                 std::string data = std::move(imgResp.text);
-                ThreadTask::RunOnMain([assetId, data = std::move(data)]() mutable {
+                WorkerThreads::RunOnMain([assetId, data = std::move(data)]() mutable {
                     auto it = g_thumbCache.find(assetId);
                     if (it == g_thumbCache.end()) {
                         --g_activeThumbLoads;
@@ -446,7 +446,7 @@ namespace {
                 });
             }
 
-            ThreadTask::RunOnMain([] {
+            WorkerThreads::RunOnMain([] {
                 g_batchThumbState.batchLoading = false;
             });
         });
@@ -489,7 +489,7 @@ namespace {
         g_inventoryState.loading = true;
         g_inventoryState.failed = false;
 
-        ThreadTask::fireAndForget([userId, cookie = std::move(cookie), assetTypeId] {
+        WorkerThreads::runBackground([userId, cookie = std::move(cookie), assetTypeId] {
             std::vector<InventoryItem> items;
             std::string cursor;
             bool anyError = false;
@@ -539,7 +539,7 @@ namespace {
                 }
             }
 
-            ThreadTask::RunOnMain([assetTypeId, anyError, items = std::move(items)]() mutable {
+            WorkerThreads::RunOnMain([assetTypeId, anyError, items = std::move(items)]() mutable {
                 if (!anyError) {
                     g_inventoryState.cachedInventories[assetTypeId] = std::move(items);
                     g_inventoryState.failed = false;

@@ -27,7 +27,8 @@
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/notifications.h"
 #include "utils/crypto.h"
-#include "utils/thread_task.h"
+#include "utils/shutdown_manager.h"
+#include "utils/worker_thread.h"
 
 #include <algorithm>
 #include <chrono>
@@ -337,7 +338,7 @@ namespace AccountProcessor {
             return;
         }
 
-        ThreadTask::RunOnMain([ids = std::move(invalidIds), names = std::move(invalidNames)]() {
+        WorkerThreads::RunOnMain([ids = std::move(invalidIds), names = std::move(invalidNames)]() {
             auto message = std::format("Invalid cookies for: {}. Remove them?", names);
 
             ModalPopup::AddYesNo(message.c_str(), [ids]() {
@@ -392,7 +393,7 @@ void refreshAccounts() {
         results.push_back(std::move(result));
     }
 
-    ThreadTask::RunOnMain([results = std::move(results),
+    WorkerThreads::RunOnMain([results = std::move(results),
                            invalidIds = std::move(invalidIds),
                            invalidNames = std::move(invalidNames)]() mutable {
         AccountProcessor::applyResults(results);
@@ -404,11 +405,15 @@ void refreshAccounts() {
 }
 
 void startAccountRefreshLoop() {
-    ThreadTask::fireAndForget([] {
+    WorkerThreads::runBackground([] {
         refreshAccounts();
 
         while (g_running.load(std::memory_order_relaxed)) {
-            std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));
+            // Use interruptible sleep that respects shutdown signals
+            if (ShutdownManager::instance().sleepFor(std::chrono::minutes(g_statusRefreshInterval))) {
+                // Shutdown was requested during sleep
+                break;
+            }
 
             if (!g_running.load()) {
                 break;
@@ -416,6 +421,8 @@ void startAccountRefreshLoop() {
 
             refreshAccounts();
         }
+
+        LOG_INFO("Account refresh loop exiting");
     });
 }
 
@@ -510,6 +517,22 @@ void initializeAutoUpdater() {
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
     return YES;
 }
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    LOG_INFO("Application terminating - initiating shutdown sequence");
+
+    // Signal all threads to stop
+    g_running = false;
+    ShutdownManager::instance().requestShutdown();
+
+    // Shutdown background systems
+    ClientUpdateChecker::UpdateChecker::Shutdown();
+
+    // Wait for all background threads to complete
+    ShutdownManager::instance().waitForShutdown();
+
+    LOG_INFO("Shutdown sequence complete");
+}
 @end
 
 @interface AppViewController : NSViewController <MTKViewDelegate>
@@ -552,9 +575,7 @@ void initializeAutoUpdater() {
 #endif
 }
 
-- (void)applicationWillTerminate:(NSNotification *)notification {
-    g_running = false;
-}
+
 
 - (void)loadView {
     constexpr CGFloat windowWidth = 1000.0;
@@ -580,7 +601,7 @@ void initializeAutoUpdater() {
 - (void)drawInMTKView:(MTKView *)view {
     IM_ASSERT([NSThread isMainThread]);
 
-    ThreadTask::RunOnMainUpdate();
+    WorkerThreads::RunOnMainUpdate();
 
     const CGFloat framebufferScale = view.window.screen.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
 

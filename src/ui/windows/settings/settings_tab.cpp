@@ -22,7 +22,7 @@
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/progress_overlay.h"
 #include "utils/paths.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 #ifdef __APPLE__
 #include "network/client_manager_macos.h"
@@ -244,7 +244,7 @@ namespace {
             }
         }
 
-        ThreadTask::fireAndForget([] {
+        WorkerThreads::runBackground([] {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             ScanEnvironments();
         });
@@ -410,7 +410,7 @@ namespace {
             if (ImGui::Button("Scan Environments")) {
                 g_cleanupState.isScanning = true;
                 g_cleanupState.statusMessage = "Scanning...";
-                ThreadTask::fireAndForget(ScanEnvironments);
+                WorkerThreads::runBackground(ScanEnvironments);
             }
 
             if (disableButtons) {
@@ -484,7 +484,7 @@ namespace {
                         }
                     }
 
-                    ThreadTask::fireAndForget([paths = std::move(paths), usernames = std::move(usernames)]() mutable {
+                    WorkerThreads::runBackground([paths = std::move(paths), usernames = std::move(usernames)]() mutable {
                         CleanSelectedEnvironments(paths, usernames);
                     });
                 }
@@ -542,7 +542,7 @@ namespace {
                         }
                     }
 
-                    ThreadTask::fireAndForget([paths = std::move(paths), usernames = std::move(usernames)]() mutable {
+                    WorkerThreads::runBackground([paths = std::move(paths), usernames = std::move(usernames)]() mutable {
                         CleanSelectedEnvironments(paths, usernames);
                     });
                 }
@@ -592,7 +592,7 @@ namespace {
                         }
                     }
 
-                    ThreadTask::fireAndForget([paths = std::move(paths), usernames = std::move(usernames)]() mutable {
+                    WorkerThreads::runBackground([paths = std::move(paths), usernames = std::move(usernames)]() mutable {
                         CleanSelectedEnvironments(paths, usernames);
                     });
                 }
@@ -722,7 +722,7 @@ namespace {
                             FormatBytes(size)
                         ),
                         [path, username]() {
-                            ThreadTask::fireAndForget([path, username]() {
+                            WorkerThreads::runBackground([path, username]() {
                                 CleanSelectedEnvironments({path}, {username});
                             });
                         }
@@ -803,7 +803,7 @@ void RenderSettingsTab() {
                 []() {
                     BottomRightStatus::Loading("Waiting for Roblox to close");
                     RobloxControl::KillRobloxProcesses();
-                    ThreadTask::fireAndForget([] {
+                    WorkerThreads::runBackground([] {
                         constexpr int maxAttempts = 50;
                         constexpr int delayMs = 100;
 
@@ -1001,7 +1001,7 @@ void RenderSettingsTab() {
                                 usernames.push_back(username);
                             }
 
-                            ThreadTask::fireAndForget([paths = std::move(paths),
+                            WorkerThreads::runBackground([paths = std::move(paths),
                                                        usernames = std::move(usernames)]() mutable {
                                 CleanSelectedEnvironments(paths, usernames);
                             });

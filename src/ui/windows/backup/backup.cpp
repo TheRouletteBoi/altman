@@ -21,7 +21,7 @@
 #include "ui/widgets/bottom_right_status.h"
 #include "ui/widgets/modal_popup.h"
 #include "utils/paths.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 namespace {
 
@@ -404,10 +404,10 @@ namespace Backup {
         g_importInProgress = true;
         BottomRightStatus::Loading("Importing backup...");
 
-        ThreadTask::fireAndForget([=]() {
+        WorkerThreads::runBackground([=]() {
             auto result = Import(filePath, password);
 
-            ThreadTask::RunOnMain([result = std::move(result)]() {
+            WorkerThreads::RunOnMain([result = std::move(result)]() {
                 g_importInProgress = false;
 
                 if (result) {

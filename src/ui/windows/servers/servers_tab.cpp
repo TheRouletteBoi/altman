@@ -32,7 +32,7 @@
 #include "ui/windows/accounts/accounts_join_ui.h"
 #include "ui/windows/components.h"
 #include "utils/account_utils.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 namespace {
     void renderPublicServers();
@@ -466,7 +466,7 @@ namespace {
                 isLoading = true;
                 errorMessage.clear();
 
-                ThreadTask::fireAndForget([this, tabType, cookie = account.cookie, cursor]() {
+                WorkerThreads::runBackground([this, tabType, cookie = account.cookie, cursor]() {
                     try {
                         auto page = Roblox::getAllPrivateServers(tabType, cookie, cursor);
 
@@ -544,7 +544,7 @@ namespace {
 
                 LOG_INFO("Joining private server: {}", server.name);
 
-                ThreadTask::fireAndForget([server, accounts = std::move(accounts), cookie]() {
+                WorkerThreads::runBackground([server, accounts = std::move(accounts), cookie]() {
                     try {
                         auto page = Roblox::getPrivateServersForGame(server.placeId, cookie);
 

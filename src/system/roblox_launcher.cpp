@@ -31,7 +31,7 @@
 #include "roblox_control.h"
 #include "ui/widgets/notifications.h"
 #include "utils/account_utils.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 LaunchParams LaunchParams::standard(uint64_t placeId) {
     return {LaunchMode::Job, placeId, ""};
@@ -405,7 +405,7 @@ void launchWithSelectedAccounts(LaunchParams params) {
         accounts.push_back(*acc);
     }
 
-    ThreadTask::fireAndForget([params = std::move(params), accounts = std::move(accounts)]() {
+    WorkerThreads::runBackground([params = std::move(params), accounts = std::move(accounts)]() {
         launchWithAccounts(params, accounts);
     });
 }

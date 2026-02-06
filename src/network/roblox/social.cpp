@@ -13,7 +13,7 @@
 #include "console/console.h"
 #include "network/http.h"
 #include "ui/windows/components.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 namespace Roblox {
 
@@ -175,7 +175,7 @@ namespace Roblox {
             }
         };
 
-        ThreadTask::fireAndForget([&, userId] {
+        WorkerThreads::runBackground([&, userId] {
             auto resp = HttpClient::get(
                 "https://users.roblox.com/v1/users/" + userId,
                 {
@@ -193,7 +193,7 @@ namespace Roblox {
             signalDone();
         });
 
-        ThreadTask::fireAndForget([&, userId] {
+        WorkerThreads::runBackground([&, userId] {
             auto resp = HttpClient::get("https://friends.roblox.com/v1/users/" + userId + "/followers/count", {});
             if (resp.status_code >= 200 && resp.status_code < 300) {
                 try {
@@ -205,7 +205,7 @@ namespace Roblox {
             signalDone();
         });
 
-        ThreadTask::fireAndForget([&, userId] {
+        WorkerThreads::runBackground([&, userId] {
             auto resp = HttpClient::get("https://friends.roblox.com/v1/users/" + userId + "/followings/count", {});
             if (resp.status_code >= 200 && resp.status_code < 300) {
                 try {
@@ -217,7 +217,7 @@ namespace Roblox {
             signalDone();
         });
 
-        ThreadTask::fireAndForget([&, userId] {
+        WorkerThreads::runBackground([&, userId] {
             auto resp = HttpClient::get("https://friends.roblox.com/v1/users/" + userId + "/friends/count", {});
             if (resp.status_code >= 200 && resp.status_code < 300) {
                 try {

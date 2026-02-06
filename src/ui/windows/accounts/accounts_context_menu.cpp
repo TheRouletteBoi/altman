@@ -34,7 +34,7 @@
 #include "ui/widgets/context_menus.h"
 #include "ui/widgets/modal_popup.h"
 #include "utils/account_utils.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 namespace {
     constexpr int MULTI_EDIT_SENTINEL = -2;
@@ -123,7 +123,7 @@ namespace {
         }
 
         g_presenceFetchInFlight.insert(accountId);
-        ThreadTask::fireAndForget([accountId, userIdStr = std::string(userId), cookieCopy = std::string(cookie)]() {
+        WorkerThreads::runBackground([accountId, userIdStr = std::string(userId), cookieCopy = std::string(cookie)]() {
             try {
                 const uint64_t uid = std::stoull(userIdStr);
                 const auto presenceMap = Roblox::getPresences({uid}, cookieCopy);
@@ -167,7 +167,7 @@ namespace {
 
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
         if (ImGui::MenuItem("Launch Link", nullptr, false, hasCookie)) {
-            ThreadTask::fireAndForget([cookie = account.cookie,
+            WorkerThreads::runBackground([cookie = account.cookie,
                                        placeId = std::string(join_value_buf),
                                        jobId = std::string(join_jobid_buf)]() {
                 const auto ticket = Roblox::fetchAuthTicket(cookie);
@@ -236,7 +236,7 @@ namespace {
                 }
             }
 
-            ThreadTask::fireAndForget(
+            WorkerThreads::runBackground(
                 [accounts, placeId = std::string(join_value_buf), jobId = std::string(join_jobid_buf)]() {
                     std::string result;
                     for (const auto &[id, cookie]: accounts) {
@@ -524,7 +524,7 @@ namespace {
                 return;
             }
 
-            ThreadTask::fireAndForget([placeId, account]() {
+            WorkerThreads::runBackground([placeId, account]() {
                 launchWithAccounts(LaunchParams::standard(placeId), {account});
             });
         };
@@ -537,7 +537,7 @@ namespace {
                 return;
             }
 
-            ThreadTask::fireAndForget([placeId, jobId, account]() {
+            WorkerThreads::runBackground([placeId, jobId, account]() {
                 launchWithAccounts(LaunchParams::gameJob(placeId, jobId), {account});
             });
         };

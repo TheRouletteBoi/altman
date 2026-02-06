@@ -12,7 +12,8 @@
 #include "system/multi_instance.h"
 #include "ui/widgets/notifications.h"
 #include "utils/paths.h"
-#include "utils/thread_task.h"
+#include "utils/shutdown_manager.h"
+#include "utils/worker_thread.h"
 
 namespace ClientUpdateChecker {
 
@@ -182,7 +183,7 @@ namespace ClientUpdateChecker {
         }
 
         if (shouldUpdate) {
-            ThreadTask::RunOnMain([clientName, infoCopy]() {
+            WorkerThreads::RunOnMain([clientName, infoCopy]() {
                 NotifyAndUpdate(clientName, infoCopy);
             });
         }
@@ -236,7 +237,7 @@ namespace ClientUpdateChecker {
                     SaveVersionInfoLocked();
                 }
 
-                ThreadTask::RunOnMain([clientNameCopy]() {
+                WorkerThreads::RunOnMain([clientNameCopy]() {
                     UpdateNotification::Show(
                         "Update Complete",
                         std::format("{} has been updated successfully!", clientNameCopy),
@@ -246,7 +247,7 @@ namespace ClientUpdateChecker {
             } else {
                 LOG_ERROR("{} update failed: {}", clientNameCopy, message);
 
-                ThreadTask::RunOnMain([clientNameCopy, message]() {
+                WorkerThreads::RunOnMain([clientNameCopy, message]() {
                     UpdateNotification::Show("Update Failed", std::format("{}: {}", clientNameCopy, message), 5.0f);
                 });
             }
@@ -260,10 +261,10 @@ namespace ClientUpdateChecker {
     void UpdateChecker::CheckerLoop() {
         LOG_INFO("Client update checker started");
 
-        while (!shouldStop.load()) {
+        while (!shouldStop.load() && !ShutdownManager::instance().isShuttingDown()) {
 
             for (const auto &clientName: g_availableClientsNames) {
-                if (shouldStop.load()) {
+                if (shouldStop.load() || ShutdownManager::instance().isShuttingDown()) {
                     break;
                 }
 
@@ -293,7 +294,7 @@ namespace ClientUpdateChecker {
                 {
                     std::unique_lock lock(shutdownMutex);
                     if (shutdownCV.wait_for(lock, std::chrono::seconds(2), []() {
-                            return shouldStop.load();
+                            return shouldStop.load() || ShutdownManager::instance().isShuttingDown();
                         })) {
                         break;
                     }
@@ -303,7 +304,7 @@ namespace ClientUpdateChecker {
             {
                 std::unique_lock lock(shutdownMutex);
                 shutdownCV.wait_for(lock, std::chrono::hours(1), []() {
-                    return shouldStop.load();
+                    return shouldStop.load() || ShutdownManager::instance().isShuttingDown();
                 });
             }
         }
@@ -335,7 +336,7 @@ namespace ClientUpdateChecker {
                         MarkClientAsInstalled("Default", GetClientVersion("Default"));
                     } else {
                         LOG_ERROR("Default client installation failed: {}", message);
-                        ThreadTask::RunOnMain([message]() {
+                        WorkerThreads::RunOnMain([message]() {
                             UpdateNotification::Show(
                                 "Installation Failed",
                                 std::format("Failed to install Default client: {}", message),
@@ -382,15 +383,15 @@ namespace ClientUpdateChecker {
     }
 
     void UpdateChecker::CheckNow(const std::string &clientName) {
-        ThreadTask::fireAndForget([clientName]() {
+        WorkerThreads::runBackground([clientName]() {
             CheckClientForUpdate(clientName);
         });
     }
 
     void UpdateChecker::CheckAllNow() {
-        ThreadTask::fireAndForget([]() {
+        WorkerThreads::runBackground([]() {
             for (const auto &clientName: g_availableClientsNames) {
-                if (shouldStop.load()) {
+                if (shouldStop.load() || ShutdownManager::instance().isShuttingDown()) {
                     break;
                 }
 
@@ -403,7 +404,7 @@ namespace ClientUpdateChecker {
                 {
                     std::unique_lock lock(shutdownMutex);
                     if (shutdownCV.wait_for(lock, std::chrono::seconds(2), []() {
-                            return shouldStop.load();
+                            return shouldStop.load() || ShutdownManager::instance().isShuttingDown();
                         })) {
                         break;
                     }

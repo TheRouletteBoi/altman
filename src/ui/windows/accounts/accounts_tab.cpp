@@ -26,7 +26,7 @@
 #include "ui/webview/webview.h"
 #include "ui/widgets/bottom_right_status.h"
 #include "ui/windows/components.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 #include "utils/time_utils.h"
 
 namespace {
@@ -104,7 +104,7 @@ namespace {
         }
 
         LOG_INFO("Opening browser for account: {} (ID: {})", account.displayName, account.id);
-        ThreadTask::fireAndForget([account]() {
+        WorkerThreads::runBackground([account]() {
             LaunchBrowserWithCookie(account);
         });
     }
@@ -140,9 +140,9 @@ namespace {
         const int accountId = account.id;
         const std::string cookie = account.cookie;
 
-        ThreadTask::fireAndForget([accountId, cookie]() {
+        WorkerThreads::runBackground([accountId, cookie]() {
             const auto voiceStatus = Roblox::getVoiceChatStatus(cookie);
-            ThreadTask::RunOnMain([accountId, voiceStatus]() {
+            WorkerThreads::RunOnMain([accountId, voiceStatus]() {
                 if (AccountData *acc = getAccountById(accountId)) {
                     acc->voiceStatus = voiceStatus.status;
                     acc->voiceBanExpiry = voiceStatus.bannedUntil;
@@ -411,7 +411,7 @@ namespace {
         if (ImGui::Button("Open", ImVec2(openWidth, 0)) && g_urlPopup.buffer[0] != '\0') {
             if (const AccountData *acc = getAccountById(g_urlPopup.accountId)) {
                 // Copy account for thread safety
-                ThreadTask::fireAndForget([account = *acc, url = std::string(g_urlPopup.buffer)]() {
+                WorkerThreads::runBackground([account = *acc, url = std::string(g_urlPopup.buffer)]() {
                     LaunchWebview(url, account);
                 });
             }

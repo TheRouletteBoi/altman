@@ -28,7 +28,7 @@
 #include "ui/widgets/bottom_right_status.h"
 #include "ui/widgets/modal_popup.h"
 #include "utils/account_utils.h"
-#include "utils/thread_task.h"
+#include "utils/worker_thread.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -222,7 +222,7 @@ namespace {
             accounts.push_back(*acc);
         }
 
-        ThreadTask::fireAndForget([userInput = std::move(userInput), accounts = std::move(accounts)]() {
+        WorkerThreads::runBackground([userInput = std::move(userInput), accounts = std::move(accounts)]() {
             try {
                 UserSpecifier spec {};
                 if (!parseUserSpecifier(userInput, spec)) {

@@ -15,7 +15,8 @@
 #include "ui/widgets/notifications.h"
 #include "ui/widgets/progress_overlay.h"
 #include "utils/paths.h"
-#include "utils/thread_task.h"
+#include "utils/shutdown_manager.h"
+#include "utils/worker_thread.h"
 #include "version.h"
 
 #ifdef _WIN32
@@ -684,8 +685,8 @@ const DownloadState &AutoUpdater::GetDownloadState() noexcept {
 }
 
 void AutoUpdater::StartBackgroundChecker() {
-    ThreadTask::fireAndForget([]() {
-        while (config.autoCheck) {
+    WorkerThreads::runBackground([]() {
+        while (config.autoCheck && !ShutdownManager::instance().isShuttingDown()) {
             const auto now = std::chrono::system_clock::now();
             const auto elapsed = std::chrono::duration_cast<std::chrono::hours>(now - config.lastCheck);
 
@@ -694,14 +695,15 @@ void AutoUpdater::StartBackgroundChecker() {
                 config.lastCheck = now;
                 config.Save();
             }
-
-            std::this_thread::sleep_for(std::chrono::hours(1));
+            if (ShutdownManager::instance().sleepFor(std::chrono::hours(1))) {
+                break;
+            }
         }
     });
 }
 
 void AutoUpdater::CheckForUpdates(bool silent) {
-    ThreadTask::fireAndForget([silent]() {
+    WorkerThreads::runBackground([silent]() {
         LOG_INFO("Checking for updates (channel: {})", GetChannelName(config.channel));
 
         const auto endpoint = GetReleaseEndpoint(config.channel);
@@ -717,7 +719,7 @@ void AutoUpdater::CheckForUpdates(bool silent) {
             LOG_ERROR("Failed to check for updates: HTTP {}", resp.status_code);
 
             if (!silent) {
-                ThreadTask::RunOnMain([]() {
+                WorkerThreads::RunOnMain([]() {
                     UpdateNotification::Show(
                         "Update Check Failed",
                         "Failed to check for updates. Please try again later."
@@ -749,7 +751,7 @@ void AutoUpdater::CheckForUpdates(bool silent) {
         if (!foundUpdate) {
             LOG_INFO("No updates available (current: {})", APP_VERSION);
             if (!silent) {
-                ThreadTask::RunOnMain([]() {
+                WorkerThreads::RunOnMain([]() {
                     UpdateNotification::Show("Up to Date", "You're using the latest version!");
                 });
             }
@@ -758,7 +760,7 @@ void AutoUpdater::CheckForUpdates(bool silent) {
 
         LOG_INFO("Update available: {} -> {}", APP_VERSION, updateInfo.version);
 
-        ThreadTask::RunOnMain([updateInfo, silent]() {
+        WorkerThreads::RunOnMain([updateInfo, silent]() {
             HandleUpdateAvailable(updateInfo, silent);
         });
     });
@@ -801,7 +803,7 @@ void AutoUpdater::HandleUpdateAvailable(const UpdateInfo &info, bool silent) {
 }
 
 void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInstall) {
-    ThreadTask::fireAndForget([info, autoInstall]() {
+    WorkerThreads::runBackground([info, autoInstall]() {
         const bool useDelta = info.hasDelta();
         bool success = false;
 
@@ -815,7 +817,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
         const auto outputExePath = tempDir / "AltMan.exe";
 #endif
 
-        ThreadTask::RunOnMain([&info, useDelta]() {
+        WorkerThreads::RunOnMain([&info, useDelta]() {
             ProgressOverlay::Add(
                 std::string(UPDATE_TASK_ID),
                 useDelta ? "Downloading delta update" : "Downloading update",
@@ -832,7 +834,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
         });
 
         const auto progressCallback = [](int percentage, size_t speed, size_t total) {
-            ThreadTask::RunOnMain([percentage, speed, total]() {
+            WorkerThreads::RunOnMain([percentage, speed, total]() {
                 const float progress = static_cast<float>(percentage) / 100.0f;
                 const auto detail
                     = std::format("{} • {}", FormatBytes(static_cast<size_t>(progress * total)), FormatSpeed(speed));
@@ -846,7 +848,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
             const auto x86_64PatchPath = tempDir / "patch_x86_64.bsdiff";
 
             LOG_INFO("Downloading arm64 delta patch...");
-            ThreadTask::RunOnMain([]() {
+            WorkerThreads::RunOnMain([]() {
                 UpdateNotification::Show("Downloading", "Downloading arm64 patch...", 2.0f);
             });
 
@@ -854,14 +856,14 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
 
             if (arm64Success) {
                 LOG_INFO("Downloading x86_64 delta patch...");
-                ThreadTask::RunOnMain([]() {
+                WorkerThreads::RunOnMain([]() {
                     UpdateNotification::Show("Downloading", "Downloading x86_64 patch...", 2.0f);
                 });
 
                 bool x86_64Success = DownloadFileWithResume(info.deltaUrl_x86_64, x86_64PatchPath, progressCallback);
 
                 if (x86_64Success) {
-                    ThreadTask::RunOnMain([]() {
+                    WorkerThreads::RunOnMain([]() {
                         UpdateNotification::Show("Applying Patch", "Applying delta patches...", 3.0f);
                     });
 
@@ -885,7 +887,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
             success = DownloadFileWithResume(info.deltaUrl, patchPath, progressCallback);
 
             if (success) {
-                ThreadTask::RunOnMain([]() {
+                WorkerThreads::RunOnMain([]() {
                     UpdateNotification::Show("Applying Patch", "Applying delta patch...", 3.0f);
                 });
 
@@ -932,14 +934,14 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
         }
 
         if (!success) {
-            ThreadTask::RunOnMain([]() {
+            WorkerThreads::RunOnMain([]() {
                 ProgressOverlay::Complete(std::string(UPDATE_TASK_ID), false, "Download failed");
             });
             std::filesystem::remove_all(tempDir);
             return;
         }
 
-        ThreadTask::RunOnMain([]() {
+        WorkerThreads::RunOnMain([]() {
             ProgressOverlay::Complete(std::string(UPDATE_TASK_ID), true, "Ready to install");
         });
 
@@ -952,11 +954,11 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
         config.lastInstalledVersion = info.version;
 
         if (autoInstall || config.autoInstall) {
-            ThreadTask::RunOnMain([]() {
+            WorkerThreads::RunOnMain([]() {
                 InstallUpdate(pendingUpdatePath);
             });
         } else {
-            ThreadTask::RunOnMain([]() {
+            WorkerThreads::RunOnMain([]() {
                 UpdateNotification::ShowPersistent("Update Ready", "Click to install and restart", []() {
                     InstallUpdate(pendingUpdatePath);
                 });
@@ -1011,7 +1013,7 @@ bool AutoUpdater::DownloadFileWithResume(
 
             const int percentage = total > 0 ? static_cast<int>((downloaded * 100) / total) : 0;
 
-            ThreadTask::RunOnMain([progressCallback, percentage, bytesPerSecond, total]() {
+            WorkerThreads::RunOnMain([progressCallback, percentage, bytesPerSecond, total]() {
                 progressCallback(percentage, bytesPerSecond, total);
             });
         };
@@ -1060,7 +1062,7 @@ bool AutoUpdater::DownloadFileWithResume(
         const size_t bytesPerSecond
             = elapsed > 0 ? (result.bytesDownloaded - startOffset) / static_cast<size_t>(elapsed) : 0;
 
-        ThreadTask::RunOnMain([progressCallback, bytesPerSecond, total = result.totalBytes]() {
+        WorkerThreads::RunOnMain([progressCallback, bytesPerSecond, total = result.totalBytes]() {
             progressCallback(100, bytesPerSecond, total);
         });
     }
@@ -1093,13 +1095,13 @@ void AutoUpdater::RollbackToPreviousVersion() {
     if (config.backupPath.empty() || !std::filesystem::exists(config.backupPath)) {
         LOG_ERROR("No backup available for rollback");
 
-        ThreadTask::RunOnMain([]() {
+        WorkerThreads::RunOnMain([]() {
             UpdateNotification::Show("Rollback Failed", "No backup found. Cannot rollback.", 5.0f);
         });
         return;
     }
 
-    ThreadTask::fireAndForget([]() {
+    WorkerThreads::runBackground([]() {
 #ifdef __APPLE__
         const auto currentPath = GetAppBundlePath();
         const auto tempBackup = std::filesystem::temp_directory_path() / "altman_rollback_tmp.app";
@@ -1116,7 +1118,7 @@ void AutoUpdater::RollbackToPreviousVersion() {
 
         CreateUpdateScript(config.backupPath.string(), currentPath.string(), tempBackup.string());
 
-        ThreadTask::RunOnMain([]() {
+        WorkerThreads::RunOnMain([]() {
             ModalPopup::AddYesNo("Rolling back to previous version. Restart now?", []() {
                 LaunchUpdateScript();
                 std::exit(0);
