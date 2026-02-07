@@ -5,132 +5,54 @@
 #import <MetalKit/MetalKit.h>
 #import <TargetConditionals.h>
 
-#include "imgui.h"
 #include "imgui_impl_metal.h"
 #include "imgui_impl_osx.h"
 #include "utils/stb_image.h"
 
-#include "assets/fonts/embedded_fa_solid.h"
-#include "assets/fonts/embedded_rubik.h"
-#include "components/data.h"
-#include "console/console.h"
-#include "image.h"
-#include "network/roblox/common.h"
-#include "network/roblox/auth.h"
-#include "network/roblox/common.h"
-#include "network/roblox/games.h"
-#include "network/roblox/session.h"
-#include "network/roblox/social.h"
-#include "system/auto_updater.h"
+#include "app_common.h"
 #include "system/client_update_checker_macos.h"
-#include "ui/ui.h"
-#include "ui/widgets/modal_popup.h"
-#include "ui/widgets/notifications.h"
-#include "utils/crypto.h"
-#include "utils/shutdown_manager.h"
-#include "utils/worker_thread.h"
-
-#include <algorithm>
-#include <chrono>
-#include <cstdio>
-#include <expected>
-#include <format>
-#include <future>
-#include <memory>
-#include <mutex>
-#include <print>
-#include <ranges>
-#include <shared_mutex>
-#include <string>
-#include <thread>
 
 namespace {
     id<MTLDevice> g_metalDevice = nil;
     id<MTLCommandQueue> g_commandQueue = nil;
-    ImFont *g_rubikFont = nullptr;
-    ImFont *g_iconFont = nullptr;
-
-    constexpr ImWchar ICON_MIN_FA = 0xf000;
-    constexpr ImWchar ICON_MAX_16_FA = 0xf3ff;
-    constexpr float BASE_FONT_SIZE = 16.0f;
 
     std::atomic<bool> g_fontReloadPending = false;
-    std::atomic<bool> g_running = true;
 } // namespace
 
 void ReloadFonts(float dpiScale) {
     IM_ASSERT([NSThread isMainThread]);
 
-    ImGuiIO &io = ImGui::GetIO();
-
-    io.Fonts->Clear();
-
-    const float scaledFontSize = BASE_FONT_SIZE;
-
-    ImFontConfig rubikCfg {};
-    rubikCfg.FontDataOwnedByAtlas = false;
-    g_rubikFont = io.Fonts->AddFontFromMemoryTTF(
-        const_cast<void *>(static_cast<const void *>(EmbeddedFonts::rubik_regular_ttf)),
-        sizeof(EmbeddedFonts::rubik_regular_ttf),
-        scaledFontSize,
-        &rubikCfg
-    );
-
-    if (!g_rubikFont) {
-        LOG_ERROR("Failed to load rubik-regular.ttf font.");
-        g_rubikFont = io.Fonts->AddFontDefault();
-    }
-
-    ImFontConfig iconCfg {};
-    iconCfg.MergeMode = true;
-    iconCfg.PixelSnapH = true;
-    iconCfg.FontDataOwnedByAtlas = false;
-    iconCfg.GlyphMinAdvanceX = scaledFontSize;
-
-    static constexpr ImWchar fa_solid_ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
-    g_iconFont = io.Fonts->AddFontFromMemoryTTF(
-        const_cast<void *>(static_cast<const void *>(EmbeddedFonts::fa_solid_ttf)),
-        sizeof(EmbeddedFonts::fa_solid_ttf),
-        scaledFontSize,
-        &iconCfg,
-        fa_solid_ranges
-    );
-
-    if (!g_iconFont && g_rubikFont) {
-        LOG_ERROR("Failed to load fa-solid.ttf font for icons.");
-    }
-
-    io.FontDefault = g_rubikFont;
+    const float scaledFontSize = BASE_FONT_SIZE; // macOS handles scaling via framebuffer
+    LoadImGuiFonts(scaledFontSize);
 
     ImGui::StyleColorsDark();
-    //ImGui::GetStyle().ScaleAllSizes(dpiScale);
 
     g_fontReloadPending = true;
 }
 
 [[nodiscard]]
-std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void *data, size_t data_size) {
-    int image_width = 0;
-    int image_height = 0;
-    unsigned char *image_data = stbi_load_from_memory(
+std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void *data, size_t dataSize) {
+    int imageWidth = 0;
+    int imageHeight = 0;
+    unsigned char *imageData = stbi_load_from_memory(
         static_cast<const unsigned char *>(data),
-        static_cast<int>(data_size),
-        &image_width,
-        &image_height,
+        static_cast<int>(dataSize),
+        &imageWidth,
+        &imageHeight,
         nullptr,
         4
     );
 
-    if (!image_data) {
+    if (!imageData) {
         return std::unexpected("Failed to decode image data");
     }
 
-    auto imageDataCleanup = std::unique_ptr<unsigned char, decltype(&stbi_image_free)>(image_data, stbi_image_free);
+    auto imageDataCleanup = std::unique_ptr<unsigned char, decltype(&stbi_image_free)>(imageData, stbi_image_free);
 
     MTLTextureDescriptor *textureDescriptor =
         [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                                           width:static_cast<NSUInteger>(image_width)
-                                                          height:static_cast<NSUInteger>(image_height)
+                                                           width:static_cast<NSUInteger>(imageWidth)
+                                                          height:static_cast<NSUInteger>(imageHeight)
                                                        mipmapped:NO];
     textureDescriptor.usage = MTLTextureUsageShaderRead;
     textureDescriptor.storageMode = MTLStorageModeShared;
@@ -141,371 +63,17 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void *
     }
 
     [texture
-        replaceRegion:MTLRegionMake2D(0, 0, static_cast<NSUInteger>(image_width), static_cast<NSUInteger>(image_height))
+        replaceRegion:MTLRegionMake2D(0, 0, static_cast<NSUInteger>(imageWidth), static_cast<NSUInteger>(imageHeight))
           mipmapLevel:0
-            withBytes:image_data
-          bytesPerRow:4 * static_cast<NSUInteger>(image_width)];
+            withBytes:imageData
+          bytesPerRow:4 * static_cast<NSUInteger>(imageWidth)];
 
     TextureLoadResult result;
     result.texture.reset(texture);
-    result.width = image_width;
-    result.height = image_height;
+    result.width = imageWidth;
+    result.height = imageHeight;
 
     return result;
-}
-
-[[nodiscard]]
-std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char *fileName) {
-    std::ifstream file(fileName, std::ios::binary | std::ios::ate);
-    if (!file) {
-        return std::unexpected(std::format("Failed to open file: {}", fileName));
-    }
-
-    const std::streamsize fileSize = file.tellg();
-    if (fileSize <= 0) {
-        return std::unexpected("Failed to determine file size");
-    }
-
-    file.seekg(0, std::ios::beg);
-
-    std::vector<char> fileData(static_cast<size_t>(fileSize));
-    if (!file.read(fileData.data(), fileSize)) {
-        return std::unexpected(std::format("Failed to read file: expected {} bytes", fileSize));
-    }
-
-    return LoadTextureFromMemory(fileData.data(), static_cast<size_t>(fileSize));
-}
-
-namespace AccountProcessor {
-    using AccountSnapshot = AccountData;
-
-    struct ProcessResult {
-            int id;
-            std::string userId;
-            std::string username;
-            std::string displayName;
-            std::string status;
-            std::string lastLocation;
-            uint64_t placeId = 0;
-            std::string jobId;
-            std::string voiceStatus;
-            time_t banExpiry = 0;
-            time_t voiceBanExpiry = 0;
-            bool shouldDeselect = false;
-            bool isInvalid = false;
-    };
-
-    [[nodiscard]]
-    std::vector<AccountSnapshot> takeAccountSnapshots() {
-        std::shared_lock lock(g_accountsMutex);
-        return {g_accounts.begin(), g_accounts.end()};
-    }
-
-    [[nodiscard]]
-    ProcessResult processAccount(const AccountSnapshot &account) {
-        ProcessResult result {
-            .id = account.id,
-            .userId = account.userId,
-            .username = account.username,
-            .displayName = account.displayName,
-            .status = "Unknown"
-        };
-
-        if (account.cookie.empty()) {
-            return result;
-        }
-
-        auto accountInfo = Roblox::fetchFullAccountInfo(account.cookie);
-
-        if (!accountInfo) {
-            switch (accountInfo.error()) {
-                case Roblox::ApiError::InvalidCookie:
-                    result.isInvalid = true;
-                    result.status = "InvalidCookie";
-                    result.voiceStatus = "N/A";
-                    result.shouldDeselect = true;
-                    return result;
-
-                case Roblox::ApiError::NetworkError:
-                case Roblox::ApiError::Timeout:
-                case Roblox::ApiError::ConnectionFailed:
-                    result.status = "Network Error";
-                    result.voiceStatus = "N/A";
-                    result.shouldDeselect = false;
-                    return result;
-
-                default:
-                    result.status = "Error";
-                    result.voiceStatus = "N/A";
-                    return result;
-            }
-        }
-
-        const auto &info = *accountInfo;
-
-        result.userId = std::to_string(info.userId);
-        result.username = info.username;
-        result.displayName = info.displayName;
-
-        switch (info.banInfo.status) {
-            case Roblox::BanCheckResult::InvalidCookie:
-                result.isInvalid = true;
-                result.status = "InvalidCookie";
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-                return result;
-
-            case Roblox::BanCheckResult::Banned:
-                result.status = "Banned";
-                result.banExpiry = info.banInfo.endDate;
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-                return result;
-
-            case Roblox::BanCheckResult::Warned:
-                result.status = "Warned";
-                result.shouldDeselect = true;
-                break;
-
-            case Roblox::BanCheckResult::Terminated:
-                result.status = "Terminated";
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-                return result;
-
-            case Roblox::BanCheckResult::NetworkError:
-                result.status = "Network Error";
-                result.voiceStatus = "N/A";
-                return result;
-
-            case Roblox::BanCheckResult::Unbanned:
-                break;
-        }
-
-        result.voiceStatus = info.voiceSettings.status;
-        result.voiceBanExpiry = info.voiceSettings.bannedUntil;
-        result.status = info.presence;
-
-        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
-            auto presenceData = Roblox::getPresenceData(account.cookie, info.userId);
-            if (presenceData) {
-                result.status = presenceData->presence;
-                result.lastLocation = presenceData->lastLocation;
-                result.placeId = presenceData->placeId;
-                result.jobId = presenceData->jobId;
-            }
-        }
-
-        return result;
-    }
-
-    void applyResults(const std::vector<ProcessResult> &results) {
-        std::unique_lock lock(g_accountsMutex);
-
-        for (const auto &result: results) {
-            auto it = std::ranges::find_if(g_accounts, [&result](const AccountData &a) {
-                return a.id == result.id;
-            });
-
-            if (it == g_accounts.end()) {
-                continue;
-            }
-
-            it->userId = result.userId;
-            it->username = result.username;
-            it->displayName = result.displayName;
-            it->status = result.status;
-            it->lastLocation = result.lastLocation;
-            it->placeId = result.placeId;
-            it->jobId = result.jobId;
-            it->voiceStatus = result.voiceStatus;
-            it->banExpiry = result.banExpiry;
-            it->voiceBanExpiry = result.voiceBanExpiry;
-
-            if (result.shouldDeselect) {
-                {
-                    std::lock_guard selLock(g_selectionMutex);
-                    g_selectedAccountIds.erase(result.id);
-                }
-            }
-        }
-
-        invalidateAccountIndex();
-    }
-
-    void showInvalidCookieModal(std::vector<int> invalidIds, std::string invalidNames) {
-        if (invalidIds.empty()) {
-            return;
-        }
-
-        WorkerThreads::RunOnMain([ids = std::move(invalidIds), names = std::move(invalidNames)]() {
-            auto message = std::format("Invalid cookies for: {}. Remove them?", names);
-
-            ModalPopup::AddYesNo(message.c_str(), [ids]() {
-                std::unique_lock lock(g_accountsMutex);
-
-                std::erase_if(g_accounts, [&ids](const AccountData &a) {
-                    return std::ranges::find(ids, a.id) != ids.end();
-                });
-
-                invalidateAccountIndex();
-
-                for (int id: ids) {
-                    g_selectedAccountIds.erase(id);
-                }
-
-                Data::SaveAccounts();
-            });
-        });
-    }
-} // namespace AccountProcessor
-
-void refreshAccounts() {
-    auto snapshots = AccountProcessor::takeAccountSnapshots();
-
-    std::vector<std::future<AccountProcessor::ProcessResult>> futures;
-    futures.reserve(snapshots.size());
-
-    for (const auto &snapshot: snapshots) {
-        futures.push_back(std::async(std::launch::async, [snapshot]() {
-            return AccountProcessor::processAccount(snapshot);
-        }));
-    }
-
-    std::vector<AccountProcessor::ProcessResult> results;
-    results.reserve(futures.size());
-
-    std::vector<int> invalidIds;
-    std::string invalidNames;
-
-    for (size_t i = 0; i < futures.size(); ++i) {
-        auto result = futures[i].get();
-
-        if (result.isInvalid) {
-            invalidIds.push_back(result.id);
-            if (!invalidNames.empty()) {
-                invalidNames.append(", ");
-            }
-            const auto &snapshot = snapshots[i];
-            invalidNames.append(snapshot.displayName.empty() ? snapshot.username : snapshot.displayName);
-        }
-
-        results.push_back(std::move(result));
-    }
-
-    WorkerThreads::RunOnMain([results = std::move(results),
-                           invalidIds = std::move(invalidIds),
-                           invalidNames = std::move(invalidNames)]() mutable {
-        AccountProcessor::applyResults(results);
-        Data::SaveAccounts();
-        LOG_INFO("Loaded accounts and refreshed statuses");
-
-        AccountProcessor::showInvalidCookieModal(std::move(invalidIds), std::move(invalidNames));
-    });
-}
-
-void startAccountRefreshLoop() {
-    WorkerThreads::runBackground([] {
-        refreshAccounts();
-
-        while (g_running.load(std::memory_order_relaxed)) {
-            if (ShutdownManager::instance().sleepFor(std::chrono::minutes(g_statusRefreshInterval))) {
-                break;
-            }
-
-            if (!g_running.load()) {
-                break;
-            }
-
-            refreshAccounts();
-        }
-
-        LOG_INFO("Account refresh loop exiting");
-    });
-}
-
-void initializeAutoUpdater() {
-    /*
-        ## GitHub Release Setup
-
-        For delta updates to work, structure releases like this:
-
-        Release v1.1.0
-        ├── macOS/
-        │   ├── AltMan-macOS-arm64.app.zip
-        │   ├── AltMan-macOS-x86_64.app.zip
-        │   └── deltas/
-        │       ├── AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff
-        │       └── AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff
-        │
-        ├── Windows/
-        │   ├── AltMan-Windows-x86_64.exe
-        │   ├── AltMan-Windows-arm64.exe
-        │   └── deltas/
-        │       ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
-        │       └── AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
-        │
-        └── beta/
-            └── AltMan-Windows-x86_64-beta.exe
-
-
-        Creating Delta Patches
-        Windows (xdelta3):
-        ```xdelta3 -e -s AltMan-1.0.0-Windows-x86_64.exe AltMan-1.1.0-Windows-x86_64.exe
-       AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta```
-        ```xdelta3 -e -s AltMan-1.0.0-Windows-arm64.exe AltMan-1.1.0-Windows-arm64.exe
-       AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta``` macOS (bsdiff): Extract slices
-        ```lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin arm64 -output old.arm64```
-        ```lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin arm64 -output new.arm64```
-
-        ```lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin x86_64 -output old.x86_64```
-        ```lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin x86_64 -output new.x86_64```
-
-        Create deltas per architecture
-        ```xdelta3 -e -s old.arm64 new.arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.xdelta```
-        ```xdelta3 -e -s old.x86_64 new.x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.xdelta```
-        OR (preferred for macOS binaries):
-        ```bsdiff old.arm64 new.arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff```
-        ```bsdiff old.x86_64 new.x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff```
-
-        Re-assemble after patch
-        ```lipo patched.arm64 patched.x86_64 -create -output AltMan```
-
-
-
-
-        **NEW way**
-        Release v1.1.0
-        ├── AltMan-Windows-x86_64.exe
-        ├── AltMan-Windows-arm64.exe
-        ├── AltMan-macOS.zip                                    # Universal binary .app
-        ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
-        ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
-        ├── AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff      # arm64 slice patch
-        └── AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff     # x86_64 slice patch
-
-
-        # macOS - Extract slices from universal binaries, create per-arch deltas
-        lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin arm64 -output old_arm64
-        lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin arm64 -output new_arm64
-        bsdiff old_arm64 new_arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff
-
-        lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin x86_64 -output old_x86_64
-        lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin x86_64 -output new_x86_64
-        bsdiff old_x86_64 new_x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff
-
-        # Windows - per architecture
-        xdelta3 -e -s old_x86_64.exe new_x86_64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
-        xdelta3 -e -s old_arm64.exe new_arm64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
-
-        # Ad-hoc signing
-        codesign --force --deep --sign - AltMan.app
-     */
-    AutoUpdater::Initialize();
-    AutoUpdater::SetBandwidthLimit(5_MB);
-    AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
-    AutoUpdater::SetAutoUpdate(true, true, false);
-    ClientUpdateChecker::UpdateChecker::Initialize();
 }
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
@@ -563,8 +131,6 @@ void initializeAutoUpdater() {
     [super dealloc];
 #endif
 }
-
-
 
 - (void)loadView {
     constexpr CGFloat windowWidth = 1000.0;
@@ -680,23 +246,13 @@ NSWindow *createMainWindow() {
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
-        if (auto result = Crypto::initialize(); !result) {
-            std::println("Failed to initialize crypto library {}", Crypto::errorToString(result.error()));
+        if (!initializeApp()) {
             return 1;
         }
 
-        HttpClient::RateLimiter::instance().configure(50, std::chrono::milliseconds(1000));
-
-        Data::LoadSettings("settings.json");
-
         if (g_checkUpdatesOnStartup) {
-            initializeAutoUpdater();
+            ClientUpdateChecker::UpdateChecker::Initialize();
         }
-
-        Data::LoadAccounts("accounts.json");
-        Data::LoadFriends("friends.json");
-
-        startAccountRefreshLoop();
 
         NSApplication *app = [NSApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];

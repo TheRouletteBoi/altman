@@ -7,44 +7,12 @@
 #include <objbase.h>
 #include <shellscalingapi.h>
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cstdio>
-#include <expected>
-#include <format>
-#include <future>
-#include <memory>
-#include <mutex>
-#include <print>
-#include <ranges>
-#include <shared_mutex>
-#include <string>
-#include <thread>
-
-#include "imgui.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
 #include "utils/stb_image.h"
 
-#include "assets/fonts/embedded_fa_solid.h"
-#include "assets/fonts/embedded_rubik.h"
-#include "components/data.h"
-#include "console/console.h"
-#include "image.h"
-#include "network/roblox/common.h"
-#include "network/roblox/auth.h"
-#include "network/roblox/common.h"
-#include "network/roblox/games.h"
-#include "network/roblox/session.h"
-#include "network/roblox/social.h"
-#include "system/auto_updater.h"
+#include "app_common.h"
 #include "system/multi_instance.h"
-#include "ui/ui.h"
-#include "ui/widgets/modal_popup.h"
-#include "ui/widgets/notifications.h"
-#include "utils/crypto.h"
-#include "utils/worker_thread.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -58,15 +26,7 @@ namespace {
     UINT g_resizeWidth = 0;
     UINT g_resizeHeight = 0;
 
-    ImFont *g_rubikFont = nullptr;
-    ImFont *g_iconFont = nullptr;
     float g_currentDPIScale = 1.0f;
-
-    constexpr ImWchar ICON_MIN_FA = 0xf000;
-    constexpr ImWchar ICON_MAX_16_FA = 0xf3ff;
-    constexpr float BASE_FONT_SIZE = 16.0f;
-
-    std::atomic<bool> g_running = true;
 
     [[nodiscard]]
     float GetDPIScale(HWND hwnd) {
@@ -166,57 +126,108 @@ namespace {
     }
 
     void ReloadFonts(float dpiScale) {
-        ImGuiIO &io = ImGui::GetIO();
-        io.Fonts->Clear();
-
         const float scaledFontSize = BASE_FONT_SIZE * dpiScale;
-
-        ImFontConfig rubikCfg {};
-        rubikCfg.FontDataOwnedByAtlas = false;
-        g_rubikFont = io.Fonts->AddFontFromMemoryTTF(
-            const_cast<void *>(static_cast<const void *>(EmbeddedFonts::rubik_regular_ttf)),
-            sizeof(EmbeddedFonts::rubik_regular_ttf),
-            scaledFontSize,
-            &rubikCfg
-        );
-
-        if (!g_rubikFont) {
-            LOG_ERROR("Failed to load rubik-regular.ttf font.");
-            g_rubikFont = io.Fonts->AddFontDefault();
-        }
-
-        ImFontConfig iconCfg {};
-        iconCfg.MergeMode = true;
-        iconCfg.PixelSnapH = true;
-        iconCfg.FontDataOwnedByAtlas = false;
-        iconCfg.GlyphMinAdvanceX = scaledFontSize;
-
-        static constexpr ImWchar fa_solid_ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
-        g_iconFont = io.Fonts->AddFontFromMemoryTTF(
-            const_cast<void *>(static_cast<const void *>(EmbeddedFonts::fa_solid_ttf)),
-            sizeof(EmbeddedFonts::fa_solid_ttf),
-            scaledFontSize,
-            &iconCfg,
-            fa_solid_ranges
-        );
-
-        if (!g_iconFont && g_rubikFont) {
-            LOG_ERROR("Failed to load fa-solid.ttf font for icons.");
-        }
-
-        io.FontDefault = g_rubikFont;
+        LoadImGuiFonts(scaledFontSize);
 
         ImGuiStyle &style = ImGui::GetStyle();
         style = ImGuiStyle();
         ImGui::StyleColorsDark();
         style.ScaleAllSizes(dpiScale);
 
-        io.Fonts->Build();
+        ImGui::GetIO().Fonts->Build();
 
         if (g_pd3dDevice) {
             ImGui_ImplDX11_InvalidateDeviceObjects();
             ImGui_ImplDX11_CreateDeviceObjects();
         }
+    }
+
+    LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+        if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) {
+            return true;
+        }
+
+        switch (msg) {
+            case WM_DPICHANGED: {
+                float newDPIScale = GetDPIScale(hWnd);
+                if (std::abs(newDPIScale - g_currentDPIScale) > 0.01f) {
+                    g_currentDPIScale = newDPIScale;
+                    ReloadFonts(g_currentDPIScale);
+                }
+                auto *rect = reinterpret_cast<RECT *>(lParam);
+                SetWindowPos(
+                    hWnd,
+                    nullptr,
+                    rect->left,
+                    rect->top,
+                    rect->right - rect->left,
+                    rect->bottom - rect->top,
+                    SWP_NOZORDER | SWP_NOACTIVATE
+                );
+                return 0;
+            }
+
+            case WM_SIZE:
+                if (wParam == SIZE_MINIMIZED) {
+                    return 0;
+                }
+                g_resizeWidth = LOWORD(lParam);
+                g_resizeHeight = HIWORD(lParam);
+                return 0;
+
+            case WM_SYSCOMMAND:
+                if ((wParam & 0xfff0) == SC_KEYMENU) {
+                    return 0;
+                }
+                break;
+
+            case WM_DESTROY:
+                g_running = false;
+                PostQuitMessage(0);
+                return 0;
+        }
+
+        return DefWindowProcW(hWnd, msg, wParam, lParam);
+    }
+
+    [[nodiscard]]
+    HWND createMainWindow(HINSTANCE hInstance) {
+        constexpr wchar_t CLASS_NAME[] = L"AltMan_WindowClass";
+
+        WNDCLASSEXW wc {};
+        wc.cbSize = sizeof(wc);
+        wc.style = CS_CLASSDC;
+        wc.lpfnWndProc = WndProc;
+        wc.hInstance = hInstance;
+        wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_ICON_32));
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.lpszClassName = CLASS_NAME;
+        wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_ICON_32));
+        RegisterClassExW(&wc);
+
+        UINT dpi = GetDpiForSystem();
+        int width = MulDiv(1000, dpi, 96);
+        int height = MulDiv(560, dpi, 96);
+
+        HWND hwnd = CreateWindowExW(
+            0,
+            CLASS_NAME,
+            L"AltMan",
+            WS_OVERLAPPEDWINDOW,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            width,
+            height,
+            nullptr,
+            nullptr,
+            hInstance,
+            nullptr
+        );
+
+        BOOL useDarkMode = TRUE;
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &useDarkMode, sizeof(useDarkMode));
+
+        return hwnd;
     }
 
 } // namespace
@@ -281,369 +292,6 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void *
     return result;
 }
 
-[[nodiscard]]
-std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char *fileName) {
-    std::ifstream file(fileName, std::ios::binary | std::ios::ate);
-    if (!file) {
-        return std::unexpected(std::format("Failed to open file: {}", fileName));
-    }
-
-    const std::streamsize fileSize = file.tellg();
-    if (fileSize <= 0) {
-        return std::unexpected("Failed to determine file size");
-    }
-
-    file.seekg(0, std::ios::beg);
-
-    std::vector<char> fileData(static_cast<size_t>(fileSize));
-    if (!file.read(fileData.data(), fileSize)) {
-        return std::unexpected(std::format("Failed to read file: expected {} bytes", fileSize));
-    }
-
-    return LoadTextureFromMemory(fileData.data(), static_cast<size_t>(fileSize));
-}
-
-namespace AccountProcessor {
-
-    using AccountSnapshot = AccountData;
-
-    struct ProcessResult {
-            int id;
-            std::string userId;
-            std::string username;
-            std::string displayName;
-            std::string status;
-            std::string lastLocation;
-            uint64_t placeId = 0;
-            std::string jobId;
-            std::string voiceStatus;
-            time_t banExpiry = 0;
-            time_t voiceBanExpiry = 0;
-            bool shouldDeselect = false;
-            bool isInvalid = false;
-    };
-
-    [[nodiscard]]
-    std::vector<AccountSnapshot> takeAccountSnapshots() {
-        std::shared_lock lock(g_accountsMutex);
-        return {g_accounts.begin(), g_accounts.end()};
-    }
-
-    [[nodiscard]]
-    ProcessResult processAccount(const AccountSnapshot &account) {
-        ProcessResult result {
-            .id = account.id,
-            .userId = account.userId,
-            .username = account.username,
-            .displayName = account.displayName,
-            .status = "Unknown"
-        };
-
-        if (account.cookie.empty()) {
-            return result;
-        }
-
-        auto accountInfo = Roblox::fetchFullAccountInfo(account.cookie);
-
-        if (!accountInfo) {
-            if (accountInfo.error() == Roblox::ApiError::InvalidCookie) {
-                result.isInvalid = true;
-                result.status = "Invalid";
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-            } else {
-                result.status = "Network Error";
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-                result.isInvalid = false;
-            }
-            return result;
-        }
-
-        const auto &info = *accountInfo;
-
-        result.userId = std::to_string(info.userId);
-        result.username = info.username;
-        result.displayName = info.displayName;
-
-        switch (info.banInfo.status) {
-            case Roblox::BanCheckResult::InvalidCookie:
-                result.isInvalid = true;
-                result.status = "Invalid";
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-                return result;
-
-            case Roblox::BanCheckResult::Banned:
-                result.status = "Banned";
-                result.banExpiry = info.banInfo.endDate;
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-                return result;
-
-            case Roblox::BanCheckResult::Warned:
-                result.status = "Warned";
-                break;
-
-            case Roblox::BanCheckResult::Terminated:
-                result.status = "Terminated";
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-                return result;
-
-            default:
-                break;
-        }
-
-        result.voiceStatus = info.voiceSettings.status;
-        result.voiceBanExpiry = info.voiceSettings.bannedUntil;
-
-        if (info.userId != 0) {
-            auto presenceData = Roblox::getPresenceData(account.cookie, info.userId);
-            if (presenceData) {
-                result.status = presenceData->presence;
-                result.lastLocation = presenceData->lastLocation;
-                result.placeId = presenceData->placeId;
-                result.jobId = presenceData->jobId;
-            } else {
-                result.status = info.presence;
-            }
-        } else {
-            result.status = info.presence;
-        }
-
-        return result;
-    }
-
-    void applyResults(const std::vector<ProcessResult> &results) {
-        std::unique_lock lock(g_accountsMutex);
-
-        for (const auto &result: results) {
-            auto it = std::ranges::find_if(g_accounts, [&result](const AccountData &a) {
-                return a.id == result.id;
-            });
-
-            if (it == g_accounts.end()) {
-                continue;
-            }
-
-            it->userId = result.userId;
-            it->username = result.username;
-            it->displayName = result.displayName;
-            it->status = result.status;
-            it->lastLocation = result.lastLocation;
-            it->placeId = result.placeId;
-            it->jobId = result.jobId;
-            it->voiceStatus = result.voiceStatus;
-            it->banExpiry = result.banExpiry;
-            it->voiceBanExpiry = result.voiceBanExpiry;
-
-            if (result.shouldDeselect) {
-                std::lock_guard selLock(g_selectionMutex);
-                g_selectedAccountIds.erase(result.id);
-            }
-        }
-
-        invalidateAccountIndex();
-    }
-
-    void showInvalidCookieModal(std::vector<int> invalidIds, std::string invalidNames) {
-        if (invalidIds.empty()) {
-            return;
-        }
-
-        WorkerThreads::RunOnMain([ids = std::move(invalidIds), names = std::move(invalidNames)]() {
-            auto message = std::format("Invalid cookies for: {}. Remove them?", names);
-
-            ModalPopup::AddYesNo(message.c_str(), [ids]() {
-                std::unique_lock lock(g_accountsMutex);
-
-                std::erase_if(g_accounts, [&ids](const AccountData &a) {
-                    return std::ranges::find(ids, a.id) != ids.end();
-                });
-
-                invalidateAccountIndex();
-
-                for (int id: ids) {
-                    g_selectedAccountIds.erase(id);
-                }
-
-                Data::SaveAccounts();
-            });
-        });
-    }
-
-} // namespace AccountProcessor
-
-void refreshAccounts() {
-    auto snapshots = AccountProcessor::takeAccountSnapshots();
-
-    if (snapshots.empty()) {
-        return;
-    }
-
-    std::vector<std::future<AccountProcessor::ProcessResult>> futures;
-    futures.reserve(snapshots.size());
-
-    for (const auto &snapshot: snapshots) {
-        futures.push_back(std::async(std::launch::async, [snapshot]() {
-            return AccountProcessor::processAccount(snapshot);
-        }));
-    }
-
-    std::vector<AccountProcessor::ProcessResult> results;
-    results.reserve(futures.size());
-
-    std::vector<int> invalidIds;
-    std::string invalidNames;
-
-    for (std::size_t i = 0; i < futures.size(); ++i) {
-        auto result = futures[i].get();
-
-        if (result.isInvalid) {
-            invalidIds.push_back(result.id);
-            if (!invalidNames.empty()) {
-                invalidNames.append(", ");
-            }
-            const auto &snapshot = snapshots[i];
-            invalidNames.append(snapshot.displayName.empty() ? snapshot.username : snapshot.displayName);
-        }
-
-        results.push_back(std::move(result));
-    }
-
-    WorkerThreads::RunOnMain([results = std::move(results),
-                           invalidIds = std::move(invalidIds),
-                           invalidNames = std::move(invalidNames)]() mutable {
-        AccountProcessor::applyResults(results);
-        Data::SaveAccounts();
-        LOG_INFO("Loaded accounts and refreshed statuses");
-
-        AccountProcessor::showInvalidCookieModal(std::move(invalidIds), std::move(invalidNames));
-    });
-}
-
-void startAccountRefreshLoop() {
-    WorkerThreads::runBackground([] {
-        refreshAccounts();
-
-        while (g_running.load(std::memory_order_relaxed)) {
-            if (ShutdownManager::instance().sleepFor(std::chrono::minutes(g_statusRefreshInterval))) {
-                break;
-            }
-
-            if (!g_running.load()) {
-                break;
-            }
-
-            refreshAccounts();
-        }
-
-        LOG_INFO("Account refresh loop exiting");
-    });
-}
-
-void initializeAutoUpdater() {
-    AutoUpdater::Initialize();
-    AutoUpdater::SetBandwidthLimit(5_MB);
-    AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
-    AutoUpdater::SetAutoUpdate(true, true, false);
-}
-
-namespace {
-
-    LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-        if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) {
-            return true;
-        }
-
-        switch (msg) {
-            case WM_DPICHANGED: {
-                float newDPIScale = GetDPIScale(hWnd);
-                if (std::abs(newDPIScale - g_currentDPIScale) > 0.01f) {
-                    g_currentDPIScale = newDPIScale;
-                    ReloadFonts(g_currentDPIScale);
-                }
-                auto *rect = reinterpret_cast<RECT *>(lParam);
-                SetWindowPos(
-                    hWnd,
-                    nullptr,
-                    rect->left,
-                    rect->top,
-                    rect->right - rect->left,
-                    rect->bottom - rect->top,
-                    SWP_NOZORDER | SWP_NOACTIVATE
-                );
-                return 0;
-            }
-
-            case WM_SIZE:
-                if (wParam == SIZE_MINIMIZED) {
-                    return 0;
-                }
-                g_resizeWidth = LOWORD(lParam);
-                g_resizeHeight = HIWORD(lParam);
-                return 0;
-
-            case WM_SYSCOMMAND:
-                if ((wParam & 0xfff0) == SC_KEYMENU) {
-                    return 0;
-                }
-                break;
-
-            case WM_DESTROY:
-                g_running = false;
-                ShutdownManager::instance().requestShutdown();
-                ShutdownManager::instance().waitForShutdown();
-                PostQuitMessage(0);
-                return 0;
-        }
-
-        return DefWindowProcW(hWnd, msg, wParam, lParam);
-    }
-
-    [[nodiscard]]
-    HWND createMainWindow(HINSTANCE hInstance) {
-        constexpr wchar_t CLASS_NAME[] = L"AltMan_WindowClass";
-
-        WNDCLASSEXW wc {};
-        wc.cbSize = sizeof(wc);
-        wc.style = CS_CLASSDC;
-        wc.lpfnWndProc = WndProc;
-        wc.hInstance = hInstance;
-        wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_ICON_32));
-        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        wc.lpszClassName = CLASS_NAME;
-        wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_ICON_32));
-        RegisterClassExW(&wc);
-
-        UINT dpi = GetDpiForSystem();
-        int width = MulDiv(1000, dpi, 96);
-        int height = MulDiv(560, dpi, 96);
-
-        HWND hwnd = CreateWindowExW(
-            0,
-            CLASS_NAME,
-            L"AltMan",
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            width,
-            height,
-            nullptr,
-            nullptr,
-            hInstance,
-            nullptr
-        );
-
-        BOOL useDarkMode = TRUE;
-        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &useDarkMode, sizeof(useDarkMode));
-
-        return hwnd;
-    }
-
-} // namespace
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -653,23 +301,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         return 1;
     }
 
-    if (auto result = Crypto::initialize(); !result) {
-        std::println("Failed to initialize crypto library {}", Crypto::errorToString(result.error()));
+    if (!initializeApp()) {
+        CoUninitialize();
         return 1;
     }
-
-    HttpClient::RateLimiter::instance().configure(50, std::chrono::milliseconds(1000));
-
-    Data::LoadSettings("settings.json");
-
-    if (g_checkUpdatesOnStartup) {
-        initializeAutoUpdater();
-    }
-
-    Data::LoadAccounts("accounts.json");
-    Data::LoadFriends("friends.json");
-
-    startAccountRefreshLoop();
 
     if (g_multiRobloxEnabled) {
         MultiInstance::Enable();
