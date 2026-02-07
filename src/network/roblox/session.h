@@ -40,6 +40,14 @@ namespace Roblox {
 
     VoiceSettings getVoiceChatStatus(const std::string &cookie);
 
+    ApiResult<std::string> getAgeGroup(const std::string &cookie);
+    ApiResult<std::string> getUserSetting(const std::string &cookie, const std::string &key);
+    ApiResult<std::string> getOnlineStatusVisibility(const std::string &cookie);
+    ApiResult<std::string> getJoinRestriction(const std::string &cookie);
+    ApiResult<void> setUserSetting(const std::string &cookie, const std::string &key, const std::string &value);
+    ApiResult<void> setOnlineStatusVisibility(const std::string &cookie, const std::string &value);
+    ApiResult<void> setJoinRestriction(const std::string &cookie, const std::string &value);
+
     void clearPresenceCache();
 
     void invalidatePresenceCache(uint64_t userId);

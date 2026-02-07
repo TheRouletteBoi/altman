@@ -235,8 +235,13 @@ namespace Roblox {
                 return getPresence(cookie, result.userId);
             });
 
+            /*auto ageGroupFuture = std::async(std::launch::async, [&]() {
+                return getAgeGroup(cookie);
+            });*/
+
             result.voiceSettings = getVoiceChatStatus(cookie);
             result.presence = presenceFuture.get();
+            //result.ageGroup = ageGroupFuture.get();
         } else {
             result.presence = std::string(banResultToString(banInfo.status));
             result.voiceSettings = {"N/A", 0};

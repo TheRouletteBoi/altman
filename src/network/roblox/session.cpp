@@ -15,6 +15,20 @@ namespace Roblox {
     namespace {
         // TTL Cache for presence data (1 minute expiry)
         TtlCache<uint64_t, PresenceData> g_presenceCache {std::chrono::minutes(1)};
+
+        // TTL Cache for age group (48 hour expiry)
+        TtlCache<std::string, std::string> g_ageGroupCache {std::chrono::hours(48)};
+
+        // TTL Cache for user settings fields (48 hour expiry)
+        TtlCache<std::string, std::unordered_map<std::string, std::string>> g_userSettingsCache {std::chrono::hours(48)};
+
+        std::string parseAgeGroupKey(const std::string &translationKey) {
+            constexpr std::string_view prefix = "Label.AgeGroup";
+            if (translationKey.starts_with(prefix)) {
+                return translationKey.substr(prefix.size());
+            }
+            return translationKey;
+        }
     } // namespace
 
     std::string getPresence(const std::string &cookie, uint64_t userId) {
@@ -275,6 +289,132 @@ namespace Roblox {
         }
 
         return {"Disabled", 0};
+    }
+
+    ApiResult<std::string> getAgeGroup(const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return std::unexpected(validationError);
+        }
+
+        if (auto cached = g_ageGroupCache.get(cookie)) {
+            return *cached;
+        }
+
+        LOG_INFO("Fetching account age group");
+
+        auto resp = HttpClient::get(
+            "https://apis.roblox.com/user-settings-api/v1/account-insights/age-group",
+            {
+                {"Cookie", ".ROBLOSECURITY=" + cookie}
+            }
+        );
+
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("Age group fetch failed: HTTP {}", resp.status_code);
+            return std::unexpected(httpStatusToError(resp.status_code));
+        }
+
+        auto j = HttpClient::decode(resp);
+
+        std::string ageGroup = parseAgeGroupKey(j.value("ageGroupTranslationKey", ""));
+        if (ageGroup.empty()) {
+            return std::unexpected(ApiError::InvalidResponse);
+        }
+
+        g_ageGroupCache.set(cookie, ageGroup);
+        return ageGroup;
+    }
+
+    ApiResult<std::string> getUserSetting(const std::string &cookie, const std::string &key) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return std::unexpected(validationError);
+        }
+
+        if (auto cached = g_userSettingsCache.get(cookie)) {
+            auto it = cached->find(key);
+            if (it != cached->end()) {
+                return it->second;
+            }
+            return std::unexpected(ApiError::NotFound);
+        }
+
+        LOG_INFO("Fetching user settings");
+
+        auto resp = HttpClient::get(
+            "https://apis.roblox.com/user-settings-api/v1/user-settings/settings-and-options",
+            {{"Cookie", ".ROBLOSECURITY=" + cookie}}
+        );
+
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("User settings fetch failed: HTTP {}", resp.status_code);
+            return std::unexpected(ApiError::NetworkError);
+        }
+
+        auto j = HttpClient::decode(resp);
+
+        std::unordered_map<std::string, std::string> settings;
+
+        for (auto &[settingKey, val] : j.items()) {
+            if (val.is_object() && val.contains("currentValue")) {
+                const auto &cv = val["currentValue"];
+                if (cv.is_string()) {
+                    settings[settingKey] = cv.get<std::string>();
+                } else if (cv.is_boolean()) {
+                    settings[settingKey] = cv.get<bool>() ? "true" : "false";
+                } else if (cv.is_number_integer()) {
+                    settings[settingKey] = std::to_string(cv.get<int64_t>());
+                }
+            }
+        }
+
+        g_userSettingsCache.set(cookie, settings);
+
+        auto it = settings.find(key);
+        if (it == settings.end()) {
+            return std::unexpected(ApiError::NotFound);
+        }
+
+        return it->second;
+    }
+
+    ApiResult<std::string> getOnlineStatusVisibility(const std::string &cookie) {
+        return getUserSetting(cookie, "whoCanSeeMyOnlineStatus");
+    }
+
+    ApiResult<std::string> getJoinRestriction(const std::string &cookie) {
+        return getUserSetting(cookie, "whoCanJoinMeInExperiences");
+    }
+
+    ApiResult<void> setUserSetting(const std::string &cookie, const std::string &key, const std::string &value) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return std::unexpected(validationError);
+        }
+
+        nlohmann::json payload = {{key, value}};
+        auto resp = authenticatedPost(
+            "https://apis.roblox.com/user-settings-api/v1/user-settings",
+            cookie,
+            payload.dump()
+        );
+
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("Failed to set user setting '{}': HTTP {}", key, resp.status_code);
+            return std::unexpected(httpStatusToError(resp.status_code));
+        }
+
+        g_userSettingsCache.invalidate(cookie);
+        return {};
+    }
+
+    ApiResult<void> setOnlineStatusVisibility(const std::string &cookie, const std::string &value) {
+        return setUserSetting(cookie, "whoCanSeeMyOnlineStatus", value);
+    }
+
+    ApiResult<void> setJoinRestriction(const std::string &cookie, const std::string &value) {
+        return setUserSetting(cookie, "whoCanJoinMeInExperiences", value);
     }
 
     void clearPresenceCache() {
