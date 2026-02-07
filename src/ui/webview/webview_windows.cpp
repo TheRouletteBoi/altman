@@ -1,6 +1,6 @@
 #define IDI_ICON_32 102
 
-#include "paths.h"
+#include "webview.h"
 
 #include <windows.h>
 #include <objbase.h>
@@ -22,20 +22,73 @@
 #include <thread>
 #include <unordered_map>
 
-#include "components/data.h"
-#include "webview.h"
-
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
 
 namespace {
 
-    constexpr wchar_t kClassName[] = L"AltmanWebView_Class";
-
-    std::wstring GetUserDataFolder() {
-        std::filesystem::path p = AltMan::Paths::WebViewProfiles();
-        return p.wstring();
+    std::string SanitizeForPath(std::string_view input) {
+        std::string sanitized;
+        sanitized.reserve(input.size());
+        for (char ch : input) {
+            if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_') {
+                sanitized.push_back(ch);
+            } else {
+                sanitized.push_back('_');
+            }
+        }
+        return sanitized;
     }
+
+    std::string ComputeUserDataPath(const std::string &userId, const std::string &cookie, bool isLoginFlow) {
+        const auto baseFolder = AltMan::Paths::WebViewProfiles().string();
+
+        if (isLoginFlow) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            auto p = std::filesystem::path(baseFolder) / std::format("temp_login_{}", ms);
+            std::filesystem::create_directories(p);
+            return p.string();
+        }
+
+        if (!userId.empty()) {
+            auto p = std::filesystem::path(baseFolder) / std::format("u_{}", SanitizeForPath(userId));
+            std::filesystem::create_directories(p);
+            return p.string();
+        }
+
+        if (!cookie.empty()) {
+            size_t h = std::hash<std::string> {}(cookie);
+            auto p = std::filesystem::path(baseFolder) / std::format("c_{:016X}", h);
+            std::filesystem::create_directories(p);
+            return p.string();
+        }
+
+        return baseFolder;
+    }
+
+    std::string ComputeAccountKey(const std::string &url, const std::string &userId, const std::string &cookie, bool isLoginFlow) {
+        if (isLoginFlow) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            return std::format("login_{}", ms);
+        }
+
+        if (!userId.empty()) {
+            return userId;
+        }
+
+        if (!cookie.empty()) {
+            size_t h = std::hash<std::string> {}(cookie);
+            return std::format("cookie_{:016X}", h);
+        }
+
+        return url;
+    }
+
+    constexpr wchar_t kClassName[] = L"AltmanWebView_Class";
 
     std::wstring Widen(const std::string &utf8) {
         if (utf8.empty()) {
@@ -67,50 +120,10 @@ namespace {
         return result;
     }
 
-    std::wstring SanitizeForPath(const std::wstring &input) {
-        std::wstring sanitized;
-        sanitized.reserve(input.size());
-        for (wchar_t ch: input) {
-            if ((ch >= L'0' && ch <= L'9') || (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') || ch == L'_') {
-                sanitized.push_back(ch);
-            } else {
-                sanitized.push_back(L'_');
-            }
-        }
-        return sanitized;
-    }
-
-    std::wstring ComputeUserDataPath(const std::wstring &userId, const std::wstring &cookie, bool isLoginFlow) {
-        const std::wstring baseFolder = GetUserDataFolder();
-
-        if (isLoginFlow) {
-            auto now = std::chrono::system_clock::now().time_since_epoch();
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-            std::filesystem::path p = std::filesystem::path(baseFolder) / std::format(L"temp_login_{}", ms);
-            std::filesystem::create_directories(p);
-            return p.wstring();
-        }
-
-        if (!userId.empty()) {
-            std::filesystem::path p = std::filesystem::path(baseFolder) / std::format(L"u_{}", SanitizeForPath(userId));
-            std::filesystem::create_directories(p);
-            return p.wstring();
-        }
-
-        if (!cookie.empty()) {
-            size_t h = std::hash<std::wstring> {}(cookie);
-            std::filesystem::path p = std::filesystem::path(baseFolder) / std::format(L"c_{:016X}", h);
-            std::filesystem::create_directories(p);
-            return p.wstring();
-        }
-
-        return baseFolder;
-    }
-
     class WebViewWindow;
 
     std::mutex g_windowsMutex;
-    std::unordered_map<std::wstring, WebViewWindow *> g_windowsByKey;
+    std::unordered_map<std::string, WebViewWindow *> g_windowsByKey;
 
     class WebViewWindow {
         public:
@@ -118,17 +131,18 @@ namespace {
                 std::wstring url,
                 std::wstring windowTitle,
                 std::wstring cookie,
-                std::wstring userId,
-                std::wstring accountKey,
+                std::string accountKey,
+                std::string userDataFolder,
+                bool isLoginFlow,
                 std::function<void(const std::wstring &)> cookieCallback
             ) :
                 initialUrl_(std::move(url)),
                 windowTitle_(std::move(windowTitle)),
                 cookieValue_(std::move(cookie)),
                 accountKey_(std::move(accountKey)),
-                cookieCallback_(std::move(cookieCallback)),
-                isLoginFlow_(cookieCallback_ != nullptr),
-                userDataFolder_(ComputeUserDataPath(userId, cookieValue_, isLoginFlow_)) {
+                userDataFolder_(Widen(userDataFolder)),
+                isLoginFlow_(isLoginFlow),
+                cookieCallback_(std::move(cookieCallback)) {
             }
 
             ~WebViewWindow() {
@@ -193,7 +207,7 @@ namespace {
                 }
             }
 
-            [[nodiscard]] const std::wstring &AccountKey() const {
+            [[nodiscard]] const std::string &AccountKey() const {
                 return accountKey_;
             }
 
@@ -401,12 +415,14 @@ namespace {
             }
 
             void OnClose() {
-                std::lock_guard lock(g_windowsMutex);
-                g_windowsByKey.erase(accountKey_);
+                {
+                    std::lock_guard lock(g_windowsMutex);
+                    g_windowsByKey.erase(accountKey_);
+                }
 
                 if (isLoginFlow_ && !userDataFolder_.empty()) {
                     std::error_code ec;
-                    std::filesystem::remove_all(userDataFolder_, ec);
+                    std::filesystem::remove_all(Narrow(userDataFolder_), ec);
                 }
             }
 
@@ -466,7 +482,7 @@ namespace {
             std::wstring windowTitle_;
             std::wstring cookieValue_;
             std::wstring userDataFolder_;
-            std::wstring accountKey_;
+            std::string accountKey_;
             std::function<void(const std::wstring &)> cookieCallback_;
             bool isLoginFlow_ = false;
     };
@@ -480,24 +496,13 @@ void LaunchWebviewImpl(
     const std::string &userId,
     CookieCallback onCookieExtracted
 ) {
+    const bool isLoginFlow = onCookieExtracted != nullptr;
+    std::string accountKey = ComputeAccountKey(url, userId, cookie, isLoginFlow);
+    std::string userDataPath = ComputeUserDataPath(userId, cookie, isLoginFlow);
+
     std::wstring wUrl = Widen(url);
     std::wstring wTitle = Widen(windowName);
     std::wstring wCookie = Widen(cookie);
-    std::wstring wUserId = Widen(userId);
-
-    std::wstring accountKey;
-    if (onCookieExtracted) {
-        auto now = std::chrono::system_clock::now().time_since_epoch();
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-        accountKey = std::format(L"login_{}", ms);
-    } else if (!wUserId.empty()) {
-        accountKey = wUserId;
-    } else if (!wCookie.empty()) {
-        size_t h = std::hash<std::wstring> {}(wCookie);
-        accountKey = std::format(L"cookie_{:016X}", h);
-    } else {
-        accountKey = wUrl;
-    }
 
     std::function<void(const std::wstring &)> wideCallback;
     if (onCookieExtracted) {
@@ -506,7 +511,7 @@ void LaunchWebviewImpl(
         };
     }
 
-    std::thread([wUrl, wTitle, wCookie, wUserId, accountKey, wideCallback]() mutable {
+    std::thread([wUrl, wTitle, wCookie, accountKey, userDataPath, isLoginFlow, wideCallback]() mutable {
         {
             std::lock_guard lock(g_windowsMutex);
             auto it = g_windowsByKey.find(accountKey);
@@ -516,7 +521,9 @@ void LaunchWebviewImpl(
             }
         }
 
-        auto window = std::make_unique<WebViewWindow>(wUrl, wTitle, wCookie, wUserId, accountKey, wideCallback);
+        auto window = std::make_unique<WebViewWindow>(
+            wUrl, wTitle, wCookie, accountKey, userDataPath, isLoginFlow, wideCallback
+        );
 
         if (!window->Create()) {
             return;
@@ -537,17 +544,25 @@ void LaunchWebviewImpl(
 }
 
 void LaunchWebview(const std::string &url, const AccountData &account) {
-    std::string title = !account.displayName.empty() ? account.displayName
-                        : account.userId.empty()     ? account.username
-                                                     : std::format("{} - {}", account.username, account.userId);
+    std::string title = !account.displayName.empty()
+                            ? account.displayName
+                            : account.userId.empty()
+                                  ? account.username
+                                  : std::format("{} - {}", account.username, account.userId);
 
     LaunchWebviewImpl(url, title, account.cookie, account.userId, nullptr);
 }
 
 void LaunchWebview(const std::string &url, const AccountData &account, const std::string &windowName) {
-    LaunchWebviewImpl(url, windowName.empty() ? account.username : windowName, account.cookie, account.userId, nullptr);
+    LaunchWebviewImpl(
+        url,
+        windowName.empty() ? account.username : windowName,
+        account.cookie,
+        account.userId,
+        nullptr
+    );
 }
 
 void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CookieCallback onCookieExtracted) {
-    LaunchWebviewImpl(url, windowName, "", "", onCookieExtracted);
+    LaunchWebviewImpl(url, windowName, "", "", std::move(onCookieExtracted));
 }

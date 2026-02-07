@@ -2,16 +2,81 @@
 #import <WebKit/WebKit.h>
 
 #include <filesystem>
+#include <format>
 #include <memory>
-#include <thread>
+#include <string>
 
-#include "components/data.h"
-#include "utils/paths.h"
 #include "webview.h"
+#include "utils/paths.h"
 
-std::string GetUserDataFolder() {
-    std::filesystem::path p = AltMan::Paths::WebViewProfiles();
-    return p.string();
+std::string SanitizeForPath(std::string_view input) {
+    std::string sanitized;
+    sanitized.reserve(input.size());
+    for (char ch : input) {
+        if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_') {
+            sanitized.push_back(ch);
+        } else {
+            sanitized.push_back('_');
+        }
+    }
+    return sanitized;
+}
+
+std::string ComputeUserDataPath(
+    const std::string &userId,
+    const std::string &cookie,
+    bool isLoginFlow
+) {
+    const auto baseFolder = AltMan::Paths::WebViewProfiles().string();
+
+    if (isLoginFlow) {
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+        auto p = std::filesystem::path(baseFolder) / std::format("temp_login_{}", ms);
+        std::filesystem::create_directories(p);
+        return p.string();
+    }
+
+    if (!userId.empty()) {
+        auto p = std::filesystem::path(baseFolder) / std::format("u_{}", SanitizeForPath(userId));
+        std::filesystem::create_directories(p);
+        return p.string();
+    }
+
+    if (!cookie.empty()) {
+        size_t h = std::hash<std::string> {}(cookie);
+        auto p = std::filesystem::path(baseFolder) / std::format("c_{:016X}", h);
+        std::filesystem::create_directories(p);
+        return p.string();
+    }
+
+    return baseFolder;
+}
+
+std::string ComputeAccountKey(
+    const std::string &url,
+    const std::string &userId,
+    const std::string &cookie,
+    bool isLoginFlow
+) {
+    if (isLoginFlow) {
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+        return std::format("login_{}", ms);
+    }
+
+    if (!userId.empty()) {
+        return userId;
+    }
+
+    if (!cookie.empty()) {
+        size_t h = std::hash<std::string> {}(cookie);
+        return std::format("cookie_{:016X}", h);
+    }
+
+    return url;
 }
 
 @class WebViewWindowController;
@@ -33,16 +98,17 @@ static NSMutableDictionary *GetWebByUser() {
 @property(strong) NSString *cookieValue;
 @property(strong) NSString *userDataFolder;
 @property(strong) NSString *accountKey;
+@property(assign) BOOL isLoginFlow;
 @property(copy) void (^cookieCallback)(NSString *);
 
 - (instancetype)initWithURL:(NSString *)url
                       title:(NSString *)title
                      cookie:(NSString *)cookie
-                     userId:(NSString *)userId
                  accountKey:(NSString *)accountKey
+              userDataFolder:(NSString *)userDataFolder
+                isLoginFlow:(BOOL)isLoginFlow
              cookieCallback:(void (^)(NSString *))callback;
 - (void)show;
-- (void)injectCookie;
 - (void)extractAndNotifyCookie;
 @end
 
@@ -51,43 +117,17 @@ static NSMutableDictionary *GetWebByUser() {
 - (instancetype)initWithURL:(NSString *)url
                       title:(NSString *)title
                      cookie:(NSString *)cookie
-                     userId:(NSString *)userId
                  accountKey:(NSString *)accountKey
+              userDataFolder:(NSString *)userDataFolder
+                isLoginFlow:(BOOL)isLoginFlow
              cookieCallback:(void (^)(NSString *))callback {
     self = [super init];
     if (self) {
         _cookieValue = cookie;
         _accountKey = [accountKey copy];
+        _userDataFolder = [userDataFolder copy];
+        _isLoginFlow = isLoginFlow;
         _cookieCallback = [callback copy];
-
-        std::string userDataPath;
-        if (userId && [userId length] > 0) {
-            std::string userIdStr = [userId UTF8String];
-            std::string sanitized;
-            sanitized.reserve(userIdStr.size());
-            for (char ch: userIdStr) {
-                if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_') {
-                    sanitized.push_back(ch);
-                } else {
-                    sanitized.push_back('_');
-                }
-            }
-            std::filesystem::path p = std::filesystem::path(GetUserDataFolder()) / ("u_" + sanitized);
-            std::filesystem::create_directories(p);
-            userDataPath = p.string();
-        } else if (cookie && [cookie length] > 0) {
-            std::string cookieStr = [cookie UTF8String];
-            size_t h = std::hash<std::string> {}(cookieStr);
-            char hashHex[17] {};
-            snprintf(hashHex, 17, "%016llX", static_cast<unsigned long long>(h));
-            std::filesystem::path p = std::filesystem::path(GetUserDataFolder()) / ("c_" + std::string(hashHex));
-            std::filesystem::create_directories(p);
-            userDataPath = p.string();
-        } else {
-            userDataPath = GetUserDataFolder();
-        }
-
-        _userDataFolder = [NSString stringWithUTF8String:userDataPath.c_str()];
 
         NSRect frame = NSMakeRect(100, 100, 1280, 800);
         NSWindowStyleMask styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
@@ -101,9 +141,9 @@ static NSMutableDictionary *GetWebByUser() {
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
 
         WKWebpagePreferences *pagePrefs = [[WKWebpagePreferences alloc] init];
-config.defaultWebpagePreferences = pagePrefs;
+        config.defaultWebpagePreferences = pagePrefs;
 
-        config.suppressesIncrementalRendering = NO; // Don't wait for full page
+        config.suppressesIncrementalRendering = NO;
 
         if (callback != nil || (cookie && [cookie length] > 0)) {
             config.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
@@ -128,12 +168,12 @@ config.defaultWebpagePreferences = pagePrefs;
         [_webView setWantsLayer:YES];
         _webView.layer.drawsAsynchronously = YES;
 
-        [_webView.configuration.preferences setValue:@YES forKey:@ "developerExtrasEnabled"];
+        [_webView.configuration.preferences setValue:@YES forKey:@"developerExtrasEnabled"];
 
         WKPreferences *prefs = _webView.configuration.preferences;
         prefs.javaScriptCanOpenWindowsAutomatically = YES;
-        [prefs setValue:@YES forKey:@ "acceleratedCompositingEnabled"];
-        [prefs setValue:@YES forKey:@ "webGLEnabled"];
+        [prefs setValue:@YES forKey:@"acceleratedCompositingEnabled"];
+        [prefs setValue:@YES forKey:@"webGLEnabled"];
 
         [[_window contentView] addSubview:_webView];
 
@@ -162,7 +202,7 @@ config.defaultWebpagePreferences = pagePrefs;
     if (_cookieCallback) {
         NSString *urlString = webView.URL.absoluteString;
 
-        if ([urlString containsString:@ "roblox.com"]) {
+        if ([urlString containsString:@"roblox.com"]) {
             [self extractAndNotifyCookie];
         }
     }
@@ -175,7 +215,7 @@ config.defaultWebpagePreferences = pagePrefs;
       NSString *robloSecurityValue = nil;
 
       for (NSHTTPCookie *cookie in cookies) {
-          if ([cookie.name isEqualToString:@ ".ROBLOSECURITY"]) {
+          if ([cookie.name isEqualToString:@".ROBLOSECURITY"]) {
               robloSecurityValue = cookie.value;
               break;
           }
@@ -188,7 +228,7 @@ config.defaultWebpagePreferences = pagePrefs;
 }
 
 - (void)preWarmNetwork {
-    NSString *script = @ "fetch('https://www.roblox.com/favicon.ico').catch(()=>{});";
+    NSString *script = @"fetch('https://www.roblox.com/favicon.ico').catch(()=>{});";
     [_webView evaluateJavaScript:script completionHandler:nil];
 }
 
@@ -203,11 +243,12 @@ config.defaultWebpagePreferences = pagePrefs;
     WKHTTPCookieStore *cookieStore = _webView.configuration.websiteDataStore.httpCookieStore;
 
     NSMutableDictionary *cookieProperties = [NSMutableDictionary dictionary];
-    [cookieProperties setObject:@ ".ROBLOSECURITY" forKey:NSHTTPCookieName];
+    [cookieProperties setObject:@".ROBLOSECURITY" forKey:NSHTTPCookieName];
     [cookieProperties setObject:_cookieValue forKey:NSHTTPCookieValue];
-    [cookieProperties setObject:@ ".roblox.com" forKey:NSHTTPCookieDomain];
-    [cookieProperties setObject:@ "/" forKey:NSHTTPCookiePath];
-    [cookieProperties setObject:@ "TRUE" forKey:NSHTTPCookieSecure];
+    [cookieProperties setObject:@".roblox.com" forKey:NSHTTPCookieDomain];
+    [cookieProperties setObject:@"/" forKey:NSHTTPCookiePath];
+    [cookieProperties setObject:@"TRUE" forKey:NSHTTPCookieSecure];
+    [cookieProperties setObject:@"TRUE" forKey:@"HttpOnly"];
 
     NSHTTPCookie *cookie = [NSHTTPCookie cookieWithProperties:cookieProperties];
 
@@ -219,15 +260,11 @@ config.defaultWebpagePreferences = pagePrefs;
                }
              }];
     } else {
-        NSLog(@ "Failed to create cookie");
+        NSLog(@"Failed to create cookie");
         if (completion) {
             completion();
         }
     }
-}
-
-- (void)injectCookie {
-    [self injectCookieWithCompletion:nil];
 }
 
 - (void)show {
@@ -238,6 +275,11 @@ config.defaultWebpagePreferences = pagePrefs;
 - (void)windowWillClose:(NSNotification *)notification {
     if (_accountKey) {
         [GetWebByUser() removeObjectForKey:_accountKey];
+    }
+
+    if (_isLoginFlow && _userDataFolder && [_userDataFolder length] > 0) {
+        std::error_code ec;
+        std::filesystem::remove_all([_userDataFolder UTF8String], ec);
     }
 
     _webView = nil;
@@ -253,10 +295,13 @@ void LaunchWebviewImpl(
     const std::string &userId,
     CookieCallback onCookieExtracted
 ) {
+    const bool isLoginFlow = onCookieExtracted != nullptr;
+    std::string accountKey = ComputeAccountKey(url, userId, cookie, isLoginFlow);
+    std::string userDataPath = ComputeUserDataPath(userId, cookie, isLoginFlow);
+
     std::string urlCopy = url;
     std::string titleCopy = windowName;
     std::string cookieCopy = cookie;
-    std::string userIdCopy = userId;
 
     void (^objcCallback)(NSString *) = nullptr;
     if (onCookieExtracted) {
@@ -271,22 +316,11 @@ void LaunchWebviewImpl(
           NSString *nsUrl = [NSString stringWithUTF8String:urlCopy.c_str()];
           NSString *nsTitle = [NSString stringWithUTF8String:titleCopy.c_str()];
           NSString *nsCookie = cookieCopy.empty() ? nil : [NSString stringWithUTF8String:cookieCopy.c_str()];
-          NSString *nsUserId = userIdCopy.empty() ? nil : [NSString stringWithUTF8String:userIdCopy.c_str()];
-
-          NSString *accountKey;
-          if (objcCallback != nil) {
-              accountKey = [NSString stringWithFormat:@ "login_%f", [[NSDate date] timeIntervalSince1970]];
-          } else if (nsUserId && [nsUserId length] > 0) {
-              accountKey = nsUserId;
-          } else if (nsCookie && [nsCookie length] > 0) {
-              size_t h = std::hash<std::string> {}([nsCookie UTF8String]);
-              accountKey = [NSString stringWithFormat:@ "cookie_%016llX", (unsigned long long) h];
-          } else {
-              accountKey = nsUrl;
-          }
+          NSString *nsAccountKey = [NSString stringWithUTF8String:accountKey.c_str()];
+          NSString *nsUserDataFolder = [NSString stringWithUTF8String:userDataPath.c_str()];
 
           NSMutableDictionary *dict = GetWebByUser();
-          WebViewWindowController *existing = dict[accountKey];
+          WebViewWindowController *existing = dict[nsAccountKey];
 
           if (existing && objcCallback == nil) {
               [existing show];
@@ -298,11 +332,12 @@ void LaunchWebviewImpl(
           WebViewWindowController *controller = [[WebViewWindowController alloc] initWithURL:nsUrl
                                                                                        title:nsTitle
                                                                                       cookie:nsCookie
-                                                                                      userId:nsUserId
-                                                                                  accountKey:accountKey
+                                                                                  accountKey:nsAccountKey
+                                                                              userDataFolder:nsUserDataFolder
+                                                                                 isLoginFlow:(isLoginFlow ? YES : NO)
                                                                               cookieCallback:objcCallback];
 
-          dict[accountKey] = controller;
+          dict[nsAccountKey] = controller;
 
           [controller show];
           [NSApp activateIgnoringOtherApps:YES];
@@ -313,15 +348,23 @@ void LaunchWebviewImpl(
 void LaunchWebview(const std::string &url, const AccountData &account) {
     std::string title = !account.displayName.empty()
                             ? account.displayName
-                            : account.username + (account.userId.empty() ? "" : (" - " + account.userId));
+                            : account.userId.empty()
+                                  ? account.username
+                                  : std::format("{} - {}", account.username, account.userId);
 
     LaunchWebviewImpl(url, title, account.cookie, account.userId, nullptr);
 }
 
 void LaunchWebview(const std::string &url, const AccountData &account, const std::string &windowName) {
-    LaunchWebviewImpl(url, windowName.empty() ? account.username : windowName, account.cookie, account.userId, nullptr);
+    LaunchWebviewImpl(
+        url,
+        windowName.empty() ? account.username : windowName,
+        account.cookie,
+        account.userId,
+        nullptr
+    );
 }
 
 void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CookieCallback onCookieExtracted) {
-    LaunchWebviewImpl(url, windowName, "", "", onCookieExtracted);
+    LaunchWebviewImpl(url, windowName, "", "", std::move(onCookieExtracted));
 }
