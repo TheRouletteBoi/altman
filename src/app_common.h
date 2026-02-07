@@ -16,8 +16,6 @@
 
 #include "imgui.h"
 
-#include "assets/fonts/embedded_fa_solid.h"
-#include "assets/fonts/embedded_rubik.h"
 #include "components/data.h"
 #include "console/console.h"
 #include "image.h"
