@@ -30,10 +30,6 @@
 #include "utils/account_utils.h"
 #include "utils/worker_thread.h"
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 namespace {
     constexpr std::string_view ICON_LAUNCH = "\xEF\x8B\xB6";
     constexpr std::string_view ICON_CLEAR = "\xEF\x87\xB8";
