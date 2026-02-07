@@ -669,20 +669,4 @@ namespace IPAInstaller {
         return true;
     }
 
-    void InstallIPAAsync(
-        const std::filesystem::path &appDataDir,
-        const std::string &client,
-        const std::string &version,
-        ProgressCallback progressCb,
-        CompletionCallback completionCb
-    ) {
-        std::thread([appDataDir, client, version, progressCb, completionCb]() {
-            const bool success = InstallIPA(appDataDir, client, version, progressCb);
-
-            if (completionCb) {
-                completionCb(success, success ? "Installation successful" : "Installation failed");
-            }
-        }).detach();
-    }
-
 } // namespace IPAInstaller

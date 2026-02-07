@@ -602,13 +602,13 @@ namespace ClientManager {
 
             LOG_INFO("Installing {} with Roblox version {}", clientName, version);
 
-            const std::filesystem::path zipPath = clientsDir / std::format("{}-{}.zip", arch, version);
+            const std::filesystem::path workDir = clientsDir / std::format("{}_install", clientName);
+            const std::filesystem::path zipPath = workDir / std::format("{}-{}.zip", arch, version);
 
             std::error_code ec;
-            std::filesystem::create_directories(clientsDir, ec);
+            std::filesystem::create_directories(workDir, ec);
 
-            // Clean up any existing zip files from previous installations
-            for (const auto &entry: std::filesystem::directory_iterator(clientsDir, ec)) {
+            for (const auto &entry: std::filesystem::directory_iterator(workDir, ec)) {
                 if (entry.path().extension() == ".zip") {
                     std::filesystem::remove(entry.path(), ec);
                     if (ec) {
@@ -632,6 +632,7 @@ namespace ClientManager {
                     if (completionCb) {
                         completionCb(false, "Failed to download Roblox");
                     }
+                    std::filesystem::remove_all(workDir, ec);
                     return;
                 }
             }
@@ -646,21 +647,22 @@ namespace ClientManager {
                 }
             };
 
-            if (!ExtractRoblox(zipPath.string(), clientsDir.string(), extractProgress)) {
+            if (!ExtractRoblox(zipPath.string(), workDir.string(), extractProgress)) {
                 if (completionCb) {
                     completionCb(false, "Failed to extract Roblox");
                 }
+                std::filesystem::remove_all(workDir, ec);
                 return;
             }
 
             if (progressCb) {
                 progressCb(0.6f, "Cleaning up...");
             }
-            if (!CleanupRobloxApp(clientsDir.string(), nullptr)) {
+            if (!CleanupRobloxApp(workDir.string(), nullptr)) {
                 LOG_WARN("Cleanup failed, continuing anyway");
             }
 
-            const std::filesystem::path robloxPlayerPath = clientsDir / "RobloxPlayer.app";
+            const std::filesystem::path robloxPlayerPath = workDir / "RobloxPlayer.app";
             const std::filesystem::path executableDir = robloxPlayerPath / "Contents" / "MacOS";
             const std::filesystem::path binaryPath = executableDir / "RobloxPlayer";
 
@@ -682,6 +684,7 @@ namespace ClientManager {
                         if (completionCb) {
                             completionCb(false, "Failed to download insert_dylib");
                         }
+                        std::filesystem::remove_all(workDir, ec);
                         return;
                     }
                 }
@@ -708,6 +711,7 @@ namespace ClientManager {
                     if (completionCb) {
                         completionCb(false, std::format("Failed to download {} dylib", clientName));
                     }
+                    std::filesystem::remove_all(workDir, ec);
                     return;
                 }
 
@@ -719,6 +723,7 @@ namespace ClientManager {
                         if (completionCb) {
                             completionCb(false, "Failed to remove signature");
                         }
+                        std::filesystem::remove_all(workDir, ec);
                         return;
                     }
                 }
@@ -737,6 +742,7 @@ namespace ClientManager {
                     if (completionCb) {
                         completionCb(false, "Failed to inject dylib");
                     }
+                    std::filesystem::remove_all(workDir, ec);
                     return;
                 }
             }
@@ -748,6 +754,7 @@ namespace ClientManager {
                 if (completionCb) {
                     completionCb(false, "Failed to sign app");
                 }
+                std::filesystem::remove_all(workDir, ec);
                 return;
             }
             std::filesystem::rename(robloxPlayerPath, finalAppPath, ec);
@@ -755,12 +762,13 @@ namespace ClientManager {
                 if (completionCb) {
                     completionCb(false, std::format("Failed to rename app: {}", ec.message()));
                 }
+                std::filesystem::remove_all(workDir, ec);
                 return;
             }
 
-            std::filesystem::remove(zipPath, ec);
+            std::filesystem::remove_all(workDir, ec);
             if (ec) {
-                LOG_WARN("Failed to cleanup zip file: {}", ec.message());
+                LOG_WARN("Failed to cleanup working directory: {}", ec.message());
             }
 
             if (progressCb) {
