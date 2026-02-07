@@ -26,6 +26,7 @@
 #include "ui/windows/backup/backup.h"
 #include "utils/paths.h"
 #include "utils/worker_thread.h"
+#include "version.h"
 
 struct DuplicateAccountModalState {
         bool showModal = false;
@@ -270,6 +271,7 @@ bool RenderMainMenu() {
     static std::vector<std::string> s_backupFiles;
     static int s_selectedBackup = 0;
     static bool s_refreshBackupList = false;
+    static bool s_openAboutPopup = false;
 
     if (!ImGui::BeginMainMenuBar()) {
         return false;
@@ -362,6 +364,24 @@ bool RenderMainMenu() {
             } else {
                 WorkerThreads::runBackground(RobloxControl::ClearRobloxCache);
             }
+        }
+
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Help")) {
+        if (ImGui::MenuItem("About AltMan")) {
+            s_openAboutPopup = true;
+        }
+
+        ImGui::Separator();
+
+        if (ImGui::MenuItem("Report Issue")) {
+            LaunchWebviewImpl("https://github.com/TheRouletteBoi/altman/issues/new", "Report Issue");
+        }
+
+        if (ImGui::MenuItem("View on GitHub")) {
+            LaunchWebviewImpl("https://github.com/TheRouletteBoi/altman", "AltMan on GitHub");
         }
 
         ImGui::EndMenu();
@@ -578,6 +598,32 @@ bool RenderMainMenu() {
                 g_duplicateAccountModal.nextId,
                 g_duplicateAccountModal.pendingDisplayName
             );
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    if (s_openAboutPopup) {
+        ImGui::OpenPopup("About AltMan");
+        s_openAboutPopup = false;
+    }
+
+    if (ImGui::BeginPopupModal("About AltMan", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("AltMan");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextWrapped("Open source Roblox account manager");
+        ImGui::Spacing();
+        ImGui::Text("Version: %s", APP_VERSION.data());
+        ImGui::Spacing();
+
+        const float closeButtonWidth = 120.0f;
+        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - closeButtonWidth) * 0.5f);
+
+        if (ImGui::Button("Close", ImVec2(closeButtonWidth, 0))) {
             ImGui::CloseCurrentPopup();
         }
 
