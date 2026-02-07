@@ -1,6 +1,7 @@
 #define IDI_ICON_32 102
 
 #include "webview.h"
+#include "utils/paths.h"
 
 #include <windows.h>
 #include <objbase.h>
