@@ -1,4 +1,4 @@
-#include "app_common.h"
+#include "main_common.h"
 #include "assets/fonts/embedded_fa_solid.h"
 #include "assets/fonts/embedded_rubik.h"
 

@@ -9,7 +9,7 @@
 #include "imgui_impl_osx.h"
 #include "utils/stb_image.h"
 
-#include "app_common.h"
+#include "main_common.h"
 #include "system/client_update_checker_macos.h"
 
 namespace {

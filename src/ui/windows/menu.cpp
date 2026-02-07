@@ -27,7 +27,7 @@
 #include "utils/paths.h"
 #include "utils/worker_thread.h"
 #include "version.h"
-#include "app_common.h"
+#include "main_common.h"
 
 struct DuplicateAccountModalState {
         bool showModal = false;
