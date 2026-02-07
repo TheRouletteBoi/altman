@@ -6,6 +6,7 @@
 #include <dwmapi.h>
 #include <objbase.h>
 #include <shellscalingapi.h>
+#include <shellapi.h>
 
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
