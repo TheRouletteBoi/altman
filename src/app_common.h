@@ -41,6 +41,7 @@ inline ImFont *g_iconFont = nullptr;
 inline std::atomic<bool> g_running = true;
 
 void LoadImGuiFonts(float scaledFontSize);
+void OpenURL(const char* url);
 
 namespace AccountProcessor {
 

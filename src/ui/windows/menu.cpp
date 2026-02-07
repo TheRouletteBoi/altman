@@ -27,6 +27,7 @@
 #include "utils/paths.h"
 #include "utils/worker_thread.h"
 #include "version.h"
+#include "app_common.h"
 
 struct DuplicateAccountModalState {
         bool showModal = false;
@@ -377,11 +378,11 @@ bool RenderMainMenu() {
         ImGui::Separator();
 
         if (ImGui::MenuItem("Report Issue")) {
-            LaunchWebviewImpl("https://github.com/TheRouletteBoi/altman/issues/new", "Report Issue");
+            OpenURL("https://github.com/TheRouletteBoi/altman/issues/new");
         }
 
         if (ImGui::MenuItem("View on GitHub")) {
-            LaunchWebviewImpl("https://github.com/TheRouletteBoi/altman", "AltMan on GitHub");
+            OpenURL("https://github.com/TheRouletteBoi/altman");
         }
 
         ImGui::EndMenu();

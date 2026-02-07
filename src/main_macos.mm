@@ -76,6 +76,16 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void *
     return result;
 }
 
+void OpenURL(const char* url) {
+    @autoreleasepool {
+        NSURL* nsurl = [NSURL URLWithString:
+            [NSString stringWithUTF8String:url]];
+        if (nsurl) {
+            [[NSWorkspace sharedWorkspace] openURL:nsurl];
+        }
+    }
+}
+
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @end
 
