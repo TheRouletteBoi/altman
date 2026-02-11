@@ -10,6 +10,8 @@ struct StandardJoinMenuParams {
         std::string jobId;
         bool enableLaunchGame = true;
         bool enableLaunchInstance = true; // only applies if jobId not empty
+        std::string launchGameLabel;
+        std::string launchInstanceLabel;
         std::function<void()> onLaunchGame; // optional
         std::function<void()> onLaunchInstance; // optional
         std::function<void()> onFillGame; // optional

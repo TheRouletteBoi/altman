@@ -168,8 +168,8 @@ namespace {
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
         if (ImGui::MenuItem("Launch Link", nullptr, false, hasCookie)) {
             WorkerThreads::runBackground([cookie = account.cookie,
-                                       placeId = std::string(join_value_buf),
-                                       jobId = std::string(join_jobid_buf)]() {
+                                          placeId = std::string(join_value_buf),
+                                          jobId = std::string(join_jobid_buf)]() {
                 const auto ticket = Roblox::fetchAuthTicket(cookie);
                 if (ticket.empty()) {
                     return;
@@ -515,28 +515,21 @@ namespace {
         }
 
         ImGui::Separator();
+
         StandardJoinMenuParams menu {};
         menu.placeId = placeId;
         menu.jobId = jobId;
 
-        menu.onLaunchGame = [placeId, account]() {
-            if (!AccountFilters::IsAccountUsable(account)) {
-                return;
-            }
+        menu.enableLaunchGame = AccountFilters::IsAccountUsable(account);
+        menu.enableLaunchInstance = !jobId.empty() && AccountFilters::IsAccountUsable(account);
 
+        menu.onLaunchGame = [placeId, account]() {
             WorkerThreads::runBackground([placeId, account]() {
                 launchWithAccounts(LaunchParams::standard(placeId), {account});
             });
         };
 
         menu.onLaunchInstance = [placeId, jobId, account]() {
-            if (jobId.empty()) {
-                return;
-            }
-            if (!AccountFilters::IsAccountUsable(account)) {
-                return;
-            }
-
             WorkerThreads::runBackground([placeId, jobId, account]() {
                 launchWithAccounts(LaunchParams::gameJob(placeId, jobId), {account});
             });
@@ -545,10 +538,63 @@ namespace {
         menu.onFillGame = [placeId]() {
             FillJoinOptions(placeId, "");
         };
+
         menu.onFillInstance = [placeId, jobId]() {
-            if (!jobId.empty()) {
-                FillJoinOptions(placeId, jobId);
+            FillJoinOptions(placeId, jobId);
+        };
+
+        RenderStandardJoinMenu(menu);
+    }
+
+    void renderInGameMenuMulti(const std::vector<const AccountData *> &selectedAccounts) {
+        std::vector<const AccountData *> inGame;
+        for (const auto *acc: selectedAccounts) {
+            if (acc->status == "InGame") {
+                inGame.push_back(acc);
             }
+        }
+
+        if (inGame.empty()) {
+            return;
+        }
+
+        const uint64_t placeId = inGame.front()->placeId;
+        const std::string jobId = inGame.front()->jobId;
+
+        if (!placeId) {
+            ImGui::Separator();
+            ImGui::TextDisabled("Fetching server info...");
+            return;
+        }
+
+        ImGui::Separator();
+
+        const int launchCount = static_cast<int>(selectedAccounts.size());
+
+        StandardJoinMenuParams menu {};
+        menu.placeId = placeId;
+        menu.jobId = jobId;
+
+        menu.enableLaunchGame = true;
+        menu.enableLaunchInstance = !jobId.empty();
+
+        menu.launchGameLabel = std::format("Launch Game ({})", launchCount);
+        menu.launchInstanceLabel = std::format("Launch Game Server ({})", launchCount);
+
+        menu.onLaunchGame = [placeId]() {
+            launchWithSelectedAccounts(LaunchParams::standard(placeId));
+        };
+
+        menu.onLaunchInstance = [placeId, jobId]() {
+            launchWithSelectedAccounts(LaunchParams::gameJob(placeId, jobId));
+        };
+
+        menu.onFillGame = [placeId]() {
+            FillJoinOptions(placeId, "");
+        };
+
+        menu.onFillInstance = [placeId, jobId]() {
+            FillJoinOptions(placeId, jobId);
         };
 
         RenderStandardJoinMenu(menu);
@@ -692,8 +738,21 @@ void RenderAccountContextMenu(AccountData &account, const std::string &uniqueCon
         ImGui::EndMenu();
     }
 
-    if (!isMultiSelection && account.status == "InGame") {
-        renderInGameMenuSingle(account);
+    if (isMultiSelection) {
+        const bool anyInGame = std::ranges::any_of(getSelectedAccountsOrdered(), [](const auto *acc) {
+            return acc->status == "InGame";
+        });
+        if (anyInGame) {
+            if (ImGui::BeginMenu("Current game")) {
+                renderInGameMenuMulti(getSelectedAccountsOrdered());
+                ImGui::EndMenu();
+            }
+        }
+    } else if (account.status == "InGame") {
+        if (ImGui::BeginMenu("Current game")) {
+            renderInGameMenuSingle(account);
+            ImGui::EndMenu();
+        }
     }
 
     ImGui::Separator();
