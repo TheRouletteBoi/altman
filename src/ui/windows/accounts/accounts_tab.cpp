@@ -193,6 +193,42 @@ namespace {
         ImGui::SetCursorPosY(currentY + rowHeight);
     }
 
+    void renderRedactedCenteredTextCell(
+        std::string_view text,
+        float cellStartY,
+        float rowHeight,
+        float verticalPadding
+    ) {
+        ImGui::TableNextColumn();
+        const float currentY = ImGui::GetCursorPosY();
+        ImGui::SetCursorPosY(currentY + verticalPadding);
+
+        if (g_privacyModeEnabled) {
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            const float textWidth = ImGui::CalcTextSize(text.data()).x;
+            const float barHeight = ImGui::GetTextLineHeight();
+
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 0));
+            ImGui::TextUnformatted(text.data());
+            ImGui::PopStyleColor();
+
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            const ImVec2 barMin(pos.x - 2.0f, pos.y - 1.0f);
+            const ImVec2 barMax(pos.x + textWidth + 2.0f, pos.y + barHeight + 1.0f);
+            const ImVec2 clipMin = ImGui::GetWindowPos();
+            const ImVec2 clipMax = ImVec2(clipMin.x + ImGui::GetWindowSize().x, clipMin.y + ImGui::GetWindowSize().y);
+
+            drawList->PushClipRect(clipMin, clipMax, true);
+            const ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_TableHeaderBg);
+            drawList->AddRectFilled(barMin, barMax, IM_COL32(col.x*255, col.y*255, col.z*255, 220), 3.0f);
+            drawList->PopClipRect();
+        } else {
+            ImGui::TextUnformatted(text.data());
+        }
+
+        ImGui::SetCursorPosY(currentY + rowHeight);
+    }
+
     void renderStatusCell(const AccountData &account, float startY, float rowHeight, float verticalPadding) {
         ImGui::TableNextColumn();
         const float currentY = ImGui::GetCursorPosY();
@@ -376,8 +412,8 @@ namespace {
         ImGui::TextUnformatted(account.displayName.c_str());
         ImGui::SetCursorPosY(cellStartY + metrics.height);
 
-        renderCenteredTextCell(account.username, cellStartY, metrics.height, metrics.verticalPadding);
-        renderCenteredTextCell(account.userId, cellStartY, metrics.height, metrics.verticalPadding);
+        renderRedactedCenteredTextCell(account.username, cellStartY, metrics.height, metrics.verticalPadding);
+        renderRedactedCenteredTextCell(account.userId, cellStartY, metrics.height, metrics.verticalPadding);
         renderStatusCell(account, cellStartY, metrics.height, metrics.verticalPadding);
         renderVoiceCell(account, cellStartY, metrics.height, metrics.verticalPadding);
         renderCenteredTextCell(account.note, cellStartY, metrics.height, metrics.verticalPadding);
