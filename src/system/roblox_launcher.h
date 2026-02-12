@@ -31,4 +31,5 @@ struct LaunchParams {
 bool startRoblox(const LaunchParams &params, AccountData acc);
 void launchWithAccounts(const LaunchParams &params, const std::vector<AccountData> &accounts);
 void launchWithSelectedAccounts(LaunchParams params);
+void launchWithSelectedAccountsExcept(LaunchParams params, uint64_t excludeId);
 

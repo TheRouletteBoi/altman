@@ -381,3 +381,22 @@ void launchWithSelectedAccounts(LaunchParams params) {
         launchWithAccounts(params, accounts);
     });
 }
+
+void launchWithSelectedAccountsExcept(LaunchParams params, uint64_t excludeId) {
+    auto accountPtrs = getUsableSelectedAccounts();
+    if (accountPtrs.empty()) return;
+
+    std::vector<AccountData> accounts;
+    accounts.reserve(accountPtrs.size());
+    for (AccountData *acc: accountPtrs) {
+        if (acc->id != excludeId) {
+            accounts.push_back(*acc);
+        }
+    }
+
+    if (accounts.empty()) return;
+
+    WorkerThreads::runBackground([params = std::move(params), accounts = std::move(accounts)]() {
+        launchWithAccounts(params, accounts);
+    });
+}
