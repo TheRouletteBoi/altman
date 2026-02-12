@@ -587,15 +587,15 @@ namespace {
         menu.enableLaunchGame = true;
         menu.enableLaunchInstance = !jobId.empty();
 
-        menu.launchGameLabel = std::format("Launch Game ({})", launchCount);
-        menu.launchInstanceLabel = std::format("Launch Game Server ({})", launchCount);
+        menu.launchGameLabel = std::format("Launch Game ({})", launchCount - 1);
+        menu.launchInstanceLabel = std::format("Launch Game Server ({})", launchCount - 1);
 
-        menu.onLaunchGame = [placeId]() {
-            launchWithSelectedAccounts(LaunchParams::standard(placeId));
+        menu.onLaunchGame = [placeId, excludeId = inGame.front()->id]() {
+            launchWithSelectedAccountsExcept(LaunchParams::standard(placeId), excludeId);
         };
 
-        menu.onLaunchInstance = [placeId, jobId]() {
-            launchWithSelectedAccounts(LaunchParams::gameJob(placeId, jobId));
+        menu.onLaunchInstance = [placeId, jobId, excludeId = inGame.front()->id]() {
+            launchWithSelectedAccountsExcept(LaunchParams::gameJob(placeId, jobId), excludeId);
         };
 
         menu.onFillGame = [placeId]() {
