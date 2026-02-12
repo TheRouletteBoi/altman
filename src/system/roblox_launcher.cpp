@@ -53,34 +53,6 @@ LaunchParams LaunchParams::followUser(const std::string &userId) {
     return {LaunchMode::FollowUser, 0, userId};
 }
 
-std::string urlEncode(const std::string &s) {
-    std::ostringstream out;
-    out << std::hex << std::uppercase;
-    for (unsigned char c: s) {
-        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            out << c;
-        } else {
-            out << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(c);
-        }
-    }
-    return out.str();
-}
-
-std::string generateBrowserTrackerId() {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis1(100000, 175000);
-    std::uniform_int_distribution<> dis2(100000, 900000);
-    return std::format("{}{}", dis1(gen), dis2(gen));
-}
-
-std::string getCurrentTimestampMs() {
-    auto nowMs
-        = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-              .count();
-    return std::to_string(nowMs);
-}
-
 struct LaunchUrls {
         std::string desktop;
         std::string mobile;

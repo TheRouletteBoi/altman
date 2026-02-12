@@ -20,7 +20,9 @@ namespace Roblox {
         TtlCache<std::string, std::string> g_ageGroupCache {std::chrono::hours(48)};
 
         // TTL Cache for user settings fields (48 hour expiry)
-        TtlCache<std::string, std::unordered_map<std::string, std::string>> g_userSettingsCache {std::chrono::hours(48)};
+        TtlCache<std::string, std::unordered_map<std::string, std::string>> g_userSettingsCache {
+            std::chrono::hours(48)
+        };
 
         std::string parseAgeGroupKey(const std::string &translationKey) {
             constexpr std::string_view prefix = "Label.AgeGroup";
@@ -55,7 +57,7 @@ namespace Roblox {
             {
                 {"Cookie",       ".ROBLOSECURITY=" + cookie},
                 {"Content-Type", "application/json"        }
-            },
+        },
             payload.dump()
         );
 
@@ -115,7 +117,7 @@ namespace Roblox {
             {
                 {"Cookie",       ".ROBLOSECURITY=" + cookie},
                 {"Content-Type", "application/json"        }
-            },
+        },
             payload.dump()
         );
 
@@ -126,8 +128,7 @@ namespace Roblox {
 
         auto json = HttpClient::decode(response);
 
-        if (!json.contains("userPresences") || !json["userPresences"].is_array()
-            || json["userPresences"].empty()) {
+        if (!json.contains("userPresences") || !json["userPresences"].is_array() || json["userPresences"].empty()) {
             return std::unexpected(ApiError::InvalidResponse);
         }
 
@@ -188,7 +189,7 @@ namespace Roblox {
             {
                 {"Cookie",       ".ROBLOSECURITY=" + cookie},
                 {"Content-Type", "application/json"        }
-            },
+        },
             payload.dump()
         );
 
@@ -245,8 +246,8 @@ namespace Roblox {
     VoiceSettings getVoiceChatStatus(const std::string &cookie) {
         // First check if account is banned/warned/terminated
         BanCheckResult status = cachedBanStatus(cookie);
-        if (status == BanCheckResult::Banned || status == BanCheckResult::Warned
-            || status == BanCheckResult::Terminated || status == BanCheckResult::InvalidCookie) {
+        if (status == BanCheckResult::Banned || status == BanCheckResult::Warned || status == BanCheckResult::Terminated
+            || status == BanCheckResult::InvalidCookie) {
             return {"N/A", 0};
         }
 
@@ -256,7 +257,7 @@ namespace Roblox {
             "https://voice.roblox.com/v1/settings",
             {
                 {"Cookie", ".ROBLOSECURITY=" + cookie}
-            }
+        }
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
@@ -307,7 +308,7 @@ namespace Roblox {
             "https://apis.roblox.com/user-settings-api/v1/account-insights/age-group",
             {
                 {"Cookie", ".ROBLOSECURITY=" + cookie}
-            }
+        }
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
@@ -344,7 +345,9 @@ namespace Roblox {
 
         auto resp = HttpClient::get(
             "https://apis.roblox.com/user-settings-api/v1/user-settings/settings-and-options",
-            {{"Cookie", ".ROBLOSECURITY=" + cookie}}
+            {
+                {"Cookie", ".ROBLOSECURITY=" + cookie}
+        }
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
@@ -356,7 +359,7 @@ namespace Roblox {
 
         std::unordered_map<std::string, std::string> settings;
 
-        for (auto &[settingKey, val] : j.items()) {
+        for (auto &[settingKey, val]: j.items()) {
             if (val.is_object() && val.contains("currentValue")) {
                 const auto &cv = val["currentValue"];
                 if (cv.is_string()) {
@@ -379,12 +382,48 @@ namespace Roblox {
         return it->second;
     }
 
-    ApiResult<std::string> getOnlineStatusVisibility(const std::string &cookie) {
-        return getUserSetting(cookie, "whoCanSeeMyOnlineStatus");
+    ApiResult<OnlineStatusVisibility> getOnlineStatusVisibility(const std::string &cookie) {
+        static const std::unordered_map<std::string, OnlineStatusVisibility> visibilityToenum = {
+            {"AllUsers", OnlineStatusVisibility::AllUsers},
+            {"FriendsFollowingAndFollowers", OnlineStatusVisibility::FriendsFollowingAndFollowers},
+            {"FriendsAndFollowing", OnlineStatusVisibility::FriendsAndFollowing},
+            {"Friends", OnlineStatusVisibility::Friends},
+            {"NoOne", OnlineStatusVisibility::NoOne},
+        };
+
+        auto settingResult = getUserSetting(cookie, "whoCanSeeMyOnlineStatus");
+        if (!settingResult) {
+            return std::unexpected(settingResult.error());
+        }
+
+        auto it = visibilityToenum.find(settingResult.value());
+        if (it == visibilityToenum.end()) {
+            return std::unexpected(ApiError::InvalidResponse);
+        }
+
+        return it->second;
     }
 
-    ApiResult<std::string> getJoinRestriction(const std::string &cookie) {
-        return getUserSetting(cookie, "whoCanJoinMeInExperiences");
+    ApiResult<JoinRestriction> getJoinRestriction(const std::string &cookie) {
+        static const std::unordered_map<std::string, JoinRestriction> joinToEnum = {
+            {"All", JoinRestriction::All},
+            {"Friends", JoinRestriction::Friends},
+            {"Following", JoinRestriction::Following},
+            {"Followers", JoinRestriction::Followers},
+            {"NoOne", JoinRestriction::NoOne},
+        };
+
+        auto settingResult = getUserSetting(cookie, "whoCanJoinMeInExperiences");
+        if (!settingResult) {
+            return std::unexpected(settingResult.error());
+        }
+
+        auto it = joinToEnum.find(settingResult.value());
+        if (it == joinToEnum.end()) {
+            return std::unexpected(ApiError::InvalidResponse);
+        }
+
+        return it->second;
     }
 
     ApiResult<void> setUserSetting(const std::string &cookie, const std::string &key, const std::string &value) {
@@ -393,7 +432,10 @@ namespace Roblox {
             return std::unexpected(validationError);
         }
 
-        nlohmann::json payload = {{key, value}};
+        nlohmann::json payload = {
+            {key, value}
+        };
+
         auto resp = authenticatedPost(
             "https://apis.roblox.com/user-settings-api/v1/user-settings",
             cookie,
@@ -409,12 +451,38 @@ namespace Roblox {
         return {};
     }
 
-    ApiResult<void> setOnlineStatusVisibility(const std::string &cookie, const std::string &value) {
-        return setUserSetting(cookie, "whoCanSeeMyOnlineStatus", value);
+    ApiResult<void> setOnlineStatusVisibility(const std::string &cookie, OnlineStatusVisibility visibility) {
+        static const std::unordered_map<OnlineStatusVisibility, std::string> visibilityToString = {
+            {OnlineStatusVisibility::AllUsers, "AllUsers"},
+            {OnlineStatusVisibility::FriendsFollowingAndFollowers, "FriendsFollowingAndFollowers"},
+            {OnlineStatusVisibility::FriendsAndFollowing, "FriendsAndFollowing"},
+            {OnlineStatusVisibility::Friends, "Friends"},
+            {OnlineStatusVisibility::NoOne, "NoOne"},
+        };
+
+        auto it = visibilityToString.find(visibility);
+        if (it == visibilityToString.end()) {
+            return std::unexpected(ApiError::InvalidInput);
+        }
+
+        return setUserSetting(cookie, "whoCanSeeMyOnlineStatus", it->second);
     }
 
-    ApiResult<void> setJoinRestriction(const std::string &cookie, const std::string &value) {
-        return setUserSetting(cookie, "whoCanJoinMeInExperiences", value);
+    ApiResult<void> setJoinRestriction(const std::string &cookie, JoinRestriction restriction) {
+        static const std::unordered_map<JoinRestriction, std::string> restrictionToString = {
+            {JoinRestriction::All, "All"},
+            {JoinRestriction::Friends, "Friends"},
+            {JoinRestriction::Following, "Following"},
+            {JoinRestriction::Followers, "Followers"},
+            {JoinRestriction::NoOne, "NoOne"},
+        };
+
+        auto it = restrictionToString.find(restriction);
+        if (it == restrictionToString.end()) {
+            return std::unexpected(ApiError::InvalidInput);
+        }
+
+        return setUserSetting(cookie, "whoCanJoinMeInExperiences", it->second);
     }
 
     void clearPresenceCache() {

@@ -11,6 +11,22 @@
 
 namespace Roblox {
 
+    enum class OnlineStatusVisibility {
+        AllUsers = 0,
+        FriendsFollowingAndFollowers,
+        FriendsAndFollowing,
+        Friends,
+        NoOne,
+    };
+
+    enum class JoinRestriction {
+        All = 0,
+        Friends,
+        Following,
+        Followers,
+        NoOne
+    };
+
     struct VoiceSettings {
             std::string status;
             time_t bannedUntil = 0;
@@ -42,11 +58,11 @@ namespace Roblox {
 
     ApiResult<std::string> getAgeGroup(const std::string &cookie);
     ApiResult<std::string> getUserSetting(const std::string &cookie, const std::string &key);
-    ApiResult<std::string> getOnlineStatusVisibility(const std::string &cookie);
-    ApiResult<std::string> getJoinRestriction(const std::string &cookie);
+    ApiResult<OnlineStatusVisibility> getOnlineStatusVisibility(const std::string &cookie);
+    ApiResult<JoinRestriction> getJoinRestriction(const std::string &cookie);
     ApiResult<void> setUserSetting(const std::string &cookie, const std::string &key, const std::string &value);
-    ApiResult<void> setOnlineStatusVisibility(const std::string &cookie, const std::string &value);
-    ApiResult<void> setJoinRestriction(const std::string &cookie, const std::string &value);
+    ApiResult<void> setOnlineStatusVisibility(const std::string &cookie, OnlineStatusVisibility visibility);
+    ApiResult<void> setJoinRestriction(const std::string &cookie, JoinRestriction restriction);
 
     void clearPresenceCache();
 

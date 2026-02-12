@@ -274,6 +274,9 @@ ImVec4 getStatusColor(std::string statusCode);
 
 std::string generateSessionId();
 std::string presenceTypeToString(int type);
+std::string urlEncode(const std::string &s);
+std::string generateBrowserTrackerId();
+std::string getCurrentTimestampMs();
 
 struct UserSpecifier {
         bool isId = false;

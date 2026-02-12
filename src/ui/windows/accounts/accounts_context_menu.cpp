@@ -40,6 +40,22 @@ namespace {
     constexpr int MULTI_EDIT_SENTINEL = -2;
     constexpr int WEBVIEW_CONFIRM_THRESHOLD = 3;
 
+    constexpr std::string_view ICON_RADIO_UNCHECKED = "\xEF\x84\x91";
+    constexpr std::string_view ICON_RADIO_CHECKED = "\xEF\x86\x92";
+
+    struct VisibilityMenuState {
+        bool isLoadingVisibility = false;
+        bool isLoadingJoinRestriction = false;
+        bool hasFetchedVisibility = false;
+        bool hasFetchedJoinRestriction = false;
+        Roblox::OnlineStatusVisibility currentVisibility = Roblox::OnlineStatusVisibility::AllUsers;
+        Roblox::JoinRestriction currentJoinRestriction = Roblox::JoinRestriction::All;
+        std::string visibilityErrorMessage;
+        std::string joinRestrictionErrorMessage;
+    };
+
+    std::unordered_map<int, VisibilityMenuState> g_visibilityStates;
+
     struct EditNoteState {
             char buffer[1024] {};
             int accountId {-1};
@@ -87,13 +103,6 @@ namespace {
         return result;
     }
 
-    std::string generateBrowserTracker() {
-        thread_local std::mt19937_64 rng {std::random_device {}()};
-        thread_local std::uniform_int_distribution<int> d1(100000, 130000);
-        thread_local std::uniform_int_distribution<int> d2(100000, 900000);
-        return std::to_string(d1(rng)) + std::to_string(d2(rng));
-    }
-
     std::string generateLaunchUri(std::string_view ticket, std::string_view placeId, std::string_view jobId) {
         const auto nowMs
             = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
@@ -112,7 +121,7 @@ namespace {
             "roblox-player://1/1+launchmode:play+gameinfo:{}+launchtime:{}+browsertrackerid:{}+placelauncherurl:{}+robloxLocale:en_us+gameLocale:en_us",
             ticket,
             nowMs,
-            generateBrowserTracker(),
+            generateBrowserTrackerId(),
             placeLauncherUrl
         );
     }
@@ -736,6 +745,163 @@ namespace {
         }
     }
 
+    void fetchVisibilityStatus(int accountId, const std::string& cookie) {
+        auto& state = g_visibilityStates[accountId];
+        if (state.isLoadingVisibility || state.hasFetchedVisibility) {
+            return;
+        }
+
+        state.isLoadingVisibility = true;
+        state.visibilityErrorMessage.clear();
+
+        WorkerThreads::runBackground([accountId, cookieCopy = cookie]() {
+            auto result = Roblox::getOnlineStatusVisibility(cookieCopy);
+
+            auto& state = g_visibilityStates[accountId];
+            state.isLoadingVisibility = false;
+
+            if (result.has_value()) {
+                state.currentVisibility = result.value();
+                state.hasFetchedVisibility = true;
+            } else {
+                state.visibilityErrorMessage = "Failed to retrieve status";
+            }
+        });
+    }
+
+    void fetchJoinRestriction(int accountId, const std::string& cookie) {
+        auto& state = g_visibilityStates[accountId];
+        if (state.isLoadingJoinRestriction || state.hasFetchedJoinRestriction) {
+            return;
+        }
+
+        state.isLoadingJoinRestriction = true;
+        state.joinRestrictionErrorMessage.clear();
+
+        WorkerThreads::runBackground([accountId, cookieCopy = cookie]() {
+            auto result = Roblox::getJoinRestriction(cookieCopy);
+
+            auto& state = g_visibilityStates[accountId];
+            state.isLoadingJoinRestriction = false;
+
+            if (result.has_value()) {
+                state.currentJoinRestriction = result.value();
+                state.hasFetchedJoinRestriction = true;
+            } else {
+                state.joinRestrictionErrorMessage = "Failed to retrieve join restriction";
+            }
+        });
+    }
+
+    void setVisibilityStatus(int accountId, const std::string& cookie, Roblox::OnlineStatusVisibility visibility) {
+        auto& state = g_visibilityStates[accountId];
+        state.isLoadingVisibility = true;
+
+        WorkerThreads::runBackground([accountId, cookieCopy = cookie, visibility]() {
+            auto result = Roblox::setOnlineStatusVisibility(cookieCopy, visibility);
+
+            auto& state = g_visibilityStates[accountId];
+            state.isLoadingVisibility = false;
+
+            if (result.has_value()) {
+                state.currentVisibility = visibility;
+                state.hasFetchedVisibility = true;
+                state.visibilityErrorMessage.clear();
+            } else {
+                state.visibilityErrorMessage = "Failed to update status";
+            }
+        });
+    }
+
+    void setJoinRestrictionStatus(int accountId, const std::string& cookie, Roblox::JoinRestriction restriction) {
+        auto& state = g_visibilityStates[accountId];
+        state.isLoadingJoinRestriction = true;
+
+        WorkerThreads::runBackground([accountId, cookieCopy = cookie, restriction]() {
+            auto result = Roblox::setJoinRestriction(cookieCopy, restriction);
+
+            auto& state = g_visibilityStates[accountId];
+            state.isLoadingJoinRestriction = false;
+
+            if (result.has_value()) {
+                state.currentJoinRestriction = restriction;
+                state.hasFetchedJoinRestriction = true;
+                state.joinRestrictionErrorMessage.clear();
+            } else {
+                state.joinRestrictionErrorMessage = "Failed to update join restriction";
+            }
+        });
+    }
+
+    void renderVisibilityMenu(const AccountData& account) {
+        auto& state = g_visibilityStates[account.id];
+
+        const bool hasNoCookie = account.cookie.empty();
+        if (hasNoCookie) {
+            ImGui::TextDisabled("No cookie available");
+            return;
+        }
+
+        if (!state.hasFetchedVisibility && !state.isLoadingVisibility) {
+            fetchVisibilityStatus(account.id, account.cookie);
+        }
+        if (!state.hasFetchedJoinRestriction && !state.isLoadingJoinRestriction) {
+            fetchJoinRestriction(account.id, account.cookie);
+        }
+
+        ImGui::TextDisabled("Online Status");
+
+        if (state.isLoadingVisibility) {
+            ImGui::TextDisabled("Loading...");
+        } else if (!state.visibilityErrorMessage.empty()) {
+            ImGui::TextDisabled("%s", state.visibilityErrorMessage.c_str());
+        } else {
+            auto renderVisibilityOption = [&](Roblox::OnlineStatusVisibility vis, const char* label, const char* id) {
+                bool isSelected = (state.currentVisibility == vis);
+                const auto& icon = isSelected ? ICON_RADIO_CHECKED : ICON_RADIO_UNCHECKED;
+                std::string selectableLabel = std::format("{} {}##{}", icon, label, id);
+
+                if (ImGui::Selectable(selectableLabel.c_str(), isSelected)) {
+                    setVisibilityStatus(account.id, account.cookie, vis);
+                }
+            };
+
+            renderVisibilityOption(Roblox::OnlineStatusVisibility::AllUsers, "Everyone", "vis_everyone");
+            renderVisibilityOption(Roblox::OnlineStatusVisibility::FriendsFollowingAndFollowers, "Connections & people I follow", "vis_conn_follow");
+            renderVisibilityOption(Roblox::OnlineStatusVisibility::FriendsAndFollowing, "Friends & Following", "vis_friends_following");
+            renderVisibilityOption(Roblox::OnlineStatusVisibility::Friends, "Connections", "vis_connections");
+            renderVisibilityOption(Roblox::OnlineStatusVisibility::NoOne, "No one", "vis_noone");
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextDisabled("Show Current Experience");
+
+        if (state.isLoadingJoinRestriction) {
+            ImGui::TextDisabled("Loading...");
+        } else if (!state.joinRestrictionErrorMessage.empty()) {
+            ImGui::TextDisabled("%s", state.joinRestrictionErrorMessage.c_str());
+        } else {
+            auto renderJoinRestrictionOption = [&](Roblox::JoinRestriction restriction, const char* label, const char* id) {
+                bool isSelected = (state.currentJoinRestriction == restriction);
+                const auto& icon = isSelected ? ICON_RADIO_CHECKED : ICON_RADIO_UNCHECKED;
+                std::string selectableLabel = std::format("{} {}##{}", icon, label, id);
+
+                if (ImGui::Selectable(selectableLabel.c_str(), isSelected)) {
+                    setJoinRestrictionStatus(account.id, account.cookie, restriction);
+                }
+            };
+
+            renderJoinRestrictionOption(Roblox::JoinRestriction::All, "Everyone", "join_everyone");
+            renderJoinRestrictionOption(Roblox::JoinRestriction::Followers, "Connections, followers & people I follow", "join_conn_followers");
+            renderJoinRestrictionOption(Roblox::JoinRestriction::Following, "Connections & People I follow", "join_conn_following");
+            renderJoinRestrictionOption(Roblox::JoinRestriction::Friends, "Connections", "join_connections");
+            renderJoinRestrictionOption(Roblox::JoinRestriction::NoOne, "No one", "join_noone");
+        }
+    }
+
 } // namespace
 
 void LaunchBrowserWithCookie(const AccountData &account) {
@@ -778,6 +944,17 @@ void RenderAccountContextMenu(AccountData &account, const std::string &uniqueCon
         }
         ImGui::Separator();
     }
+
+    ImGui::TextDisabled("Roblox Settings");
+    if (ImGui::BeginMenu("Visibility")) {
+        if (isMultiSelection) {
+            ImGui::TextDisabled("Not available for multiple accounts");
+        } else {
+            renderVisibilityMenu(account);
+        }
+        ImGui::EndMenu();
+    }
+    ImGui::Separator();
 
     if (ImGui::BeginMenu("Copy Info")) {
         if (isMultiSelection) {
