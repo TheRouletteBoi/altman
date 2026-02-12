@@ -789,6 +789,8 @@ void RenderSettingsTab() {
     if (ImGui::Button("Cleanup old backups")) {
         AutoUpdater::CleanupOldBackups();
     }
+    if (ImGui::Checkbox("Privacy Mode", &g_privacyModeEnabled)) {
+    }
 
     ImGui::Spacing();
     ImGui::SeparatorText("Launch Options");
@@ -1084,7 +1086,13 @@ void RenderSettingsTab() {
                 auto &buffer = keyBuffers[clientName];
 
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                if (ImGui::InputText("##Key", buffer.data(), buffer.size(), ImGuiInputTextFlags_EnterReturnsTrue)) {
+
+                ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue;
+                if (g_privacyModeEnabled) {
+                    flags |= ImGuiInputTextFlags_Password;
+                }
+
+                if (ImGui::InputText("##Key", buffer.data(), buffer.size(), flags)) {
                     key = std::string(buffer.data());
                     Data::SaveSettings();
                     LOG_INFO("Updated key for {}", clientName);
