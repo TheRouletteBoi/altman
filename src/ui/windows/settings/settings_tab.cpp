@@ -617,7 +617,7 @@ namespace {
                 "EnvironmentTable",
                 5,
                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY
-                    | ImGuiTableFlags_RowBg | ImGuiTableFlags_Sortable,
+                    | ImGuiTableFlags_RowBg,
                 ImVec2(0, tableHeight)
             )) {
 
@@ -633,7 +633,14 @@ namespace {
             ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, 70.0f);
             ImGui::TableHeadersRow();
 
-            if (ImGuiTableSortSpecs *sortSpecs = ImGui::TableGetSortSpecs()) {
+            /*
+             * ObjectiveC weak reference corruption
+             * The table is being sorted while holding the mutex
+             * The sort is comparing file_time_type objects
+             * There's a weak reference corruption during the sort operation
+             * We are sorting the vector while the UI thread holds the lock
+             * and the sort comparator is accessing lastAccessed
+             if (ImGuiTableSortSpecs *sortSpecs = ImGui::TableGetSortSpecs()) {
                 if (sortSpecs->SpecsDirty && sortSpecs->SpecsCount > 0) {
                     const auto &spec = sortSpecs->Specs[0];
                     const bool ascending = (spec.SortDirection == ImGuiSortDirection_Ascending);
@@ -663,7 +670,7 @@ namespace {
 
                     sortSpecs->SpecsDirty = false;
                 }
-            }
+            }*/
 
             for (auto &env: g_cleanupState.environments) {
                 ImGui::TableNextRow();
