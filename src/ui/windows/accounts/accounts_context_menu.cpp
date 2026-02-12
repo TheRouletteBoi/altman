@@ -600,6 +600,75 @@ namespace {
         RenderStandardJoinMenu(menu);
     }
 
+    void renderJoinAccountMenu(const AccountData &contextAccount, bool isMultiSelection) {
+        std::vector<const AccountData *> joinableAccounts;
+
+        std::unordered_set<uint64_t> relevantPlaceIds;
+        if (isMultiSelection) {
+            for (const auto *acc: getSelectedAccountsOrdered()) {
+                if (acc->status == "InGame" && acc->placeId != 0) {
+                    relevantPlaceIds.insert(acc->placeId);
+                }
+            }
+        } else if (contextAccount.status == "InGame" && contextAccount.placeId != 0) {
+            relevantPlaceIds.insert(contextAccount.placeId);
+        }
+
+        for (const auto &acc: g_accounts) {
+            if (isMultiSelection) {
+                if (g_selectedAccountIds.contains(acc.id)) {
+                    continue;
+                }
+            } else {
+                if (acc.id == contextAccount.id) {
+                    continue;
+                }
+            }
+
+            if (acc.status != "InGame" || acc.placeId == 0) {
+                continue;
+            }
+
+            joinableAccounts.push_back(&acc);
+        }
+
+        if (joinableAccounts.empty()) {
+            return;
+        }
+
+        if (ImGui::BeginMenu("Join Account")) {
+            for (const auto *acc: joinableAccounts) {
+                std::string displayText = acc->displayName.empty() ? acc->username : acc->displayName;
+
+                if (!acc->jobId.empty()) {
+                    if (isMultiSelection) {
+                        // displayText += std::format(" ({}...)", acc->jobId.substr(0, 8));
+                    } else if (!contextAccount.jobId.empty()) {
+                        displayText += (acc->jobId == contextAccount.jobId) ? " (Same Server)" : " (Different Server)";
+                    } else {
+                        // displayText += std::format(" ({}...)", acc->jobId.substr(0, 8));
+                    }
+                }
+                if (ImGui::MenuItem(displayText.c_str())) {
+                    const uint64_t targetPlaceId = acc->placeId;
+                    const std::string targetJobId = acc->jobId;
+
+                    WorkerThreads::runBackground([targetPlaceId, targetJobId, isMultiSelection, contextAccount]() {
+                        auto launchParams = !targetJobId.empty() ? LaunchParams::gameJob(targetPlaceId, targetJobId)
+                                                                 : LaunchParams::standard(targetPlaceId);
+
+                        if (isMultiSelection) {
+                            launchWithSelectedAccounts(launchParams);
+                        } else {
+                            launchWithAccounts(launchParams, {contextAccount});
+                        }
+                    });
+                }
+            }
+            ImGui::EndMenu();
+        }
+    }
+
     void renderUrlPopups(const AccountData &account) {
         if (g_customUrl.open && g_customUrl.accountId == account.id) {
             ImGui::OpenPopup(std::format("Custom URL##Acct{}", account.id).c_str());
@@ -742,17 +811,24 @@ void RenderAccountContextMenu(AccountData &account, const std::string &uniqueCon
         const bool anyInGame = std::ranges::any_of(getSelectedAccountsOrdered(), [](const auto *acc) {
             return acc->status == "InGame";
         });
+
         if (anyInGame) {
-            if (ImGui::BeginMenu("Current game")) {
+            if (ImGui::BeginMenu("Current Game")) {
                 renderInGameMenuMulti(getSelectedAccountsOrdered());
                 ImGui::EndMenu();
             }
         }
-    } else if (account.status == "InGame") {
-        if (ImGui::BeginMenu("Current game")) {
-            renderInGameMenuSingle(account);
-            ImGui::EndMenu();
+
+        renderJoinAccountMenu(account, true);
+    } else {
+        if (account.status == "InGame") {
+            if (ImGui::BeginMenu("Current Game")) {
+                renderInGameMenuSingle(account);
+                ImGui::EndMenu();
+            }
         }
+
+        renderJoinAccountMenu(account, false);
     }
 
     ImGui::Separator();

@@ -84,7 +84,7 @@ void RenderStandardJoinMenu(const StandardJoinMenuParams &p) {
             }
         }
         if (!p.jobId.empty()) {
-            if (ImGui::MenuItem("Instance")) {
+            if (ImGui::MenuItem("Game Server")) {
                 if (p.onFillInstance) {
                     p.onFillInstance();
                 }
