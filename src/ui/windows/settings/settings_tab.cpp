@@ -766,6 +766,12 @@ void RenderSettingsTab() {
     }
     ImGui::Spacing();
 
+    ImGui::SeparatorText("General");
+    if (ImGui::Checkbox("Privacy Mode", &g_privacyModeEnabled)) {
+        Data::SaveSettings();
+    }
+
+    ImGui::Spacing();
     ImGui::SeparatorText("Updates");
 
     bool checkUpdates = g_checkUpdatesOnStartup;
@@ -788,8 +794,6 @@ void RenderSettingsTab() {
     ImGui::SameLine();
     if (ImGui::Button("Cleanup old backups")) {
         AutoUpdater::CleanupOldBackups();
-    }
-    if (ImGui::Checkbox("Privacy Mode", &g_privacyModeEnabled)) {
     }
 
     ImGui::Spacing();

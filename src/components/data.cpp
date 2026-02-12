@@ -471,6 +471,7 @@ namespace Data {
             g_killRobloxOnLaunch = safeGet(j, "killRobloxOnLaunch", false);
             g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
             g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
+            g_privacyModeEnabled = safeGet(j, "privacyModeEnabled", false);
 
             if (j.contains("clientKeys") && j["clientKeys"].is_object()) {
                 g_clientKeys.clear();
@@ -497,7 +498,8 @@ namespace Data {
             {"killRobloxOnLaunch",    g_killRobloxOnLaunch   },
             {"clearCacheOnLaunch",    g_clearCacheOnLaunch   },
             {"multiRobloxEnabled",    g_multiRobloxEnabled   },
-            {"clientKeys",            g_clientKeys           }
+            {"clientKeys",            g_clientKeys           },
+            {"privacyModeEnabled",    g_privacyModeEnabled   }
         };
 
         const auto path = AltMan::Paths::Config(filename).string();
