@@ -50,17 +50,17 @@ jobs:
           cp -R build/bin/AltMan.app dmg/
           ln -s /Applications dmg/Applications
           hdiutil create \
-            -volname "AltMan ${{ env.VERSION }}" \
+            -volname "AltMan v${{ env.VERSION }}" \
             -srcfolder dmg \
             -ov \
             -format UDZO \
-            "AltMan-${{ env.VERSION }}-macOS.dmg"
+            "AltMan-v${{ env.VERSION }}-macOS.dmg"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: AltMan-${{ env.VERSION }}-macOS.dmg
+          path: AltMan-v${{ env.VERSION }}-macOS.dmg
 
   build-windows:
     needs: version
@@ -87,7 +87,7 @@ jobs:
       - name: Package .zip
         shell: pwsh
         run: |
-          $outDir = "AltMan-${{ env.VERSION }}-Windows-${{ matrix.name }}"
+          $outDir = "AltMan-v${{ env.VERSION }}-Windows-${{ matrix.name }}"
           New-Item -ItemType Directory -Path $outDir
           # Copy everything from the Release output folder
           Copy-Item -Recurse "build\bin\Release\*" "$outDir\"
@@ -97,7 +97,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.name }}-zip
-          path: AltMan-${{ env.VERSION }}-Windows-${{ matrix.name }}.zip
+          path: AltMan-v${{ env.VERSION }}-Windows-${{ matrix.name }}.zip
 
   release:
     needs: [version, build-macos, build-windows]
