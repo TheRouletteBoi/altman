@@ -149,11 +149,11 @@ namespace {
     }
 
     template<typename T> T safeGet(const nlohmann::json &j, std::string_view key, T defaultValue) {
-        try {
-            return j.value(key.data(), defaultValue);
-        } catch (...) {
+        auto it = j.find(key);
+        if (it == j.end() || it->is_null()) {
             return defaultValue;
         }
+        return it->get<T>();
     }
 
     AccountData parseAccount(const nlohmann::json &item) {

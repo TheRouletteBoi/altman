@@ -532,17 +532,25 @@ bool AutoUpdater::ApplyDeltaPatch(
 
 UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json &release, UpdateChannel channel) {
     UpdateInfo info;
-    info.version = release.value("tag_name", "");
+
+    auto safeString = [&](const std::string &key, const std::string &fallback = "") -> std::string {
+        if (!release.contains(key) || release[key].is_null()) {
+            return fallback;
+        }
+        return release[key].get<std::string>();
+    };
+
+    info.version = safeString("tag_name");
 
     if (!info.version.empty() && (info.version.front() == 'v' || info.version.front() == 'V')) {
         info.version = info.version.substr(1);
     }
 
-    info.changelog = release.value("body", "");
-    info.channel = channel;
-    info.isCritical
-        = (info.changelog.find("[CRITICAL]") != std::string::npos
-           || info.changelog.find("[SECURITY]") != std::string::npos);
+    info.changelog = safeString("body");
+    info.channel   = channel;
+    info.isCritical =
+        (info.changelog.find("[CRITICAL]") != std::string::npos ||
+         info.changelog.find("[SECURITY]") != std::string::npos);
 
     const auto fullAssetName = GetPlatformAssetName(channel);
 
@@ -715,21 +723,20 @@ void AutoUpdater::CheckForUpdates(bool silent) {
         }
         );
 
-        if (resp.status_code != 200) {
-            LOG_ERROR("Failed to check for updates: HTTP {}", resp.status_code);
-
+        auto parsed = HttpClient::parseJsonSafe(resp);
+        if (!parsed) {
+            LOG_ERROR("Failed to check for updates: {}", parsed.error());
             if (!silent) {
                 WorkerThreads::RunOnMain([]() {
                     UpdateNotification::Show(
                         "Update Check Failed",
-                        "Failed to check for updates. Please try again later."
-                    );
+                        "Failed to check for updates. Please try again later.");
                 });
             }
             return;
         }
 
-        const nlohmann::json releases = HttpClient::decode(resp);
+        const nlohmann::json &releases = *parsed;
         UpdateInfo updateInfo;
         bool foundUpdate = false;
 

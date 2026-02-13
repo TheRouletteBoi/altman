@@ -31,6 +31,37 @@ namespace HttpClient {
         return result;
     }
 
+    [[nodiscard]] std::expected<nlohmann::json, std::string> parseJsonSafe(const HttpClient::Response &resp) {
+        if (resp.status_code != 200 || resp.text.empty()) {
+            return std::unexpected(std::format("HTTP error: {}", resp.status_code));
+        }
+
+        auto result = HttpClient::decode(resp);
+        if (result.is_null()) {
+            return std::unexpected("Failed to parse JSON");
+        }
+
+        return result;
+    }
+
+    [[nodiscard]] std::expected<nlohmann::json, std::string> parseJsonSafeWithRateLimit(const HttpClient::Response &resp) {
+        if (resp.status_code == 429) {
+            HttpClient::RateLimiter::instance().backoff(std::chrono::seconds(2));
+            return std::unexpected("Rate limited");
+        }
+
+        if (resp.status_code != 200 || resp.text.empty()) {
+            return std::unexpected(std::format("HTTP error: {}", resp.status_code));
+        }
+
+        auto result = HttpClient::decode(resp);
+        if (result.is_null()) {
+            return std::unexpected("Failed to parse JSON");
+        }
+
+        return result;
+    }
+
     std::string build_kv_string(std::initializer_list<std::pair<const std::string, std::string>> items, char sep) {
         std::ostringstream ss;
         bool first = true;

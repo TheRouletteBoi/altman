@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <expected>
 #include <functional>
 #include <initializer_list>
 #include <map>
@@ -45,6 +46,9 @@ namespace HttpClient {
     };
 
     nlohmann::json decode(const Response &response);
+
+    [[nodiscard]] std::expected<nlohmann::json, std::string> parseJsonSafe(const HttpClient::Response &resp);
+    [[nodiscard]] std::expected<nlohmann::json, std::string> parseJsonSafeWithRateLimit(const HttpClient::Response &resp);
 
     std::string build_kv_string(std::initializer_list<std::pair<const std::string, std::string>> items, char sep = '&');
 

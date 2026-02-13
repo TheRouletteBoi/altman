@@ -162,25 +162,6 @@ namespace {
         return {userId, cookie};
     }
 
-    [[nodiscard]]
-    std::expected<nlohmann::json, std::string> parseJsonSafe(const HttpClient::Response &resp) {
-        if (resp.status_code == 429) {
-            HttpClient::RateLimiter::instance().backoff(std::chrono::seconds(2));
-            return std::unexpected("Rate limited");
-        }
-
-        if (resp.status_code != 200 || resp.text.empty()) {
-            return std::unexpected(std::format("HTTP error: {}", resp.status_code));
-        }
-
-        auto result = HttpClient::decode(resp);
-        if (result.is_null()) {
-            return std::unexpected("Failed to parse JSON");
-        }
-
-        return result;
-    }
-
     void FetchAvatarImage(uint64_t userId) {
         g_avatarState.started = true;
         g_avatarState.loading = true;
@@ -192,7 +173,7 @@ namespace {
             );
 
             auto metaResp = HttpClient::rateLimitedGet(metaUrl);
-            auto metaJsonResult = parseJsonSafe(metaResp);
+            auto metaJsonResult = parseJsonSafeWithRateLimit(metaResp);
 
             if (!metaJsonResult) {
                 WorkerThreads::RunOnMain([] {
@@ -254,7 +235,7 @@ namespace {
                     {"Cookie", std::format(".ROBLOSECURITY={}", cookie)}
                 }
             );
-            auto jsonResult = parseJsonSafe(resp);
+            auto jsonResult = parseJsonSafeWithRateLimit(resp);
 
             if (!jsonResult) {
                 WorkerThreads::RunOnMain([] {
@@ -304,7 +285,7 @@ namespace {
             const std::string url = std::format("https://avatar.roblox.com/v1/users/{}/currently-wearing", userId);
 
             auto resp = HttpClient::rateLimitedGet(url);
-            auto jsonResult = parseJsonSafe(resp);
+            auto jsonResult = parseJsonSafeWithRateLimit(resp);
 
             if (!jsonResult) {
                 WorkerThreads::RunOnMain([userId] {
@@ -367,7 +348,7 @@ namespace {
             );
 
             auto metaResp = HttpClient::rateLimitedGet(metaUrl);
-            auto metaJsonResult = parseJsonSafe(metaResp);
+            auto metaJsonResult = parseJsonSafeWithRateLimit(metaResp);
 
             if (!metaJsonResult) {
                 WorkerThreads::RunOnMain([assetIds] {
@@ -511,7 +492,7 @@ namespace {
                         {"Cookie", std::format(".ROBLOSECURITY={}", cookie)}
                     }
                 );
-                auto jsonResult = parseJsonSafe(resp);
+                auto jsonResult = parseJsonSafeWithRateLimit(resp);
 
                 if (!jsonResult) {
                     anyError = true;
