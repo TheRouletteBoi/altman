@@ -174,7 +174,7 @@ class AutoUpdater {
 
     private:
         [[nodiscard]] static constexpr std::string_view GetChannelName(UpdateChannel channel) noexcept;
-        [[nodiscard]] static std::string GetPlatformAssetName(UpdateChannel channel);
+        [[nodiscard]] static std::string GetVersionedPlatformAssetName(std::string_view version, UpdateChannel channel);
         [[nodiscard]] static std::string GetDeltaAssetName(std::string_view fromVersion, std::string_view toVersion);
         [[nodiscard]] static std::filesystem::path GetUpdateScriptPath();
 
@@ -193,6 +193,7 @@ class AutoUpdater {
 
 #ifdef __APPLE__
         static bool ExtractZipToPath(const std::filesystem::path &zipPath, const std::filesystem::path &destPath);
+        static bool MountDmgAndCopyApp(const std::filesystem::path &dmgPath, const std::filesystem::path &outputAppPath);
 
         [[nodiscard]] static bool IsUniversalBinary(const std::filesystem::path &binaryPath);
         static bool ExtractSlice(

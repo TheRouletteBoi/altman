@@ -104,26 +104,25 @@ constexpr std::string_view AutoUpdater::GetChannelName(UpdateChannel channel) no
     }
 }
 
-std::string AutoUpdater::GetPlatformAssetName(UpdateChannel channel) {
-    // Asset naming:
-    // Windows: AltMan-Windows-x86_64.exe, AltMan-Windows-arm64.exe
-    // macOS:   AltMan-macOS.zip (universal binary)
-    // Beta:    AltMan-Windows-x86_64-beta.exe, AltMan-macOS-beta.zip
-
-    const auto platform = SystemInfo::GetPlatformString();
+std::string AutoUpdater::GetVersionedPlatformAssetName(std::string_view version, UpdateChannel channel) {
+    // Asset naming with version prefix, matching actual GitHub release filenames:
+    // Windows: AltMan-v1.7.2-Windows-x64.zip, AltMan-v1.7.2-Windows-ARM64.zip
+    // macOS:   AltMan-v1.7.2-macOS.dmg
 
 #ifdef _WIN32
-    const auto arch = SystemInfo::GetArchitectureString();
+    const bool isArm = SystemInfo::IsRunningUnderEmulation()
+                    || (SystemInfo::GetHardwareArchitecture().find("ARM") != std::string::npos)
+                    || (SystemInfo::GetHardwareArchitecture().find("arm") != std::string::npos);
+    const auto archStr = isArm ? "ARM64" : "x64";
     if (channel == UpdateChannel::Stable) {
-        return std::format("AltMan-{}-{}.exe", platform, arch);
+        return std::format("AltMan-v{}-Windows-{}.zip", version, archStr);
     }
-    return std::format("AltMan-{}-{}-{}.exe", platform, arch, GetChannelName(channel));
+    return std::format("AltMan-v{}-Windows-{}-{}.zip", version, archStr, GetChannelName(channel));
 #else
-    // macOS ships universal binary - no arch suffix
     if (channel == UpdateChannel::Stable) {
-        return std::format("AltMan-{}.zip", platform);
+        return std::format("AltMan-v{}-macOS.dmg", version);
     }
-    return std::format("AltMan-{}-{}.zip", platform, GetChannelName(channel));
+    return std::format("AltMan-v{}-macOS-{}.dmg", version, GetChannelName(channel));
 #endif
 }
 
@@ -352,6 +351,65 @@ std::string AutoUpdater::FormatSpeed(size_t bytesPerSecond) noexcept {
 }
 
 #ifdef __APPLE__
+bool AutoUpdater::MountDmgAndCopyApp(const std::filesystem::path &dmgPath, const std::filesystem::path &outputAppPath) {
+    LOG_INFO("Mounting DMG: {}", dmgPath.string());
+
+    const auto mountPoint = std::filesystem::temp_directory_path()
+                          / std::format("altman_dmg_{}", std::chrono::steady_clock::now().time_since_epoch().count());
+
+    std::filesystem::create_directories(mountPoint);
+
+    const auto attachCmd = std::format(
+        "hdiutil attach \"{}\" -mountpoint \"{}\" -nobrowse -quiet -noverify -noautoopen",
+        dmgPath.string(),
+        mountPoint.string()
+    );
+
+    if (std::system(attachCmd.c_str()) != 0) {
+        LOG_ERROR("Failed to mount DMG: {}", dmgPath.string());
+        std::filesystem::remove_all(mountPoint);
+        return false;
+    }
+
+    bool found = false;
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator(mountPoint, ec)) {
+        if (entry.path().extension() == ".app") {
+            LOG_INFO("Found app bundle in DMG: {}", entry.path().string());
+
+            if (std::filesystem::exists(outputAppPath)) {
+                std::filesystem::remove_all(outputAppPath);
+            }
+
+            const auto copyCmd = std::format(
+                "ditto \"{}\" \"{}\"",
+                entry.path().string(),
+                outputAppPath.string()
+            );
+
+            if (std::system(copyCmd.c_str()) != 0) {
+                LOG_ERROR("Failed to copy app bundle from DMG");
+            } else {
+                found = true;
+                LOG_INFO("App bundle copied to: {}", outputAppPath.string());
+            }
+            break;
+        }
+    }
+
+    if (!found) {
+        LOG_ERROR("No .app bundle found inside DMG at: {}", mountPoint.string());
+    }
+
+    const auto detachCmd = std::format("hdiutil detach \"{}\" -quiet -force", mountPoint.string());
+    if (std::system(detachCmd.c_str()) != 0) {
+        LOG_WARN("Failed to detach DMG mount point: {}", mountPoint.string());
+    }
+
+    std::filesystem::remove_all(mountPoint);
+    return found;
+}
+
 bool AutoUpdater::ExtractZipToPath(const std::filesystem::path &zipPath, const std::filesystem::path &destPath) {
     LOG_INFO("Extracting {} to {}", zipPath.string(), destPath.string());
 
@@ -552,7 +610,7 @@ UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json &release, UpdateCh
         (info.changelog.find("[CRITICAL]") != std::string::npos ||
          info.changelog.find("[SECURITY]") != std::string::npos);
 
-    const auto fullAssetName = GetPlatformAssetName(channel);
+    const auto fullAssetName = GetVersionedPlatformAssetName(info.version, channel);
 
 #ifdef _WIN32
     const auto deltaAssetName = GetDeltaAssetName(APP_VERSION, info.version);
@@ -575,6 +633,7 @@ UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json &release, UpdateCh
         for (const auto &asset: release["assets"]) {
             const std::string name = asset.value("name", "");
 
+            LOG_INFO("  Asset in release: '{}'", name);
             if (name == fullAssetName) {
                 info.downloadUrl = asset.value("browser_download_url", "");
                 info.fullSize = asset.value("size", 0);
@@ -810,6 +869,14 @@ void AutoUpdater::HandleUpdateAvailable(const UpdateInfo &info, bool silent) {
 }
 
 void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInstall) {
+    if (!info.hasDelta() && info.downloadUrl.empty()) {
+        LOG_ERROR("Cannot download update {}: downloadUrl is empty.", info.version);
+        WorkerThreads::RunOnMain([]() {
+            UpdateNotification::Show("Update Failed", "Update package not found in release assets.", 5.0f);
+        });
+        return;
+    }
+
     WorkerThreads::runBackground([info, autoInstall]() {
         const bool useDelta = info.hasDelta();
         bool success = false;
@@ -911,32 +978,60 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
 
         if (!useDelta || !success) {
 #ifdef __APPLE__
+            const auto dmgPath = tempDir / "update.dmg";
+            success = DownloadFileWithResume(info.downloadUrl, dmgPath, progressCallback);
+
+            if (success) {
+                WorkerThreads::RunOnMain([]() {
+                    UpdateNotification::Show("Installing", "Mounting disk image...", 3.0f);
+                });
+
+                LOG_INFO("Mounting and copying app from DMG...");
+                success = MountDmgAndCopyApp(dmgPath, outputAppPath);
+                std::filesystem::remove(dmgPath);
+
+                if (!success) {
+                    LOG_ERROR("Failed to extract app from DMG");
+                }
+            }
+#else
             const auto zipPath = tempDir / "update.zip";
             success = DownloadFileWithResume(info.downloadUrl, zipPath, progressCallback);
 
             if (success) {
-                LOG_INFO("Extracting update...");
+                LOG_INFO("Extracting update zip...");
 
                 const auto extractPath = tempDir / "extracted";
-                success = ExtractZipToPath(zipPath, extractPath);
-                std::filesystem::remove(zipPath);
+                std::filesystem::create_directories(extractPath);
 
-                if (success) {
-                    for (const auto &entry: std::filesystem::directory_iterator(extractPath)) {
-                        if (entry.path().extension() == ".app") {
-                            if (std::filesystem::exists(outputAppPath)) {
-                                std::filesystem::remove_all(outputAppPath);
+                const auto extractCmd = std::format(
+                    "powershell.exe -NoProfile -NonInteractive -Command "
+                    "\"Expand-Archive -Path '{}' -DestinationPath '{}' -Force\"",
+                    zipPath.string(),
+                    extractPath.string()
+                );
+
+                if (std::system(extractCmd.c_str()) != 0) {
+                    LOG_ERROR("Failed to extract update zip");
+                    success = false;
+                } else {
+                    std::error_code ec;
+                    for (const auto &entry : std::filesystem::recursive_directory_iterator(extractPath, ec)) {
+                        if (entry.path().extension() == ".exe"
+                            && entry.path().filename().string().find("AltMan") != std::string::npos) {
+                            if (std::filesystem::exists(outputExePath)) {
+                                std::filesystem::remove(outputExePath);
                             }
-                            std::filesystem::rename(entry.path(), outputAppPath);
+                            std::filesystem::rename(entry.path(), outputExePath);
                             break;
                         }
                     }
-
-                    success = std::filesystem::exists(outputAppPath);
+                    success = std::filesystem::exists(outputExePath);
                 }
+
+                std::filesystem::remove(zipPath);
+                std::filesystem::remove_all(extractPath);
             }
-#else
-            success = DownloadFileWithResume(info.downloadUrl, outputExePath, progressCallback);
 #endif
         }
 
