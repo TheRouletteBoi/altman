@@ -1,0 +1,125 @@
+name: Multi-Platform Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. v1.2.0)"
+        required: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Get version from tag or input
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${{ github.event.inputs.version }}"
+            echo "version=${RAW#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-macos:
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package .dmg
+        run: |
+          mkdir dmg
+          cp -R build/bin/AltMan.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create \
+            -volname "AltMan ${{ env.VERSION }}" \
+            -srcfolder dmg \
+            -ov \
+            -format UDZO \
+            "AltMan-${{ env.VERSION }}-macOS.dmg"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: AltMan-${{ env.VERSION }}-macOS.dmg
+
+  build-windows:
+    needs: version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    strategy:
+      matrix:
+        include:
+          - name: x64
+            arch: x64
+          - name: ARM64
+            arch: ARM64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A ${{ matrix.arch }}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package .zip
+        shell: pwsh
+        run: |
+          $outDir = "AltMan-${{ env.VERSION }}-Windows-${{ matrix.name }}"
+          New-Item -ItemType Directory -Path $outDir
+          # Copy everything from the Release output folder
+          Copy-Item -Recurse "build\bin\Release\*" "$outDir\"
+          Compress-Archive -Path "$outDir\*" -DestinationPath "$outDir.zip"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.name }}-zip
+          path: AltMan-${{ env.VERSION }}-Windows-${{ matrix.name }}.zip
+
+  release:
+    needs: [version, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: AltMan v${{ env.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/macos-dmg/AltMan-${{ env.VERSION }}-macOS.dmg
+            dist/windows-x64-zip/AltMan-${{ env.VERSION }}-Windows-x64.zip
+            dist/windows-ARM64-zip/AltMan-${{ env.VERSION }}-Windows-ARM64.zip
