@@ -38,17 +38,11 @@ jobs:
 
       - name: Configure (macOS)
         if: runner.os == 'macOS'
-        run: |
-          cmake -S . -B build \
-            -G "${{ matrix.generator }}" \
-            -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
-        run: |
-          cmake -S . -B build \
-            -G "${{ matrix.generator }}" \
-            -A ${{ matrix.arch }}
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -A ${{ matrix.arch }}
 
       - name: Build
         run: cmake --build build --config Release
