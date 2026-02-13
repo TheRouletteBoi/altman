@@ -1,0 +1,54 @@
+name: Multi-Platform Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            name: macOS Universal
+            generator: Ninja
+            arch: ""
+          
+          - os: windows-latest
+            name: Windows x64
+            generator: "Visual Studio 17 2022"
+            arch: x64
+          
+          - os: windows-latest
+            name: Windows ARM64
+            generator: "Visual Studio 17 2022"
+            arch: ARM64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -S . -B build \
+            -G "${{ matrix.generator }}" \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S . -B build \
+            -G "${{ matrix.generator }}" \
+            -A ${{ matrix.arch }}
+
+      - name: Build
+        run: cmake --build build --config Release
