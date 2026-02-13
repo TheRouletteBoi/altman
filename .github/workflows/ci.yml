@@ -120,6 +120,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist/macos-dmg/AltMan-${{ env.VERSION }}-macOS.dmg
-            dist/windows-x64-zip/AltMan-${{ env.VERSION }}-Windows-x64.zip
-            dist/windows-ARM64-zip/AltMan-${{ env.VERSION }}-Windows-ARM64.zip
+            dist/macos-dmg/AltMan-v${{ env.VERSION }}-macOS.dmg
+            dist/windows-x64-zip/AltMan-v${{ env.VERSION }}-Windows-x64.zip
+            dist/windows-ARM64-zip/AltMan-v${{ env.VERSION }}-Windows-ARM64.zip
