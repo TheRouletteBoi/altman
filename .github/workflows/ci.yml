@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. v1.2.0)"
+        required: true
 
 jobs:
   version:
@@ -11,9 +16,14 @@ jobs:
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - name: Get version from tag
+      - name: Get version from tag or input
         id: get_version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
 
   build-macos:
     needs: version
@@ -51,9 +61,6 @@ jobs:
           name: macos-dmg
           path: AltMan-${{ env.VERSION }}-macOS.dmg
 
-  # ─────────────────────────────────────────────
-  # Windows — build + zip, matrix for x64 / ARM64
-  # ─────────────────────────────────────────────
   build-windows:
     needs: version
     runs-on: windows-latest
