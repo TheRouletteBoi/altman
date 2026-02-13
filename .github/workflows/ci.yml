@@ -46,7 +46,7 @@ jobs:
       - name: Package .dmg
         run: |
           mkdir dmg
-          cp -R build/AltMan.app dmg/
+          cp -R build/bin/AltMan.app dmg/
           ln -s /Applications dmg/Applications
           hdiutil create \
             -volname "AltMan ${{ env.VERSION }}" \
@@ -89,7 +89,7 @@ jobs:
           $outDir = "AltMan-${{ env.VERSION }}-Windows-${{ matrix.name }}"
           New-Item -ItemType Directory -Path $outDir
           # Copy everything from the Release output folder
-          Copy-Item -Recurse "build\Release\*" "$outDir\"
+          Copy-Item -Recurse "build\bin\Release\*" "$outDir\"
           Compress-Archive -Path "$outDir\*" -DestinationPath "$outDir.zip"
 
       - name: Upload Windows artifact
