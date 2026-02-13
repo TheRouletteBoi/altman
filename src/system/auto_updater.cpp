@@ -300,24 +300,9 @@ void AutoUpdater::LaunchUpdateScript() {
     const auto scriptPath = GetUpdateScriptPath();
 
 #ifdef _WIN32
-    SHELLEXECUTEINFOW sei {};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = L"open";
-    sei.lpFile = L"powershell.exe";
-
-    std::wstring args
-        = L"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + scriptPath.wstring() + L"\"";
-    sei.lpParameters = args.c_str();
-    sei.nShow = SW_HIDE;
-
-    if (!ShellExecuteExW(&sei)) {
-        LOG_ERROR("Failed to launch update script: {}", GetLastError());
+    if (!LaunchPowerShellScript(std::format("-ExecutionPolicy Bypass -File \"{}\"", scriptPath.string()), false)) {
+        LOG_ERROR("Failed to launch update script");
         return;
-    }
-
-    if (sei.hProcess) {
-        CloseHandle(sei.hProcess);
     }
 #else
     pid_t pid;
@@ -550,6 +535,49 @@ bool AutoUpdater::ApplyUniversalDeltaUpdate(
     std::filesystem::remove_all(tempDir);
 
     LOG_INFO("Universal binary delta update applied successfully");
+    return true;
+}
+#endif
+
+#ifdef _WIN32
+bool AutoUpdater::LaunchPowerShellScript(const std::string &psArguments, bool waitForCompletion) {
+    SHELLEXECUTEINFOW sei {};
+    sei.cbSize    = sizeof(sei);
+    sei.fMask     = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb    = L"open";
+    sei.lpFile    = L"powershell.exe";
+    sei.nShow     = SW_HIDE;
+
+    const std::string fullArgs = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass " + psArguments;
+
+    const int wlen = MultiByteToWideChar(CP_UTF8, 0, fullArgs.c_str(), -1, nullptr, 0);
+    std::wstring argsW(wlen, 0);
+    MultiByteToWideChar(CP_UTF8, 0, fullArgs.c_str(), -1, argsW.data(), wlen);
+
+    sei.lpParameters = argsW.c_str();
+
+    if (!ShellExecuteExW(&sei)) {
+        LOG_ERROR("Failed to launch PowerShell: {}", GetLastError());
+        return false;
+    }
+
+    if (sei.hProcess) {
+        if (waitForCompletion) {
+            WaitForSingleObject(sei.hProcess, INFINITE);
+
+            DWORD exitCode = 0;
+            GetExitCodeProcess(sei.hProcess, &exitCode);
+            CloseHandle(sei.hProcess);
+
+            if (exitCode != 0) {
+                LOG_ERROR("PowerShell exited with code {}", exitCode);
+                return false;
+            }
+        } else {
+            CloseHandle(sei.hProcess);
+        }
+    }
+
     return true;
 }
 #endif
@@ -1004,14 +1032,13 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
                 const auto extractPath = tempDir / "extracted";
                 std::filesystem::create_directories(extractPath);
 
-                const auto extractCmd = std::format(
-                    "powershell.exe -NoProfile -NonInteractive -Command "
-                    "\"Expand-Archive -Path '{}' -DestinationPath '{}' -Force\"",
+                const auto psArgs = std::format(
+                    "-Command Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
                     zipPath.string(),
                     extractPath.string()
                 );
 
-                if (std::system(extractCmd.c_str()) != 0) {
+                if (!LaunchPowerShellScript(psArgs, true)) {
                     LOG_ERROR("Failed to extract update zip");
                     success = false;
                 } else {

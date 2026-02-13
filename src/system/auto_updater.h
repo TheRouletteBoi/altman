@@ -214,8 +214,7 @@ class AutoUpdater {
 #endif
 
 #ifdef _WIN32
-        [[nodiscard]] static std::string GetHardwareArchitecture();
-        [[nodiscard]] static bool IsRunningUnderEmulation();
+        [[nodiscard]] static bool LaunchPowerShellScript(const std::string &psArguments, bool waitForCompletion);
 #endif
 
         [[nodiscard]] static UpdateInfo ParseReleaseInfo(const nlohmann::json &release, UpdateChannel channel);
