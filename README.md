@@ -61,7 +61,8 @@ The project is designed to be straightforward, auditable, and extensible rather 
 ## Preview
 
 ![AltMan Preview](.github/previews/screenshot.png)
-<video src=".github/previews/preview2.mp4" autoplay loop muted playsinline width="600"></video>
+
+<video src=".github/previews/preview2_lowest.mp4" autoplay loop muted playsinline width="600"></video>
 
 ---
 
