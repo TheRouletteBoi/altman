@@ -60,7 +60,8 @@ The project is designed to be straightforward, auditable, and extensible rather 
 
 ## Preview
 
-![AltMan Preview](src/assets/images/screenshot.png)
+![AltMan Preview](.github/previews/screenshot.png)
+<video src=".github/previews/preview2.mp4" autoplay loop muted playsinline width="600"></video>
 
 ---
 
