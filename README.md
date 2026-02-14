@@ -59,14 +59,11 @@ The project is designed to be straightforward, auditable, and extensible rather 
 ---
 
 ## Preview
-
-![AltMan Preview](.github/previews/screenshot.png)
-
-
-<video src="https://github.com/user-attachments/assets/170bb0f1-c5e9-4fa3-8ffd-69185b593448" autoplay loop muted playsinline width="600"></video> 
-
-
-
+<div align="center">
+  <img src=".github/previews/screenshot.png" alt="AltMan Preview" />
+  <br/>
+  <video src="https://github.com/user-attachments/assets/170bb0f1-c5e9-4fa3-8ffd-69185b593448" controls autoplay loop muted width="600"></video>
+</div>
 
 ---
 
