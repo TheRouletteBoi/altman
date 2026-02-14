@@ -63,8 +63,8 @@ The project is designed to be straightforward, auditable, and extensible rather 
 ![AltMan Preview](.github/previews/screenshot.png)
 
 
+<video src="https://github.com/user-attachments/assets/170bb0f1-c5e9-4fa3-8ffd-69185b593448" autoplay loop muted playsinline width="600"></video> 
 
-https://github.com/user-attachments/assets/170bb0f1-c5e9-4fa3-8ffd-69185b593448
 
 
 
