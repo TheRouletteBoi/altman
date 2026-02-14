@@ -23,7 +23,7 @@ namespace Roblox {
         LOG_INFO("Checking moderation status");
 
         HttpClient::Response response = HttpClient::rateLimitedGet(
-            "https://usermoderation.roblox.com/v1/not-approved",
+            "https://usermoderation.roblox.com/v2/not-approved",
             {
                 {"Cookie", ".ROBLOSECURITY=" + cookie}
             }
@@ -33,44 +33,56 @@ namespace Roblox {
             LOG_ERROR("Failed moderation check: HTTP {}", response.status_code);
 
             if (response.status_code == 401 || response.status_code == 403) {
-                return {BanCheckResult::InvalidCookie, 0, 0};
+                return {BanCheckResult::InvalidCookie, 0};
             }
 
             if (response.status_code == 429) {
                 HttpClient::RateLimiter::instance().backoff(std::chrono::seconds(2));
-                return {BanCheckResult::NetworkError, 0, 0};
+                return {BanCheckResult::NetworkError, 0};
             }
 
-            return {BanCheckResult::NetworkError, 0, 0};
+            return {BanCheckResult::NetworkError, 0};
         }
 
         auto j = HttpClient::decode(response);
 
-        if (j.is_object() && j.contains("punishmentTypeDescription")) {
-            std::string punishmentType = j["punishmentTypeDescription"].get<std::string>();
-            time_t end = 0;
-            uint64_t punishedUserId = j.value("punishedUserId", 0ULL);
-            bool hasEndDate = j.contains("endDate") && j["endDate"].is_string()
-                              && !j["endDate"].get<std::string>().empty();
-
-            if (hasEndDate) {
-                end = parseIsoTimestamp(j["endDate"].get<std::string>());
-                return {BanCheckResult::Banned, end, punishedUserId};
-            }
-
-            if (punishmentType == "Delete") {
-                return {BanCheckResult::Terminated, 0, punishedUserId};
-            }
-
-            if (punishmentType == "Warn") {
-                return {BanCheckResult::Warned, 0, punishedUserId};
-            }
-
-            // Default to banned for other punishment types without end date
-            return {BanCheckResult::Banned, 0, punishedUserId};
+        if (!j.is_object() || !j.contains("restriction") || j["restriction"].is_null()) {
+            return {BanCheckResult::Unbanned, 0};
         }
 
-        return {BanCheckResult::Unbanned, 0, 0};
+        const auto &restriction = j["restriction"];
+
+        int moderationStatus = restriction.value("moderationStatus", 0);
+
+        bool hasEndTime = restriction.contains("endTime")
+                          && restriction["endTime"].is_string()
+                          && !restriction["endTime"].get<std::string>().empty();
+
+        bool hasDuration = restriction.contains("durationSeconds")
+                           && !restriction["durationSeconds"].is_null();
+
+        if (moderationStatus == 1) {
+            return {BanCheckResult::Warned, 0};
+        }
+
+        if (hasEndTime) {
+            time_t end = parseIsoTimestamp(restriction["endTime"].get<std::string>());
+            return {BanCheckResult::Banned, end};
+        }
+
+        if (hasDuration) {
+            return {BanCheckResult::Banned, 0};
+        }
+
+        if (moderationStatus == 2) {
+            return {BanCheckResult::Locked, 0};
+        }
+
+        if (moderationStatus == 3) {
+            return {BanCheckResult::Terminated, 0};
+        }
+
+        return {BanCheckResult::Banned, 0};
     }
 
     BanCheckResult cachedBanStatus(const std::string &cookie) {
@@ -101,6 +113,9 @@ namespace Roblox {
         switch (status) {
             case BanCheckResult::Banned:
                 LOG_ERROR("Skipping request: cookie is banned");
+                return false;
+            case BanCheckResult::Locked:
+                LOG_ERROR("Skipping request: cookie is locked");
                 return false;
             case BanCheckResult::Warned:
                 LOG_ERROR("Skipping request: cookie is warned");

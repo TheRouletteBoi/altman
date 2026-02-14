@@ -261,7 +261,7 @@ namespace Roblox {
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
-            LOG_INFO("Failed to fetch voice settings: HTTP {}", resp.status_code);
+            LOG_ERROR("Failed to fetch voice settings: HTTP {}", resp.status_code);
             return {"Unknown", 0};
         }
 
