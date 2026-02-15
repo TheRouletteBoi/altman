@@ -477,6 +477,7 @@ namespace MultiInstance {
         }
 
         std::filesystem::create_directories(environmentsDir / "Documents", ec);
+        std::filesystem::create_directories(environmentsDir / "Downloads", ec);
         std::filesystem::create_directories(environmentsDir / "Applications", ec);
         std::filesystem::create_directories(environmentsDir / "Library", ec);
         std::filesystem::create_directories(environmentsDir / "Library" / "Preferences", ec);
