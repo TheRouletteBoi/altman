@@ -142,6 +142,16 @@ set(SODIUM_MINIMAL ON CACHE BOOL "" FORCE)
 set(SODIUM_STATIC ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(libsodium)
 
+FetchContent_Declare(
+        micro_ecc
+        GIT_REPOSITORY https://github.com/kmackay/micro-ecc.git
+        GIT_TAG 541b3a78026420a3e369c4c9281c396b5e531113
+)
+FetchContent_MakeAvailable(micro_ecc)
+add_library(micro_ecc_lib STATIC ${micro_ecc_SOURCE_DIR}/uECC.c)
+target_include_directories(micro_ecc_lib PUBLIC ${micro_ecc_SOURCE_DIR})
+target_compile_definitions(micro_ecc_lib PRIVATE uECC_VLI_NATIVE_LITTLE_ENDIAN=1)
+
 if(WIN32)
     target_include_directories(imgui_lib PRIVATE ${WEBVIEW2_INCLUDE_DIR})
 endif()
@@ -221,6 +231,7 @@ target_link_libraries(AltMan PRIVATE
         nlohmann_json::nlohmann_json
         cpr::cpr
         sodium
+        micro_ecc_lib
 )
 
 if(WIN32)

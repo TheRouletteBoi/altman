@@ -71,83 +71,6 @@ namespace {
         return key;
     }
 
-    std::optional<std::string> encryptCookie(std::string_view cookie) {
-        if (cookie.empty()) {
-            return "";
-        }
-
-        auto keyResult = getOrCreateLocalKey();
-        if (!keyResult) {
-            LOG_ERROR("Failed to get encryption key: {}", Crypto::errorToString(keyResult.error()));
-            return std::nullopt;
-        }
-        const auto &key = *keyResult;
-
-        std::array<std::uint8_t, crypto_secretbox_NONCEBYTES> nonce {};
-        randombytes_buf(nonce.data(), nonce.size());
-
-        std::vector<std::uint8_t> ciphertext(cookie.size() + crypto_secretbox_MACBYTES);
-
-        if (crypto_secretbox_easy(
-                ciphertext.data(),
-                reinterpret_cast<const std::uint8_t *>(cookie.data()),
-                cookie.size(),
-                nonce.data(),
-                key.data()
-            )
-            != 0) {
-            LOG_ERROR("Cookie encryption failed");
-            return std::nullopt;
-        }
-
-        std::vector<std::uint8_t> result;
-        result.reserve(nonce.size() + ciphertext.size());
-        result.insert(result.end(), nonce.begin(), nonce.end());
-        result.insert(result.end(), ciphertext.begin(), ciphertext.end());
-
-        return base64_encode(result);
-    }
-
-    std::string decryptCookie(std::string_view base64Encrypted) {
-        if (base64Encrypted.empty()) {
-            return "";
-        }
-
-        auto keyResult = getOrCreateLocalKey();
-        if (!keyResult) {
-            LOG_ERROR("Failed to get encryption key: {}", Crypto::errorToString(keyResult.error()));
-            return "";
-        }
-        const auto &key = *keyResult;
-
-        std::vector<std::uint8_t> encrypted;
-        try {
-            encrypted = base64_decode(base64Encrypted);
-        } catch (const std::exception &e) {
-            LOG_ERROR("Failed to decode base64 cookie: {}", e.what());
-            return "";
-        }
-
-        constexpr std::size_t kMinSize = crypto_secretbox_NONCEBYTES + crypto_secretbox_MACBYTES;
-        if (encrypted.size() < kMinSize) {
-            LOG_ERROR("Encrypted cookie too short ({} bytes, need at least {})", encrypted.size(), kMinSize);
-            return "";
-        }
-
-        const std::uint8_t *nonce = encrypted.data();
-        const std::uint8_t *ciphertext = encrypted.data() + crypto_secretbox_NONCEBYTES;
-        const std::size_t ciphertextLen = encrypted.size() - crypto_secretbox_NONCEBYTES;
-
-        std::vector<std::uint8_t> plaintext(ciphertextLen - crypto_secretbox_MACBYTES);
-
-        if (crypto_secretbox_open_easy(plaintext.data(), ciphertext, ciphertextLen, nonce, key.data()) != 0) {
-            LOG_ERROR("Cookie decryption failed (wrong key or corrupted data)");
-            return "";
-        }
-
-        return std::string(plaintext.begin(), plaintext.end());
-    }
-
     template<typename T> T safeGet(const nlohmann::json &j, std::string_view key, T defaultValue) {
         auto it = j.find(key);
         if (it == j.end() || it->is_null()) {
@@ -174,36 +97,49 @@ namespace {
         account.isUsingCustomClient = safeGet<bool>(item, "isUsingCustomClient", false);
         account.clientName = safeGet<std::string>(item, "clientName", "");
         account.customClientBase = safeGet<std::string>(item, "customClientBase", "");
+        account.cookieLastUse = safeGet(item, "cookieLastUse", std::time(nullptr));
+        account.cookieLastRefreshAttempt = safeGet(item, "cookieLastRefreshAttempt", 0);
+        account.hbaPublicKey = safeGet<std::string>(item, "hbaPublicKey", "");
 
         if (item.contains("encryptedCookie")) {
             const auto encrypted = safeGet<std::string>(item, "encryptedCookie", "");
-            account.cookie = decryptCookie(encrypted);
+            account.cookie = Data::decryptLocalData(encrypted);
+        }
+
+        if (item.contains("hbaEncryptedPrivateKey")) {
+            const auto encrypted = safeGet<std::string>(item, "hbaEncryptedPrivateKey", "");
+            account.hbaPrivateKey = Data::decryptLocalData(encrypted);
         }
 
         return account;
     }
 
     nlohmann::json serializeAccount(const AccountData &account) {
-        const auto encryptedCookie = encryptCookie(account.cookie).value_or("");
+        const auto encryptedCookie = Data::encryptLocalData(account.cookie).value_or("");
+        const auto encryptedHbaPrivateKey = Data::encryptLocalData(account.hbaPrivateKey).value_or("");
 
         return {
-            {"id",                  account.id                 },
-            {"displayName",         account.displayName        },
-            {"username",            account.username           },
-            {"userId",              account.userId             },
-            {"status",              account.status             },
-            {"voiceStatus",         account.voiceStatus        },
-            {"voiceBanExpiry",      account.voiceBanExpiry     },
-            {"banExpiry",           account.banExpiry          },
-            {"note",                account.note               },
-            {"encryptedCookie",     encryptedCookie            },
-            {"isFavorite",          account.isFavorite         },
-            {"lastLocation",        account.lastLocation       },
-            {"placeId",             account.placeId            },
-            {"jobId",               account.jobId              },
-            {"isUsingCustomClient", account.isUsingCustomClient},
-            {"clientName",          account.clientName         },
-            {"customClientBase",    account.customClientBase   }
+            {"id",                       account.id                      },
+            {"displayName",              account.displayName             },
+            {"username",                 account.username                },
+            {"userId",                   account.userId                  },
+            {"status",                   account.status                  },
+            {"voiceStatus",              account.voiceStatus             },
+            {"voiceBanExpiry",           account.voiceBanExpiry          },
+            {"banExpiry",                account.banExpiry               },
+            {"note",                     account.note                    },
+            {"encryptedCookie",          encryptedCookie                 },
+            {"isFavorite",               account.isFavorite              },
+            {"lastLocation",             account.lastLocation            },
+            {"placeId",                  account.placeId                 },
+            {"jobId",                    account.jobId                   },
+            {"isUsingCustomClient",      account.isUsingCustomClient     },
+            {"clientName",               account.clientName              },
+            {"customClientBase",         account.customClientBase        },
+            {"cookieLastUse",            account.cookieLastUse           },
+            {"cookieLastRefreshAttempt", account.cookieLastRefreshAttempt},
+            {"hbaPublicKey",             account.hbaPublicKey            },
+            {"hbaEncryptedPrivateKey",   encryptedHbaPrivateKey          }
         };
     }
 
@@ -472,6 +408,7 @@ namespace Data {
             g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
             g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
             g_privacyModeEnabled = safeGet(j, "privacyModeEnabled", false);
+            g_autoCookieRefresh = safeGet(j, "autoCookieRefresh", false);
 
             if (j.contains("clientKeys") && j["clientKeys"].is_object()) {
                 g_clientKeys.clear();
@@ -499,7 +436,8 @@ namespace Data {
             {"clearCacheOnLaunch",    g_clearCacheOnLaunch   },
             {"multiRobloxEnabled",    g_multiRobloxEnabled   },
             {"clientKeys",            g_clientKeys           },
-            {"privacyModeEnabled",    g_privacyModeEnabled   }
+            {"privacyModeEnabled",    g_privacyModeEnabled   },
+            {"autoCookieRefresh",     g_autoCookieRefresh    }
         };
 
         const auto path = AltMan::Paths::Config(filename).string();
@@ -613,6 +551,83 @@ namespace Data {
 
         out << root.dump(4);
         LOG_INFO("Saved friend data");
+    }
+
+    std::optional<std::string> encryptLocalData(std::string_view plaintext) {
+        if (plaintext.empty()) {
+            return "";
+        }
+
+        auto keyResult = getOrCreateLocalKey();
+        if (!keyResult) {
+            LOG_ERROR("Failed to get encryption key: {}", Crypto::errorToString(keyResult.error()));
+            return std::nullopt;
+        }
+        const auto &key = *keyResult;
+
+        std::array<std::uint8_t, crypto_secretbox_NONCEBYTES> nonce {};
+        randombytes_buf(nonce.data(), nonce.size());
+
+        std::vector<std::uint8_t> ciphertext(plaintext.size() + crypto_secretbox_MACBYTES);
+
+        if (crypto_secretbox_easy(
+                ciphertext.data(),
+                reinterpret_cast<const std::uint8_t *>(plaintext.data()),
+                plaintext.size(),
+                nonce.data(),
+                key.data()
+            )
+            != 0) {
+            LOG_ERROR("Encryption failed");
+            return std::nullopt;
+        }
+
+        std::vector<std::uint8_t> result;
+        result.reserve(nonce.size() + ciphertext.size());
+        result.insert(result.end(), nonce.begin(), nonce.end());
+        result.insert(result.end(), ciphertext.begin(), ciphertext.end());
+
+        return base64_encode(result);
+    }
+
+    std::string decryptLocalData(std::string_view base64Encrypted) {
+        if (base64Encrypted.empty()) {
+            return "";
+        }
+
+        auto keyResult = getOrCreateLocalKey();
+        if (!keyResult) {
+            LOG_ERROR("Failed to get encryption key: {}", Crypto::errorToString(keyResult.error()));
+            return "";
+        }
+        const auto &key = *keyResult;
+
+        std::vector<std::uint8_t> encrypted;
+        try {
+            encrypted = base64_decode(base64Encrypted);
+        } catch (const std::exception &e) {
+            LOG_ERROR("Failed to decode base64 data: {}", e.what());
+            return "";
+        }
+
+        constexpr std::size_t kMinSize = crypto_secretbox_NONCEBYTES + crypto_secretbox_MACBYTES;
+        if (encrypted.size() < kMinSize) {
+            LOG_ERROR("Encrypted data too short ({} bytes, need at least {})", encrypted.size(), kMinSize);
+            return "";
+        }
+
+        const std::uint8_t *nonce = encrypted.data();
+        const std::uint8_t *ciphertext = encrypted.data() + crypto_secretbox_NONCEBYTES;
+        const std::size_t ciphertextLen = encrypted.size() - crypto_secretbox_NONCEBYTES;
+
+        std::vector<std::uint8_t> plaintext(ciphertextLen - crypto_secretbox_MACBYTES);
+
+        if (crypto_secretbox_open_easy(plaintext.data(), ciphertext, ciphertextLen, nonce, key.data()) != 0) {
+            LOG_ERROR("Decryption failed (wrong key or corrupted data)");
+            return "";
+        }
+
+        return std::string(plaintext.begin(), plaintext.end());
     }
 
 } // namespace Data

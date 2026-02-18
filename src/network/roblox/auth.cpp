@@ -1,4 +1,5 @@
 #include "auth.h"
+#include "network/roblox/hba.h"
 
 #include <format>
 #include <future>
@@ -26,7 +27,7 @@ namespace Roblox {
             "https://usermoderation.roblox.com/v2/not-approved",
             {
                 {"Cookie", ".ROBLOSECURITY=" + cookie}
-            }
+        }
         );
 
         if (response.status_code < 200 || response.status_code >= 300) {
@@ -54,12 +55,10 @@ namespace Roblox {
 
         int moderationStatus = restriction.value("moderationStatus", 0);
 
-        bool hasEndTime = restriction.contains("endTime")
-                          && restriction["endTime"].is_string()
+        bool hasEndTime = restriction.contains("endTime") && restriction["endTime"].is_string()
                           && !restriction["endTime"].get<std::string>().empty();
 
-        bool hasDuration = restriction.contains("durationSeconds")
-                           && !restriction["durationSeconds"].is_null();
+        bool hasDuration = restriction.contains("durationSeconds") && !restriction["durationSeconds"].is_null();
 
         if (moderationStatus == 1) {
             return {BanCheckResult::Warned, 0};
@@ -154,7 +153,7 @@ namespace Roblox {
             "https://users.roblox.com/v1/users/authenticated",
             {
                 {"Cookie", ".ROBLOSECURITY=" + cookie}
-            }
+        }
         );
 
         if (response.status_code < 200 || response.status_code >= 300) {
@@ -191,7 +190,7 @@ namespace Roblox {
             "https://users.roblox.com/v1/users/authenticated",
             {
                 {"Cookie", ".ROBLOSECURITY=" + cookie}
-            }
+        }
         );
 
         if (response.status_code < 200 || response.status_code >= 300) {
@@ -231,7 +230,7 @@ namespace Roblox {
                 "https://users.roblox.com/v1/users/authenticated",
                 {
                     {"Cookie", ".ROBLOSECURITY=" + cookie}
-                }
+            }
             );
 
             if (userResponse.status_code >= 200 && userResponse.status_code < 300) {
@@ -256,7 +255,7 @@ namespace Roblox {
 
             result.voiceSettings = getVoiceChatStatus(cookie);
             result.presence = presenceFuture.get();
-            //result.ageGroup = ageGroupFuture.get();
+            // result.ageGroup = ageGroupFuture.get();
         } else {
             result.presence = std::string(banResultToString(banInfo.status));
             result.voiceSettings = {"N/A", 0};
@@ -313,6 +312,69 @@ namespace Roblox {
         g_banCache.invalidate(cookie);
         g_userInfoCache.invalidate(cookie);
         CsrfManager::instance().invalidateToken(cookie);
+    }
+
+    ApiResult<std::string> refreshCookie(const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return std::unexpected(validationError);
+        }
+
+        LOG_INFO("Refreshing cookie");
+
+        auto intentResult = Hba::buildSecureAuthIntent(cookie);
+        if (!intentResult) {
+            LOG_ERROR("Failed to build secure auth intent");
+            return std::unexpected(intentResult.error());
+        }
+
+        nlohmann::json body = {
+            {"secureAuthenticationIntent", nlohmann::json::parse(*intentResult)}
+        };
+        std::string bodyStr = body.dump();
+
+        auto tokenResult = Hba::buildBoundAuthToken(
+            cookie,
+            "https://auth.roblox.com/v1/logoutfromallsessionsandreauthenticate",
+            bodyStr
+        );
+
+        auto response = authenticatedPost(
+            "https://auth.roblox.com/v1/logoutfromallsessionsandreauthenticate",
+            cookie,
+            bodyStr,
+            {
+                {"x-bound-auth-token", tokenResult ? *tokenResult : ""}
+        }
+        );
+
+        if (response.status_code < 200 || response.status_code >= 300) {
+            LOG_ERROR("Cookie refresh failed: HTTP {}", response.status_code);
+            return std::unexpected(httpStatusToError(response.status_code));
+        }
+
+        auto it = response.headers.find("set-cookie");
+        if (it == response.headers.end()) {
+            return std::unexpected(ApiError::InvalidResponse);
+        }
+
+        const std::string prefix = ".ROBLOSECURITY=";
+        auto pos = it->second.find(prefix);
+        if (pos == std::string::npos) {
+            return std::unexpected(ApiError::InvalidResponse);
+        }
+
+        pos += prefix.size();
+        auto end = it->second.find(';', pos);
+        std::string newCookie = it->second.substr(pos, end == std::string::npos ? end : end - pos);
+
+        if (newCookie.empty()) {
+            return std::unexpected(ApiError::InvalidResponse);
+        }
+
+        LOG_INFO("Cookie refreshed successfully");
+        invalidateCacheForCookie(cookie);
+        return newCookie;
     }
 
 } // namespace Roblox

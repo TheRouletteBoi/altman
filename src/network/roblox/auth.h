@@ -92,4 +92,6 @@ namespace Roblox {
 
     void invalidateCacheForCookie(const std::string &cookie);
 
+    ApiResult<std::string> refreshCookie(const std::string &cookie);
+
 } // namespace Roblox

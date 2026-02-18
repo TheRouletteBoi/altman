@@ -69,6 +69,10 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char *fi
 
 namespace AccountProcessor {
 
+    constexpr int UNUSED_DAYS_THRESHOLD = 20;
+    constexpr int RETRY_DAYS_THRESHOLD  = 7;
+    constexpr double SECONDS_PER_DAY = 86400.0;
+
     [[nodiscard]]
     std::vector<AccountSnapshot> takeAccountSnapshots() {
         std::shared_lock lock(g_accountsMutex);
@@ -204,6 +208,7 @@ namespace AccountProcessor {
             it->voiceStatus = result.voiceStatus;
             it->banExpiry = result.banExpiry;
             it->voiceBanExpiry = result.voiceBanExpiry;
+            it->cookieLastUse = std::time(nullptr);
 
             if (result.shouldDeselect) {
                 std::lock_guard selLock(g_selectionMutex);
@@ -238,6 +243,17 @@ namespace AccountProcessor {
                 Data::SaveAccounts();
             });
         });
+    }
+
+    bool shouldRefreshCookies(const AccountData& account) {
+        if (account.cookie.empty())
+            return false;
+
+        auto now = std::time(nullptr);
+        double daysSinceUse     = std::difftime(now, account.cookieLastUse)            / SECONDS_PER_DAY;
+        double daysSinceAttempt = std::difftime(now, account.cookieLastRefreshAttempt) / SECONDS_PER_DAY;
+
+        return daysSinceUse > UNUSED_DAYS_THRESHOLD && daysSinceAttempt >= RETRY_DAYS_THRESHOLD;
     }
 
 } // namespace AccountProcessor
@@ -310,6 +326,66 @@ void startAccountRefreshLoop() {
     });
 }
 
+void refreshAccountsCookies() {
+    std::vector<AccountProcessor::AccountSnapshot> snapshots;
+    {
+        std::shared_lock lock(g_accountsMutex);
+        snapshots = {g_accounts.begin(), g_accounts.end()};
+    }
+
+    for (const auto& snapshot : snapshots) {
+        if (!AccountProcessor::shouldRefreshCookies(snapshot))
+            continue;
+
+        LOG_INFO("Attempting cookie refresh for {} | Last use: {}", snapshot.username, snapshot.cookieLastUse);
+
+        {
+            std::unique_lock lock(g_accountsMutex);
+
+            auto it = std::ranges::find_if(g_accounts, [&](const AccountData& a) {
+                return a.id == snapshot.id;
+            });
+
+            if (it != g_accounts.end()) {
+                it->cookieLastRefreshAttempt = std::time(nullptr);
+            }
+            Data::SaveAccounts();
+        }
+
+        auto result = Roblox::refreshCookie(snapshot.cookie);
+
+        if (result) {
+            std::string newCookie = std::move(*result);
+            WorkerThreads::RunOnMain([id = snapshot.id, newCookie = std::move(newCookie)]() {
+                std::unique_lock lock(g_accountsMutex);
+                auto it = std::ranges::find_if(g_accounts, [id](const AccountData& a) {
+                    return a.id == id;
+                });
+                if (it != g_accounts.end()) {
+                    it->cookie = newCookie;
+                    Roblox::invalidateCacheForCookie(it->cookie);
+                }
+                Data::SaveAccounts();
+                LOG_INFO("Cookie refreshed and saved");
+            });
+        }
+        else {
+            LOG_ERROR("Cookie refresh failed for {}: {}", snapshot.username, Roblox::apiErrorToString(result.error()));
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+}
+
+void checkAndRefreshCookies() {
+    if (g_autoCookieRefresh) {
+        WorkerThreads::runBackground([] {
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+             refreshAccountsCookies();
+        });
+    }
+}
+
 void initializeAutoUpdater() {
     AutoUpdater::Initialize();
     AutoUpdater::SetBandwidthLimit(5_MB);
@@ -336,6 +412,7 @@ bool initializeApp() {
     Data::LoadFriends("friends.json");
 
     startAccountRefreshLoop();
+    //checkAndRefreshCookies();
 
     return true;
 }
