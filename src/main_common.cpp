@@ -208,7 +208,8 @@ namespace AccountProcessor {
             it->voiceStatus = result.voiceStatus;
             it->banExpiry = result.banExpiry;
             it->voiceBanExpiry = result.voiceBanExpiry;
-            it->cookieLastUse = std::time(nullptr);
+            if (it->status == "Online")
+                it->cookieLastUse = std::time(nullptr);
 
             if (result.shouldDeselect) {
                 std::lock_guard selLock(g_selectionMutex);
