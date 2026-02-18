@@ -296,6 +296,7 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
         CloseHandle(executionInfo.hProcess);
     }
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     LOG_INFO("Roblox launched for account: {}", acc.username);
     return true;
 }
@@ -338,7 +339,7 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
         return false;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     return true;
 }
@@ -357,7 +358,6 @@ void launchWithAccounts(const LaunchParams &params, const std::vector<AccountDat
 
         if (success) {
             LOG_INFO("Roblox launched for account ID: {}", acc.id);
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         } else {
             LOG_ERROR("Failed to start Roblox for account ID: {}", acc.id);
         }
