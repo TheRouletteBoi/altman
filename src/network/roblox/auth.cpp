@@ -74,7 +74,7 @@ namespace Roblox {
         return {BanCheckResult::Unbanned, 0, 0};
     }
 
-    BanInfo checkBanStatusV2(const std::string &cookie) {
+    BanInfo checkRestrictionStatus(const std::string &cookie) {
         LOG_INFO("Checking moderation status");
 
         HttpClient::Response response = HttpClient::rateLimitedGet(
@@ -107,16 +107,14 @@ namespace Roblox {
 
         const auto &restriction = j["restriction"];
 
+        int sourceStatus = restriction.value("source", 0);
+
         int moderationStatus = restriction.value("moderationStatus", 0);
 
         bool hasEndTime = restriction.contains("endTime") && restriction["endTime"].is_string()
                           && !restriction["endTime"].get<std::string>().empty();
 
         bool hasDuration = restriction.contains("durationSeconds") && !restriction["durationSeconds"].is_null();
-
-        if (moderationStatus == 1) {
-            return {BanCheckResult::Warned, 0, 0};
-        }
 
         if (hasEndTime) {
             time_t end = parseIsoTimestamp(restriction["endTime"].get<std::string>());
@@ -127,8 +125,24 @@ namespace Roblox {
             return {BanCheckResult::Banned, 0, 0};
         }
 
+        if (sourceStatus == 1) {
+            // Banned
+        }
+
+        if (sourceStatus == 2) {
+            // Screen time limit reached
+        }
+
+        if (sourceStatus == 5) {
+            // Account locked
+        }
+
         if (moderationStatus == 3) {
-            return {BanCheckResult::Terminated, 0, 0};
+            // Banned
+        }
+
+        if (moderationStatus == 2) {
+            // UnBanned
         }
 
         return {BanCheckResult::Banned, 0, 0};
