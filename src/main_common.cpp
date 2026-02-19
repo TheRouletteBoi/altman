@@ -140,12 +140,6 @@ namespace AccountProcessor {
                 result.shouldDeselect = true;
                 return result;
 
-            case Roblox::BanCheckResult::Locked:
-                result.status = "Locked";
-                result.voiceStatus = "N/A";
-                result.shouldDeselect = true;
-                return result;
-
             case Roblox::BanCheckResult::Warned:
                 result.status = "Warned";
                 result.shouldDeselect = true;

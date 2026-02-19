@@ -16,7 +16,6 @@ namespace Roblox {
     enum class BanCheckResult {
         NetworkError,
         InvalidCookie,
-        Locked,
         Unbanned,
         Banned,
         Warned,
@@ -33,8 +32,6 @@ namespace Roblox {
                 return "Unbanned";
             case BanCheckResult::Banned:
                 return "Banned";
-            case BanCheckResult::Locked:
-                return "Locked";
             case BanCheckResult::Warned:
                 return "Warned";
             case BanCheckResult::Terminated:
@@ -47,6 +44,7 @@ namespace Roblox {
     struct BanInfo {
             BanCheckResult status = BanCheckResult::NetworkError;
             time_t endDate = 0;
+            uint64_t punishedUserId = 0;
     };
 
     struct AuthenticatedUserInfo {

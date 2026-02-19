@@ -902,7 +902,7 @@ void RenderSettingsTab() {
                 "A refresh is attempted at most once every 7 days per account.\n\n"
                 "Warning: This will sign out all other active sessions on that account.\n"
                 "Note: Only works while the cookie is still valid.\n"
-                "Expired cookies must be re-logged in manually."
+                "Expired cookies must be relogged in manually."
             );
         }*/
 
