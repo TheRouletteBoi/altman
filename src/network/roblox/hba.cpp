@@ -122,7 +122,6 @@ namespace Roblox::Hba {
                 if (!privB64.empty()) {
                     auto rawKey = base64Decode(privB64, false);
                     if (rawKey.size() == 32) {
-                        LOG_INFO("[HBA] Restored keypair from disk");
                         std::unique_lock keyLock(g_keyMutex);
                         g_keyCache[cookie] = {account.hbaPublicKey, rawKey};
                         return KeyPair {account.hbaPublicKey, rawKey};
@@ -152,7 +151,6 @@ namespace Roblox::Hba {
 
         saveKeyPairToAccount(cookie, pubKeyB64, privKey);
 
-        LOG_INFO("[HBA] Generated and persisted new P-256 keypair");
         return KeyPair {pubKeyB64, privKey};
     }
 
@@ -180,6 +178,42 @@ namespace Roblox::Hba {
             return resp.text;
         } catch (...) {
             return resp.text;
+        }
+    }
+
+    ApiResult<std::string> fetchClientAssertion(const std::string &cookie) {
+        const std::string url = "https://auth.roblox.com/v1/client-assertion/";
+
+        auto tokenResult = buildBoundAuthToken(cookie, url, "");
+        if (!tokenResult) {
+            LOG_ERROR("[HBA] Failed to build bound auth token for client assertion");
+            return std::unexpected(tokenResult.error());
+        }
+
+        auto resp = HttpClient::get(
+            url,
+            {
+                {"Cookie",             ".ROBLOSECURITY=" + cookie},
+                {"Accept",             "application/json"        },
+                {"Origin",             "https://www.roblox.com"  },
+                {"Referer",            "https://www.roblox.com/" },
+                {"x-bound-auth-token", *tokenResult           }
+            }
+        );
+
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("[HBA] Failed to fetch client assertion: HTTP {}", resp.status_code);
+            return std::unexpected(httpStatusToError(resp.status_code));
+        }
+
+        try {
+            auto j = nlohmann::json::parse(resp.text);
+            if (!j.contains("clientAssertion") || !j["clientAssertion"].is_string()) {
+                return std::unexpected(ApiError::InvalidResponse);
+            }
+            return j["clientAssertion"].get<std::string>();
+        } catch (...) {
+            return std::unexpected(ApiError::ParseError);
         }
     }
 

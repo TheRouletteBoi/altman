@@ -363,6 +363,49 @@ namespace Roblox {
         return ticket->second;
     }
 
+    std::string fetchAuthTicketSecure(const std::string &cookie) {
+        if (!canUseCookie(cookie)) {
+            return "";
+        }
+
+        auto assertionResult = Hba::fetchClientAssertion(cookie);
+        if (!assertionResult) {
+            LOG_ERROR("Failed to fetch client assertion: {}", apiErrorToString(assertionResult.error()));
+            return "";
+        }
+
+        const std::string url = "https://auth.roblox.com/v1/authentication-ticket/";
+        const std::string body = nlohmann::json{{"clientAssertion", *assertionResult}}.dump();
+
+        auto tokenResult = Hba::buildBoundAuthToken(cookie, url, body);
+        if (!tokenResult) {
+            LOG_ERROR("Failed to build bound auth token for auth ticket");
+            return "";
+        }
+
+        auto response = authenticatedPost(
+            url,
+            cookie,
+            body,
+            {
+                {"x-bound-auth-token", *tokenResult}
+            }
+        );
+
+        if (response.status_code < 200 || response.status_code >= 300) {
+            LOG_ERROR("Failed to fetch auth ticket: HTTP {}", response.status_code);
+            return "";
+        }
+
+        auto it = response.headers.find("rbx-authentication-ticket");
+        if (it == response.headers.end()) {
+            LOG_ERROR("Failed to get authentication ticket from response headers");
+            return "";
+        }
+
+        return it->second;
+    }
+
     void clearAuthCaches() {
         g_banCache.clear();
         g_userInfoCache.clear();

@@ -102,6 +102,7 @@ namespace Roblox {
     std::string getDisplayName(const std::string &cookie);
 
     std::string fetchAuthTicket(const std::string &cookie);
+    std::string fetchAuthTicketSecure(const std::string &cookie);
 
     void clearAuthCaches();
 

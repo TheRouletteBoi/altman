@@ -16,6 +16,9 @@ namespace Roblox::Hba {
     // GET https://apis.roblox.com/hba-service/v1/getServerNonce
     ApiResult<std::string> fetchServerNonce(const std::string &cookie);
 
+    // GET https://auth.roblox.com/v1/client-assertion/
+    ApiResult<std::string> fetchClientAssertion(const std::string &cookie);
+
     // Build the full secureAuthenticationIntent JSON string
     ApiResult<std::string> buildSecureAuthIntent(const std::string &cookie);
 
