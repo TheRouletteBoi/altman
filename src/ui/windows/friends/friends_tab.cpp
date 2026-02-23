@@ -543,50 +543,6 @@ namespace {
                 }
             }
 
-            if (ImGui::BeginPopupContextItem("RequestContext")) {
-                if (ImGui::MenuItem("Copy Display Name")) {
-                    ImGui::SetClipboardText(req.displayName.c_str());
-                }
-                if (ImGui::MenuItem("Copy Username")) {
-                    ImGui::SetClipboardText(req.username.c_str());
-                }
-                if (ImGui::MenuItem("Copy User ID")) {
-                    ImGui::SetClipboardText(std::to_string(req.userId).c_str());
-                }
-                ImGui::Separator();
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.85f, 0.4f, 1.0f));
-                if (ImGui::MenuItem("Accept")) {
-                    const uint64_t uid = req.userId;
-                    const std::string cookie = account.cookie;
-                    WorkerThreads::runBackground([uid, cookie]() {
-                        Roblox::acceptFriendRequest(std::to_string(uid), cookie);
-                        std::lock_guard lock(g_requests.mutex);
-                        std::erase_if(g_requests.requests, [uid](const auto &r) { return r.userId == uid; });
-                    });
-                    if (g_requests.selectedIdx == static_cast<int>(idx)) {
-                        g_requests.selectedIdx = -1;
-                        g_requests.selectedDetail = {};
-                    }
-                }
-                ImGui::PopStyleColor();
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-                if (ImGui::MenuItem("Decline")) {
-                    const uint64_t uid = req.userId;
-                    const std::string cookie = account.cookie;
-                    WorkerThreads::runBackground([uid, cookie]() {
-                        Roblox::declineFriendRequest(std::to_string(uid), cookie);
-                        std::lock_guard lock(g_requests.mutex);
-                        std::erase_if(g_requests.requests, [uid](const auto &r) { return r.userId == uid; });
-                    });
-                    if (g_requests.selectedIdx == static_cast<int>(idx)) {
-                        g_requests.selectedIdx = -1;
-                        g_requests.selectedDetail = {};
-                    }
-                }
-                ImGui::PopStyleColor();
-                ImGui::EndPopup();
-            }
-
             ImGui::PopID();
         }
 
