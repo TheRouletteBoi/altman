@@ -287,9 +287,13 @@ namespace {
             WorkerThreads::runBackground([specs, cookie = account.cookie]() {
                 for (const auto &spec: specs) {
                     const uint64_t uid = spec.isId ? spec.id : Roblox::getUserIdFromUsername(spec.username);
-                    std::string resp;
-                    if (Roblox::sendFriendRequest(std::to_string(uid), cookie, &resp)) {
+                    Roblox::SocialActionResult social_action_result = Roblox::sendFriendRequestResult(std::to_string(uid), cookie);
+                    if (social_action_result.success)
                         LOG_INFO("Friend request sent");
+                    else {
+                        if (social_action_result.error != Roblox::ApiError::Success) {
+                            LOG_ERROR("Friend request Error: {}", Roblox::apiErrorToString(social_action_result.error));
+                        }
                     }
                 }
                 g_addFriend.loading = false;
@@ -498,6 +502,323 @@ namespace {
                 ImGui::PopID();
             }
         }
+    }
+
+    void renderRequestsList(const AccountData &account) {
+        const bool loading = g_requests.loading.load();
+        std::vector<Roblox::IncomingFriendRequest> snapshot;
+        {
+            std::lock_guard lock(g_requests.mutex);
+            snapshot = g_requests.requests;
+        }
+
+        if (loading && snapshot.empty()) {
+            ImGui::Text("Loading requests...");
+            return;
+        }
+
+        if (!loading && snapshot.empty()) {
+            ImGui::TextDisabled("No incoming friend requests.");
+            return;
+        }
+
+        for (std::size_t idx = 0; idx < snapshot.size(); ++idx) {
+            const auto &req = snapshot[idx];
+            ImGui::PushID(static_cast<int>(idx));
+
+            const std::string label = formatDisplayName(req.displayName, req.username);
+            const bool selected = (g_requests.selectedIdx == static_cast<int>(idx));
+
+            if (ImGui::Selectable(label.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns)) {
+                if (g_requests.selectedIdx != static_cast<int>(idx)) {
+                    g_requests.selectedIdx = static_cast<int>(idx);
+                    g_requests.selectedDetail = {};
+                    WorkerThreads::runBackground(
+                        FriendsActions::FetchFriendDetails,
+                        std::to_string(req.userId),
+                        account.cookie,
+                        std::ref(g_requests.selectedDetail),
+                        std::ref(g_requests.detailsLoading)
+                    );
+                }
+            }
+
+            if (ImGui::BeginPopupContextItem("RequestContext")) {
+                if (ImGui::MenuItem("Copy Display Name")) {
+                    ImGui::SetClipboardText(req.displayName.c_str());
+                }
+                if (ImGui::MenuItem("Copy Username")) {
+                    ImGui::SetClipboardText(req.username.c_str());
+                }
+                if (ImGui::MenuItem("Copy User ID")) {
+                    ImGui::SetClipboardText(std::to_string(req.userId).c_str());
+                }
+                ImGui::Separator();
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.85f, 0.4f, 1.0f));
+                if (ImGui::MenuItem("Accept")) {
+                    const uint64_t uid = req.userId;
+                    const std::string cookie = account.cookie;
+                    WorkerThreads::runBackground([uid, cookie]() {
+                        Roblox::acceptFriendRequest(std::to_string(uid), cookie);
+                        std::lock_guard lock(g_requests.mutex);
+                        std::erase_if(g_requests.requests, [uid](const auto &r) { return r.userId == uid; });
+                    });
+                    if (g_requests.selectedIdx == static_cast<int>(idx)) {
+                        g_requests.selectedIdx = -1;
+                        g_requests.selectedDetail = {};
+                    }
+                }
+                ImGui::PopStyleColor();
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+                if (ImGui::MenuItem("Decline")) {
+                    const uint64_t uid = req.userId;
+                    const std::string cookie = account.cookie;
+                    WorkerThreads::runBackground([uid, cookie]() {
+                        Roblox::declineFriendRequest(std::to_string(uid), cookie);
+                        std::lock_guard lock(g_requests.mutex);
+                        std::erase_if(g_requests.requests, [uid](const auto &r) { return r.userId == uid; });
+                    });
+                    if (g_requests.selectedIdx == static_cast<int>(idx)) {
+                        g_requests.selectedIdx = -1;
+                        g_requests.selectedDetail = {};
+                    }
+                }
+                ImGui::PopStyleColor();
+                ImGui::EndPopup();
+            }
+
+            ImGui::PopID();
+        }
+
+        {
+            std::lock_guard lock(g_requests.mutex);
+            if (!g_requests.nextCursor.empty() && !loading) {
+                if (ImGui::Button("Load more...")) {
+                    loadIncomingRequests(account.cookie, false);
+                }
+            }
+        }
+
+        if (loading && !snapshot.empty()) {
+            ImGui::TextDisabled("Loading more...");
+        }
+    }
+
+    void renderRequestDetails(const AccountData &account) {
+        constexpr float INDENT = 8.0f;
+
+        const int selIdx = g_requests.selectedIdx;
+
+        std::vector<Roblox::IncomingFriendRequest> snapshot;
+        {
+            std::lock_guard lock(g_requests.mutex);
+            snapshot = g_requests.requests;
+        }
+
+        if (selIdx < 0 || selIdx >= static_cast<int>(snapshot.size())) {
+            ImGui::Indent(INDENT);
+            ImGui::Spacing();
+            ImGui::TextWrapped("Click a request to see more details or take action.");
+            ImGui::Unindent(INDENT);
+            return;
+        }
+
+        if (g_requests.detailsLoading.load()) {
+            ImGui::Indent(INDENT);
+            ImGui::Spacing();
+            ImGui::Text("Loading full details...");
+            ImGui::Unindent(INDENT);
+            return;
+        }
+
+        const auto &detail = g_requests.selectedDetail;
+        const auto &req = snapshot[selIdx];
+
+        const bool hasDetail = (detail.id != 0);
+
+        constexpr ImGuiTableFlags tableFlags
+            = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit;
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
+
+        const std::vector<const char *> labels
+            = {"Display Name:", "Username:", "User ID:", "Friends:", "Followers:", "Following:", "Created:", "Description:"};
+        const float labelWidth = std::max(
+            ImGui::GetFontSize() * 7.5f,
+            std::ranges::max(labels | std::views::transform([](auto lbl) {
+                                 return ImGui::CalcTextSize(lbl).x;
+                             }))
+                + INDENT * 2.0f + ImGui::GetFontSize()
+        );
+
+        if (ImGui::BeginTable("RequestDetails", 2, tableFlags)) {
+            ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, labelWidth);
+            ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
+
+            auto addRow = [&](const char *label, const std::string &value, bool wrap = false) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Indent(INDENT);
+                ImGui::Spacing();
+                ImGui::TextUnformatted(label);
+                ImGui::Spacing();
+                ImGui::Unindent(INDENT);
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Indent(INDENT);
+                ImGui::Spacing();
+                ImGui::PushID(label);
+                if (wrap) {
+                    ImGui::TextWrapped("%s", value.c_str());
+                } else {
+                    ImGui::TextUnformatted(value.c_str());
+                }
+                if (ImGui::BeginPopupContextItem("Copy")) {
+                    if (ImGui::MenuItem("Copy")) {
+                        ImGui::SetClipboardText(value.c_str());
+                    }
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
+                ImGui::Spacing();
+                ImGui::Unindent(INDENT);
+            };
+
+            const std::string displayName = hasDetail
+                ? (detail.displayName.empty() ? detail.username : detail.displayName)
+                : (req.displayName.empty() ? req.username : req.displayName);
+            const std::string username = hasDetail ? detail.username : req.username;
+            const uint64_t userId = hasDetail ? detail.id : req.userId;
+
+            addRow("Display Name:", displayName);
+            addRow("Username:", username);
+            addRow("User ID:", std::to_string(userId));
+            if (hasDetail) {
+                addRow("Friends:", std::to_string(detail.friends));
+                addRow("Followers:", std::to_string(detail.followers));
+                addRow("Following:", std::to_string(detail.following));
+                addRow("Created:", formatAbsoluteWithRelativeFromIso(detail.createdIso));
+            } else {
+                addRow("Friends:", "—");
+                addRow("Followers:", "—");
+                addRow("Following:", "—");
+                addRow("Created:", "—");
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Indent(INDENT);
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Description:");
+            ImGui::Spacing();
+            ImGui::Unindent(INDENT);
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Indent(INDENT);
+            ImGui::Spacing();
+
+            const auto &style = ImGui::GetStyle();
+            const float reserved = style.ItemSpacing.y * 2 + ImGui::GetFrameHeightWithSpacing();
+            const float descHeight = std::max(
+                ImGui::GetContentRegionAvail().y - reserved,
+                ImGui::GetTextLineHeightWithSpacing() * 3.0f
+            );
+
+            const bool hasDesc = hasDetail && !detail.description.empty();
+            const std::string descStr = hasDesc ? detail.description : std::string("No description");
+
+            ImGui::PushID("ReqDescription");
+            ImGui::BeginChild("##DescScroll", ImVec2(0, descHeight - 4), false, ImGuiWindowFlags_HorizontalScrollbar);
+            if (hasDesc) {
+                ImGui::TextWrapped("%s", descStr.c_str());
+            } else {
+                ImGui::TextDisabled("%s", descStr.c_str());
+            }
+            if (ImGui::BeginPopupContextItem("CopyDesc")) {
+                if (ImGui::MenuItem("Copy")) {
+                    ImGui::SetClipboardText(descStr.c_str());
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::EndChild();
+            ImGui::PopID();
+
+            ImGui::Spacing();
+            ImGui::Unindent(INDENT);
+            ImGui::EndTable();
+        }
+        ImGui::PopStyleVar();
+
+        ImGui::Separator();
+        ImGui::Indent(INDENT / 2);
+
+        const uint64_t uid = req.userId;
+        const std::string cookie = account.cookie;
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.55f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.65f, 0.25f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.45f, 0.15f, 1.0f));
+        if (ImGui::Button("Accept")) {
+            WorkerThreads::runBackground([uid, cookie]() {
+                Roblox::acceptFriendRequest(std::to_string(uid), cookie);
+                std::lock_guard lock(g_requests.mutex);
+                std::erase_if(g_requests.requests, [uid](const auto &r) { return r.userId == uid; });
+            });
+            g_requests.selectedIdx = -1;
+            g_requests.selectedDetail = {};
+        }
+        ImGui::PopStyleColor(3);
+
+        ImGui::SameLine();
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.2f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.65f, 0.25f, 0.25f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.45f, 0.15f, 0.15f, 1.0f));
+        if (ImGui::Button("Decline")) {
+            WorkerThreads::runBackground([uid, cookie]() {
+                Roblox::declineFriendRequest(std::to_string(uid), cookie);
+                std::lock_guard lock(g_requests.mutex);
+                std::erase_if(g_requests.requests, [uid](const auto &r) { return r.userId == uid; });
+            });
+            g_requests.selectedIdx = -1;
+            g_requests.selectedDetail = {};
+        }
+        ImGui::PopStyleColor(3);
+
+        ImGui::SameLine();
+        if (ImGui::Button((std::string(ICON_OPEN_LINK) + " Open Page").c_str())) {
+            ImGui::OpenPopup("ReqProfileContext");
+        }
+        ImGui::OpenPopupOnItemClick("ReqProfileContext");
+
+        if (ImGui::BeginPopup("ReqProfileContext")) {
+            std::string viewCookie;
+            std::string viewUserId;
+            if (!g_selectedAccountIds.empty()) {
+                if (const AccountData *acc = getAccountById(*g_selectedAccountIds.begin())) {
+                    viewCookie = acc->cookie;
+                    viewUserId = acc->userId;
+                }
+            }
+            const auto uidStr = std::to_string(uid);
+            if (ImGui::MenuItem("Profile")) {
+                LaunchWebviewImpl("https://www.roblox.com/users/" + uidStr + "/profile", "Roblox Profile", viewCookie, viewUserId);
+            }
+            if (ImGui::MenuItem("Friends")) {
+                LaunchWebviewImpl("https://www.roblox.com/users/" + uidStr + "/friends", "Friends", viewCookie, viewUserId);
+            }
+            if (ImGui::MenuItem("Favorites")) {
+                LaunchWebviewImpl("https://www.roblox.com/users/" + uidStr + "/favorites", "Favorites", viewCookie, viewUserId);
+            }
+            if (ImGui::MenuItem("Inventory")) {
+                LaunchWebviewImpl("https://www.roblox.com/users/" + uidStr + "/inventory/#!/accessories", "Inventory", viewCookie, viewUserId);
+            }
+            if (ImGui::MenuItem("Rolimons")) {
+                LaunchWebviewImpl("https://www.rolimons.com/player/" + uidStr, "Rolimons");
+            }
+            ImGui::EndPopup();
+        }
+
+        ImGui::Unindent(INDENT / 2);
     }
 
     void renderFriendDetails() {
@@ -835,7 +1156,11 @@ void RenderFriendsTab() {
     const float listWidth = std::clamp(availWidth * 0.28f, MIN_LIST_WIDTH, MAX_LIST_WIDTH);
 
     ImGui::BeginChild("##FriendsList", ImVec2(listWidth, 0), true);
-    renderFriendsList();
+    if (g_state.viewMode == VIEW_MODE_FRIENDS) {
+        renderFriendsList();
+    } else {
+        renderRequestsList(*account);
+    }
     ImGui::EndChild();
 
     ImGui::SameLine();
@@ -843,6 +1168,10 @@ void RenderFriendsTab() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::BeginChild("##Details", ImVec2(0, 0), true);
     ImGui::PopStyleVar();
-    renderFriendDetails();
+    if (g_state.viewMode == VIEW_MODE_FRIENDS) {
+        renderFriendDetails();
+    } else {
+        renderRequestDetails(*account);
+    }
     ImGui::EndChild();
 }

@@ -22,6 +22,15 @@ namespace Roblox {
         Terminated
     };
 
+    enum class RestrictionCheckResult {
+        Unknown0,
+        Banned,
+        ScreenTimeLimit,
+        Unknown3,
+        Unknown4,
+        AccountLocked
+    };
+
     constexpr std::string_view banResultToString(BanCheckResult result) noexcept {
         switch (result) {
             case BanCheckResult::NetworkError:
@@ -47,6 +56,14 @@ namespace Roblox {
             uint64_t punishedUserId = 0;
     };
 
+    struct RestrictionInfo {
+        RestrictionCheckResult status = RestrictionCheckResult::Unknown0;
+        int moderationStatus = 0;
+        time_t startDate = 0;
+        time_t endDate = 0;
+        uint64_t durationSeconds = 0;
+    };
+
     struct AuthenticatedUserInfo {
             uint64_t userId = 0;
             std::string username;
@@ -68,7 +85,7 @@ namespace Roblox {
     BanInfo checkBanStatus(const std::string &cookie);
 
     // Get cached ban status (uses TTL cache, 30 minute expiry)
-    BanCheckResult cachedBanStatus(const std::string &cookie);
+    RestrictionInfo checkRestrictionStatus(const std::string &cookie);
 
     // Refresh ban status (invalidates cache and re-fetches)
     BanCheckResult refreshBanStatus(const std::string &cookie);

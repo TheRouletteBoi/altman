@@ -449,25 +449,7 @@ namespace Roblox {
         return page;
     }
 
-    bool acceptFriendRequest(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
-        if (!canUseCookie(cookie)) {
-            if (outResponse) {
-                *outResponse = "Banned/warned cookie";
-            }
-            return false;
-        }
-
-        std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/accept-friend-request";
-
-        auto resp = authenticatedPost(url, cookie);
-
-        if (outResponse) {
-            *outResponse = resp.text;
-        }
-        return resp.status_code >= 200 && resp.status_code < 300;
-    }
-
-    SocialActionResult acceptFriendRequestResult(const std::string &targetUserId, const std::string &cookie) {
+    SocialActionResult acceptFriendRequest(const std::string &targetUserId, const std::string &cookie) {
         ApiError validationError = validateCookieForRequest(cookie);
         if (validationError != ApiError::Success) {
             return {false, std::string(apiErrorToString(validationError)), validationError};
@@ -478,6 +460,22 @@ namespace Roblox {
 
         if (resp.status_code >= 200 && resp.status_code < 300) {
             return {true, "Friend request accepted", ApiError::Success};
+        }
+
+        return {false, resp.text, httpStatusToError(resp.status_code)};
+    }
+
+    SocialActionResult declineFriendRequest(const std::string &targetUserId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return {false, std::string(apiErrorToString(validationError)), validationError};
+        }
+
+        std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/decline-friend-request";
+        auto resp = authenticatedPost(url, cookie);
+
+        if (resp.status_code >= 200 && resp.status_code < 300) {
+            return {true, "Friend request declined", ApiError::Success};
         }
 
         return {false, resp.text, httpStatusToError(resp.status_code)};

@@ -67,13 +67,9 @@ namespace Roblox {
     FriendRequestsPage
     getIncomingFriendRequests(const std::string &cookie, const std::string &cursor = {}, int limit = 100);
 
-    bool acceptFriendRequest(
-        const std::string &targetUserId,
-        const std::string &cookie,
-        std::string *outResponse = nullptr
-    );
+    SocialActionResult acceptFriendRequest(const std::string &targetUserId, const std::string &cookie);
 
-    SocialActionResult acceptFriendRequestResult(const std::string &targetUserId, const std::string &cookie);
+    SocialActionResult declineFriendRequest(const std::string &targetUserId, const std::string &cookie);
 
     bool sendFriendRequest(
         const std::string &targetUserId,

@@ -74,7 +74,7 @@ namespace Roblox {
         return {BanCheckResult::Unbanned, 0, 0};
     }
 
-    BanInfo checkRestrictionStatus(const std::string &cookie) {
+    RestrictionInfo checkRestrictionStatus(const std::string &cookie) {
         LOG_INFO("Checking moderation status");
 
         HttpClient::Response response = HttpClient::rateLimitedGet(
@@ -88,21 +88,21 @@ namespace Roblox {
             LOG_ERROR("Failed moderation check: HTTP {}", response.status_code);
 
             if (response.status_code == 401 || response.status_code == 403) {
-                return {BanCheckResult::InvalidCookie, 0, 0};
+                return {RestrictionCheckResult::Unknown0, 0, 0, 0, 0};
             }
 
             if (response.status_code == 429) {
                 HttpClient::RateLimiter::instance().backoff(std::chrono::seconds(2));
-                return {BanCheckResult::NetworkError, 0, 0};
+                return {RestrictionCheckResult::Unknown0, 0, 0, 0, 0};
             }
 
-            return {BanCheckResult::NetworkError, 0, 0};
+            return {RestrictionCheckResult::Unknown0, 0, 0, 0, 0};
         }
 
         auto j = HttpClient::decode(response);
 
         if (!j.is_object() || !j.contains("restriction") || j["restriction"].is_null()) {
-            return {BanCheckResult::Unbanned, 0, 0};
+            return {RestrictionCheckResult::Unknown0, 0, 0, 0, 0};
         }
 
         const auto &restriction = j["restriction"];
@@ -118,11 +118,11 @@ namespace Roblox {
 
         if (hasEndTime) {
             time_t end = parseIsoTimestamp(restriction["endTime"].get<std::string>());
-            return {BanCheckResult::Banned, end, 0};
+            return {RestrictionCheckResult::Banned, moderationStatus, 0, end, 0};
         }
 
         if (hasDuration) {
-            return {BanCheckResult::Banned, 0, 0};
+            return {RestrictionCheckResult::Banned, moderationStatus, 0, 0, 0};
         }
 
         if (sourceStatus == 1) {
@@ -145,7 +145,7 @@ namespace Roblox {
             // UnBanned
         }
 
-        return {BanCheckResult::Banned, 0, 0};
+        return {RestrictionCheckResult::Banned, moderationStatus, 0, 0, 0};
     }
 
     BanCheckResult cachedBanStatus(const std::string &cookie) {
