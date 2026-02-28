@@ -203,6 +203,46 @@ namespace {
         return {false, true};
     }
 
+    void addPrivateServerHistory(const std::string &link) {
+        auto &h = g_privateServerHistory;
+        std::erase(h, link);
+        h.insert(h.begin(), link);
+        if (static_cast<int>(h.size()) > k_privateServerHistoryMax) {
+            h.resize(k_privateServerHistoryMax);
+        }
+        Data::SavePrivateServerHistory();
+    }
+
+    void renderPrivateServerHistoryContextMenu() {
+        ImGui::OpenPopupOnItemClick("##PSHistoryCtx", ImGuiPopupFlags_MouseButtonRight);
+
+        if (ImGui::BeginPopup("##PSHistoryCtx")) {
+            if (g_privateServerHistory.empty()) {
+                ImGui::TextDisabled("No recent links");
+            } else {
+                ImGui::TextDisabled("Recent private server links");
+                ImGui::Separator();
+                for (int i = 0; i < static_cast<int>(g_privateServerHistory.size()); ++i) {
+                    const auto &entry = g_privateServerHistory[i];
+
+                    const std::string label = entry.size() > 60
+                        ? "..." + entry.substr(entry.size() - 60)
+                        : entry;
+
+                    if (ImGui::Selectable(std::format("{}##psh{}", label, i).c_str())) {
+                        std::strncpy(join_value_buf, entry.c_str(), sizeof(join_value_buf) - 1);
+                        join_value_buf[sizeof(join_value_buf) - 1] = '\0';
+                    }
+                }
+                ImGui::Separator();
+                if (ImGui::Selectable("Clear history")) {
+                    g_privateServerHistory.clear();
+                    Data::SavePrivateServerHistory();
+                }
+            }
+            ImGui::EndPopup();
+        }
+    }
 
     void handleJoinByUser(std::string userInput) {
         auto accountPtrs = getUsableSelectedAccounts();
@@ -244,6 +284,7 @@ namespace {
     }
 
     void handleJoinByPrivateServer(std::string serverLink) {
+        addPrivateServerHistory(serverLink);
         launchWithSelectedAccounts(LaunchParams::privateServer(serverLink));
     }
 
@@ -289,7 +330,7 @@ namespace {
         } else if (joinType == JoinType::Game) {
             showError = validatePlaceId(join_value_buf).showError;
         } else if (joinType == JoinType::GameServer) {
-            // showError = validateJobId(join_value_buf).showError;
+            showError = validateJobId(join_jobid_buf).showError;
         } else if (joinType == JoinType::User) {
             showError = validateUserInput(join_value_buf).showError;
         }
@@ -307,6 +348,10 @@ namespace {
             endErrorBorder();
         }
         ImGui::PopItemWidth();
+
+        if (joinType == JoinType::PrivateServer) {
+            renderPrivateServerHistoryContextMenu();
+        }
     }
 
     bool canJoin(int joinType) {

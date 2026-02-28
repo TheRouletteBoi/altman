@@ -553,6 +553,60 @@ namespace Data {
         LOG_INFO("Saved friend data");
     }
 
+    void LoadPrivateServerHistory(std::string_view filename) {
+        const auto path = AltMan::Paths::Config(filename).string();
+        std::ifstream fin {path};
+
+        if (!fin.is_open()) {
+            LOG_INFO("No {}, starting with empty private server history", path);
+            return;
+        }
+
+        try {
+            nlohmann::json arr;
+            fin >> arr;
+
+            if (!arr.is_array()) {
+                LOG_ERROR("Invalid private_server_history.json format");
+                return;
+            }
+
+            g_privateServerHistory.clear();
+            g_privateServerHistory.reserve(std::min(arr.size(), static_cast<std::size_t>(k_privateServerHistoryMax)));
+
+            for (const auto &item: arr) {
+                if (item.is_string()) {
+                    g_privateServerHistory.push_back(item.get<std::string>());
+                    if (static_cast<int>(g_privateServerHistory.size()) >= k_privateServerHistoryMax) {
+                        break;
+                    }
+                }
+            }
+
+            LOG_INFO("Loaded {} private server history entries", g_privateServerHistory.size());
+        } catch (const std::exception &e) {
+            LOG_ERROR("Failed to parse {}: {}", filename, e.what());
+        }
+    }
+
+    void SavePrivateServerHistory(std::string_view filename) {
+        const auto path = AltMan::Paths::Config(filename).string();
+        std::ofstream out {path};
+
+        if (!out.is_open()) {
+            LOG_ERROR("Could not open '{}' for writing", path);
+            return;
+        }
+
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto &link: g_privateServerHistory) {
+            arr.push_back(link);
+        }
+
+        out << arr.dump(4);
+        LOG_INFO("Saved {} private server history entries", g_privateServerHistory.size());
+    }
+
     std::optional<std::string> encryptLocalData(std::string_view plaintext) {
         if (plaintext.empty()) {
             return "";

@@ -393,7 +393,7 @@ void refreshAccountsCookies() {
     }
 }
 
-void checkAndRefreshCookies() {
+void checkAndRefreshCookiesLoop() {
     if (g_autoCookieRefresh) {
         WorkerThreads::runBackground([] {
             std::this_thread::sleep_for(std::chrono::seconds(30));
@@ -426,9 +426,11 @@ bool initializeApp() {
 
     Data::LoadAccounts("accounts.json");
     Data::LoadFriends("friends.json");
+    Data::LoadFavorites("favorites.json");
+    Data::LoadPrivateServerHistory("private_server_history.json");
 
     startAccountRefreshLoop();
-    //checkAndRefreshCookies();
+    //checkAndRefreshCookiesLoop();
 
     return true;
 }

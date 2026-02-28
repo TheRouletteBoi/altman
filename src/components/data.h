@@ -80,6 +80,8 @@ inline bool g_forceLatestRobloxVersion = false;
 inline std::vector<std::string> g_availableClientsNames = {"Default", "MacSploit", "Hydrogen", "Delta"};
 inline bool g_privacyModeEnabled = false;
 inline bool g_autoCookieRefresh = false;
+inline std::vector<std::string> g_privateServerHistory;
+constexpr int k_privateServerHistoryMax = 20;
 
 void invalidateAccountIndex();
 AccountData *getAccountById(int id);
@@ -105,4 +107,7 @@ namespace Data {
 
     void LoadFriends(std::string_view filename = "friends.json");
     void SaveFriends(std::string_view filename = "friends.json");
+
+    void LoadPrivateServerHistory(std::string_view filename = "private_server_history.json");
+    void SavePrivateServerHistory(std::string_view filename = "private_server_history.json");
 } // namespace Data
