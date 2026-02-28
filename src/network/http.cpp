@@ -208,6 +208,20 @@ namespace HttpClient {
         return {static_cast<int>(r.status_code), r.text, hdrs, r.url.str()};
     }
 
+    Response patch(
+        const std::string &url,
+        std::span<const std::pair<std::string, std::string>> headers,
+        const std::string &jsonBody
+    ) {
+        cpr::Header cprHdr;
+        for (const auto &[k, v]: headers) {
+            cprHdr.emplace(k, v);
+        }
+        auto r = cpr::Patch(cpr::Url {url}, cprHdr, cpr::Body {jsonBody});
+        std::map<std::string, std::string> hdrs(r.header.begin(), r.header.end());
+        return {static_cast<int>(r.status_code), r.text, hdrs, r.url.str()};
+    }
+
     bool download(
         const std::string &url,
         const std::string &output_path,

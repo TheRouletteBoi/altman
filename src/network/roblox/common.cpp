@@ -95,6 +95,66 @@ namespace Roblox {
         return resp;
     }
 
+    HttpClient::Response authenticatedPatch(
+        const std::string &url,
+        const std::string &cookie,
+        const std::string &jsonBody,
+        std::initializer_list<std::pair<const std::string, std::string>> extraHeaders
+    ) {
+        auto &csrfMgr = CsrfManager::instance();
+
+        auto buildHeaders = [&](const std::string &csrf) {
+            std::string browserId = generateBrowserTrackerId();
+            std::string cookieHeader
+                = std::format(".ROBLOSECURITY={}; RBXEventTrackerV2=browserid={}", cookie, browserId);
+            std::vector<std::pair<std::string, std::string>> headers = {
+                {"Cookie",  cookieHeader           },
+                {"Accept",  "application/json"        },
+                {"Origin",  "https://www.roblox.com"  },
+                {"Referer", "https://www.roblox.com/" }
+            };
+
+            if (!csrf.empty()) {
+                headers.emplace_back("X-CSRF-TOKEN", csrf);
+            }
+
+            if (!jsonBody.empty()) {
+                headers.emplace_back("Content-Type", "application/json");
+            }
+
+            for (const auto &[key, value]: extraHeaders) {
+                headers.emplace_back(key, value);
+            }
+
+            return headers;
+        };
+
+        std::string csrf = csrfMgr.getToken(cookie);
+        auto headers = buildHeaders(csrf);
+
+        HttpClient::Response resp = HttpClient::patch(url, {headers.begin(), headers.end()}, jsonBody);
+
+        if (resp.status_code == 403) {
+            auto it = resp.headers.find("x-csrf-token");
+            if (it != resp.headers.end() && !it->second.empty()) {
+                LOG_INFO("CSRF token expired, retrying with new token");
+                csrfMgr.updateToken(cookie, it->second);
+
+                headers = buildHeaders(it->second);
+                resp = HttpClient::patch(url, {headers.begin(), headers.end()}, jsonBody);
+            }
+        }
+
+        if (resp.status_code >= 200 && resp.status_code < 300) {
+            auto it = resp.headers.find("x-csrf-token");
+            if (it != resp.headers.end() && !it->second.empty()) {
+                csrfMgr.updateToken(cookie, it->second);
+            }
+        }
+
+        return resp;
+    }
+
     ApiError validateCookieForRequest(const std::string &cookie) {
         if (cookie.empty()) {
             return ApiError::InvalidInput;

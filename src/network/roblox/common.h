@@ -221,6 +221,13 @@ namespace Roblox {
         std::initializer_list<std::pair<const std::string, std::string>> extraHeaders = {}
     );
 
+    HttpClient::Response authenticatedPatch(
+       const std::string &url,
+       const std::string &cookie,
+       const std::string &jsonBody = {},
+       std::initializer_list<std::pair<const std::string, std::string>> extraHeaders = {}
+   );
+
     enum class BanCheckResult;
     BanCheckResult cachedBanStatus(const std::string &cookie);
 

@@ -97,6 +97,12 @@ namespace HttpClient {
         int max_redirects = 10
     );
 
+    Response patch(
+        const std::string &url,
+        std::span<const std::pair<std::string, std::string>> headers,
+        const std::string &jsonBody
+    );
+
     Response rateLimitedPost(
         const std::string &url,
         const std::vector<std::pair<std::string, std::string>> &headers,
