@@ -448,7 +448,11 @@ namespace {
 
     class PrivateServerUI {
         public:
-            int selectedTab = 0;
+            enum class ServerType {
+                MyServers,
+                JoinableServers,
+            };
+            ServerType selectedTab = ServerType::JoinableServers;
 
         private:
             std::vector<PrivateServer> servers;
@@ -461,13 +465,13 @@ namespace {
             std::vector<std::string> cursorHistory;
 
         public:
-            void loadServers(int tabType, const AccountData &account, const std::string &cursor = {}) {
+            void loadServers(ServerType tabType, const AccountData &account, const std::string &cursor = {}) {
                 isLoading = true;
                 errorMessage.clear();
 
                 WorkerThreads::runBackground([this, tabType, cookie = account.cookie, cursor]() {
                     try {
-                        auto page = Roblox::getAllPrivateServers(tabType, cookie, cursor);
+                        auto page = Roblox::getAllPrivateServers(static_cast<int>(tabType), cookie, cursor);
 
                         servers.clear();
                         for (const auto &info: page.data) {
@@ -589,7 +593,7 @@ namespace {
                         "The new link will be copied to your clipboard.",
                         server.name
                     ),
-                    [this, vipServerId = server.vipServerId, cookie]() {
+                    [vipServerId = server.vipServerId, cookie]() {
                         WorkerThreads::runBackground([vipServerId, cookie]() {
                             auto result = Roblox::regenerateVipServerLink(vipServerId, cookie);
                             if (result) {
@@ -619,21 +623,21 @@ namespace {
 
                 if (ImGui::BeginTabBar("PrivateServerTabs")) {
                     if (ImGui::BeginTabItem("Joinable Servers")) {
-                        if (selectedTab != 1) {
-                            selectedTab = 1;
+                        if (selectedTab != ServerType::JoinableServers) {
+                            selectedTab = ServerType::JoinableServers;
                             currentCursor.clear();
                             cursorHistory.clear();
-                            loadServers(1, account);
+                            loadServers(ServerType::JoinableServers, account);
                         }
                         ImGui::EndTabItem();
                     }
 
                     if (ImGui::BeginTabItem("My Servers")) {
-                        if (selectedTab != 0) {
-                            selectedTab = 0;
+                        if (selectedTab != ServerType::MyServers) {
+                            selectedTab = ServerType::MyServers;
                             currentCursor.clear();
                             cursorHistory.clear();
-                            loadServers(0, account);
+                            loadServers(ServerType::MyServers, account);
                         }
                         ImGui::EndTabItem();
                     }
@@ -716,7 +720,7 @@ namespace {
         private:
             void renderTable(const std::vector<PrivateServer> &displayList, const std::string &cookie) {
                 RowMetrics metrics = calculateRowMetrics();
-                const int columnCount = selectedTab == 1 ? 4 : 5;
+                const int columnCount = selectedTab == ServerType::JoinableServers ? 4 : 5;
                 constexpr ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
                                                   | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
 
@@ -734,7 +738,7 @@ namespace {
                 ImGui::TableSetupColumn("Server Name", ImGuiTableColumnFlags_WidthFixed, base * 11.25f);
                 ImGui::TableSetupColumn("Game", ImGuiTableColumnFlags_WidthStretch);
 
-                if (selectedTab == 0) {
+                if (selectedTab == ServerType::MyServers) {
                     ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, base * 4.375f);
                     ImGui::TableSetupColumn("Renew", ImGuiTableColumnFlags_WidthFixed, base * 3.75f);
                 } else {
@@ -759,7 +763,7 @@ namespace {
                             ImVec2(0, rowMetrics.height)
                         );
 
-                        if (selectedTab == 0 && ImGui::BeginPopupContextItem("##PrivateServerRowCtx")) {
+                        if (selectedTab == ServerType::MyServers && ImGui::BeginPopupContextItem("##PrivateServerRowCtx")) {
                             if (ImGui::MenuItem("Copy Share Link")) {
                                 const_cast<PrivateServerUI *>(this)->copyShareLink(server, cookie);
                             }
@@ -778,7 +782,7 @@ namespace {
                     ImGui::TableNextColumn();
                     ImGui::TextWrapped("%s", server.universeName.c_str());
 
-                    if (selectedTab == 0) {
+                    if (selectedTab == ServerType::MyServers) {
                         ImGui::TableNextColumn();
                         if (server.active) {
                             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 1.0f, 0.3f, 1.0f));
@@ -811,7 +815,7 @@ namespace {
                         ImGui::BeginTooltip();
                         ImGui::Text("Server ID: %llu", server.vipServerId);
                         ImGui::Text("Place ID: %llu", server.placeId);
-                        if (selectedTab == 0) {
+                        if (selectedTab == ServerType::MyServers) {
                             if (!server.expirationDate.empty()) {
                                 ImGui::Text("Expires: %s", server.expirationDate.c_str());
                             }
@@ -860,7 +864,10 @@ namespace {
 
         if (lastAccountId != primaryId) {
             lastAccountId = primaryId;
-            ui.loadServers(ui.selectedTab == 1 ? 1 : 0, *account);
+            ui.loadServers(
+                ui.selectedTab == PrivateServerUI::ServerType::JoinableServers ?
+                PrivateServerUI::ServerType::JoinableServers : PrivateServerUI::ServerType::MyServers,
+                *account);
         }
 
         ui.render(*account);
