@@ -277,7 +277,7 @@ namespace Roblox {
 
 } // namespace Roblox
 
-ImVec4 getStatusColor(std::string statusCode);
+ImVec4 getStatusColor(const std::string& statusCode);
 
 std::string generateSessionId();
 std::string presenceTypeToString(int type);

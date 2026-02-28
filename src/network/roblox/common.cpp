@@ -182,32 +182,22 @@ namespace Roblox {
 
 } // namespace Roblox
 
-ImVec4 getStatusColor(std::string statusCode) {
-    if (statusCode == "Online") {
-        return ImVec4(0.6f, 0.8f, 0.95f, 1.0f);
-    }
-    if (statusCode == "InGame") {
-        return ImVec4(0.6f, 0.9f, 0.7f, 1.0f);
-    }
-    if (statusCode == "InStudio") {
-        return ImVec4(1.0f, 0.85f, 0.7f, 1.0f);
-    }
-    if (statusCode == "Invisible") {
-        return ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
-    }
-    if (statusCode == "Banned") {
-        return ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
-    }
-    if (statusCode == "Warned") {
-        return ImVec4(1.0f, 0.8f, 0.0f, 1.0f);
-    }
-    if (statusCode == "Terminated") {
-        return ImVec4(0.8f, 0.1f, 0.1f, 1.0f);
-    }
-    if (statusCode == "InvalidCookie") {
-        return ImVec4(0.9f, 0.4f, 0.9f, 1.0f);
-    }
-    return ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+ImVec4 getStatusColor(const std::string& statusCode) {
+    static const std::unordered_map<std::string, ImVec4> colors = {
+        {"Online",           {0.6f, 0.8f,  0.95f, 1.0f}},
+        {"InGame",           {0.6f, 0.9f,  0.7f,  1.0f}},
+        {"InStudio",         {1.0f, 0.85f, 0.7f,  1.0f}},
+        {"Invisible",        {0.8f, 0.8f,  0.8f,  1.0f}},
+        {"Banned",           {1.0f, 0.3f,  0.3f,  1.0f}},
+        {"Warned",           {1.0f, 0.8f,  0.0f,  1.0f}},
+        {"Terminated",       {0.8f, 0.1f,  0.1f,  1.0f}},
+        {"InvalidCookie",    {0.9f, 0.4f,  0.9f,  1.0f}},
+        {"Locked",           {1.0f, 0.6f,  0.1f,  1.0f}},
+        {"Screen Time Limit",{0.5f, 0.7f,  1.0f,  1.0f}},
+    };
+
+    auto it = colors.find(statusCode);
+    return it != colors.end() ? it->second : ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
 }
 
 std::string generateSessionId() {

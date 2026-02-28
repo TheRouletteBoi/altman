@@ -238,16 +238,25 @@ namespace {
         ImGui::TextColored(statusColor, "%s", account.status.c_str());
 
         if (ImGui::IsItemHovered()) {
-            ImGui::BeginTooltip();
             if (account.status == "Banned" && account.banExpiry > 0) {
+                ImGui::BeginTooltip();
                 const auto timeStr = formatCountdown(account.banExpiry);
                 ImGui::TextUnformatted(timeStr.c_str());
+                ImGui::EndTooltip();
             } else if (account.status == "InGame" && !account.lastLocation.empty()) {
+                ImGui::BeginTooltip();
                 ImGui::TextUnformatted(account.lastLocation.c_str());
-            } else {
-                ImGui::TextUnformatted(" ");
+                ImGui::EndTooltip();
+            } else if (account.status == "Locked") {
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted("Account locked: suspicious activity detected,");
+                ImGui::TextUnformatted("Human verification required to unlock.");
+                ImGui::EndTooltip();
+            } else if (account.status == "Screen Time Limit") {
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted("Account has an active parental screen time restriction.");
+                ImGui::EndTooltip();
             }
-            ImGui::EndTooltip();
         }
 
         ImGui::SetCursorPosY(currentY + rowHeight);
@@ -264,18 +273,20 @@ namespace {
         ImGui::TextColored(voiceColor, "%s", account.voiceStatus.c_str());
 
         if (ImGui::IsItemHovered()) {
-            ImGui::BeginTooltip();
             if (account.voiceStatus == "Banned" && account.voiceBanExpiry > 0) {
+                ImGui::BeginTooltip();
                 const auto timeStr = formatCountdown(account.voiceBanExpiry);
                 ImGui::TextUnformatted(timeStr.c_str());
+                ImGui::EndTooltip();
             } else if (account.voiceStatus == "Unknown") {
+                ImGui::BeginTooltip();
                 ImGui::TextUnformatted("HTTP request returned an error");
+                ImGui::EndTooltip();
             } else if (account.voiceStatus == "N/A") {
+                ImGui::BeginTooltip();
                 ImGui::TextUnformatted("HTTP request unavailable");
-            } else {
-                ImGui::TextUnformatted("");
+                ImGui::EndTooltip();
             }
-            ImGui::EndTooltip();
         }
 
         ImGui::SetCursorPosY(currentY + rowHeight);
