@@ -328,13 +328,10 @@ namespace {
         if (ImGui::Selectable(
                 selectableId.c_str(),
                 false,
-                ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap
-                    | ImGuiSelectableFlags_AllowDoubleClick,
+                ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
                 ImVec2(0, metrics.height)
-            )
-            && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            )) {
 
-            launchWithSelectedAccounts(LaunchParams::gameJob(g_state.currentPlaceId, server.jobId));
         }
 
         if (ImGui::BeginPopupContextItem("ServerRowContextMenu")) {
