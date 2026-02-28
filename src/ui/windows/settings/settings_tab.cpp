@@ -421,7 +421,7 @@ namespace {
             ImGui::TextDisabled("(?)");
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "Environments store per-account Roblox data including:\n"
+                    "Environments store per account Roblox data including:\n"
                     "- Documents folder\n"
                     "- Cache files\n"
                     "- Client copies\n\n"
@@ -854,7 +854,7 @@ void RenderSettingsTab() {
 #ifdef _WIN32
     if (ImGui::IsItemHovered()) {
         if (g_multiRobloxEnabled) {
-            ImGui::SetTooltip("AltMan must be running before launching Roblox for multi-instance to work.");
+            ImGui::SetTooltip("AltMan must be running before launching Roblox for multi instance to work.");
         } else {
             ImGui::SetTooltip("Enabling this will close any running Roblox instances.");
         }
@@ -1063,7 +1063,7 @@ void RenderSettingsTab() {
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            "If your client crashed on startup try enabling this option, then remove and install client again.\nWhen enabled, ignores client-recommended versions and always uses the latest Roblox version.\nMay cause compatibility issues with some clients.\nDefault client remains non affected."
+            "If your client crashed on startup try enabling this option, then remove and install client again.\nWhen enabled, ignores client recommended versions and always uses the latest Roblox version.\nMay cause compatibility issues with some clients.\nDefault client remains non affected."
         );
     }
 
