@@ -23,12 +23,24 @@ namespace Roblox {
     };
 
     enum class RestrictionCheckResult {
+        NetworkError,
+        InvalidCookie,
         Unknown0,
         Banned,
         ScreenTimeLimit,
         Unknown3,
         Unknown4,
-        AccountLocked
+        AccountLocked,
+        Unknown6,
+        Unknown7,
+        Unknown8,
+        Unknown9,
+        Unknown10,
+        Unknown11,
+        Unknown12,
+        Unknown13,
+        Unknown14,
+        Unknown15,
     };
 
     constexpr std::string_view banResultToString(BanCheckResult result) noexcept {
@@ -76,6 +88,7 @@ namespace Roblox {
             std::string displayName;
 
             BanInfo banInfo;
+            RestrictionInfo restrictionInfo;
 
             std::string presence;
             VoiceSettings voiceSettings;

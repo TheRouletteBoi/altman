@@ -160,6 +160,27 @@ namespace AccountProcessor {
                 break;
         }
 
+        switch (info.restrictionInfo.status) {
+            case Roblox::RestrictionCheckResult::Banned:
+                result.status = "Banned";
+                result.banExpiry = info.restrictionInfo.endDate;
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
+
+            case Roblox::RestrictionCheckResult::AccountLocked:
+                result.status = "Locked";
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
+
+            case Roblox::RestrictionCheckResult::ScreenTimeLimit:
+                result.status = "Screen Time Limit";
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
+        }
+
         result.voiceStatus = info.voiceSettings.status;
         result.voiceBanExpiry = info.voiceSettings.bannedUntil;
 
