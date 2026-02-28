@@ -1,9 +1,12 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <format>
 #include <future>
+#include <mutex>
 #include <print>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -46,6 +49,23 @@ static DuplicateAccountModalState g_duplicateAccountModal;
 namespace {
     constexpr size_t COOKIE_BUFFER_SIZE = 2048;
     constexpr size_t PASSWORD_BUFFER_SIZE = 128;
+
+    struct CookieBatchAddResult {
+        bool isDuplicate;
+        std::string cookie;
+        std::string username;
+        std::string displayName;
+        std::string presence;
+        std::string userId;
+        Roblox::VoiceSettings voiceSettings;
+        int existingId;
+    };
+
+    std::mutex g_cookieBatchResultsMutex;
+    std::vector<CookieBatchAddResult> g_cookieBatchPendingResults;
+    std::atomic<bool> g_cookieBatchInProgress{false};
+    std::atomic<int> g_cookieBatchTotal{0};
+    std::atomic<int> g_cookieBatchDone{0};
 
     std::string TrimWhitespace(const std::string &str) {
         const auto start = str.find_first_not_of(" \t\r\n");
@@ -182,6 +202,88 @@ namespace {
 
         return true;
     }
+
+    void DrainCookieBatchResults() {
+        std::vector<CookieBatchAddResult> results;
+        {
+            std::lock_guard lock(g_cookieBatchResultsMutex);
+            results.swap(g_cookieBatchPendingResults);
+        }
+
+        for (auto &r : results) {
+            const int nextId = GetMaxAccountId() + 1;
+            if (r.isDuplicate) {
+                ShowDuplicateAccountPrompt(
+                    r.cookie, r.username, r.displayName,
+                    r.presence, r.userId, r.voiceSettings,
+                    r.existingId, nextId
+                );
+            } else {
+                CreateNewAccount(
+                    nextId, r.cookie, r.userId, r.username,
+                    r.displayName, r.presence, r.voiceSettings
+                );
+            }
+        }
+    }
+
+    void RunCookieBatchAdd(std::vector<std::string> cookies) {
+        g_cookieBatchInProgress = true;
+        g_cookieBatchTotal = static_cast<int>(cookies.size());
+        g_cookieBatchDone = 0;
+
+        WorkerThreads::runBackground([cookies = std::move(cookies)]() mutable {
+            for (const auto &raw : cookies) {
+                const std::string cookie = TrimWhitespace(raw);
+                if (cookie.empty()) {
+                    ++g_cookieBatchDone;
+                    continue;
+                }
+
+                auto accountInfo = Roblox::fetchFullAccountInfo(cookie);
+                if (!accountInfo) {
+                    LOG_WARN("Batch add: failed to validate cookie (skipping)");
+                    ++g_cookieBatchDone;
+                    continue;
+                }
+
+                const auto &info = *accountInfo;
+                if (info.userId == 0 || info.username.empty() || info.displayName.empty()) {
+                    ++g_cookieBatchDone;
+                    continue;
+                }
+
+                const std::string userIdStr = std::to_string(info.userId);
+
+                CookieBatchAddResult result;
+                result.cookie = cookie;
+                result.username = info.username;
+                result.displayName = info.displayName;
+                result.presence = info.presence;
+                result.userId = userIdStr;
+                result.voiceSettings = info.voiceSettings;
+
+                const auto existing = std::find_if(
+                    g_accounts.begin(), g_accounts.end(),
+                    [&userIdStr](const AccountData &a) { return a.userId == userIdStr; }
+                );
+
+                result.isDuplicate = (existing != g_accounts.end());
+                result.existingId  = result.isDuplicate ? existing->id : -1;
+
+                {
+                    std::lock_guard lock(g_cookieBatchResultsMutex);
+                    g_cookieBatchPendingResults.push_back(std::move(result));
+                }
+
+                ++g_cookieBatchDone;
+            }
+
+            g_cookieBatchInProgress = false;
+            BottomRightStatus::Success("Cookie's imported successfully");
+            LOG_INFO("Batch add complete.");
+        });
+    }
 } // namespace
 
 bool RenderMainMenu() {
@@ -196,6 +298,8 @@ bool RenderMainMenu() {
     static int s_selectedBackup = 0;
     static bool s_refreshBackupList = false;
     static bool s_openAboutPopup = false;
+    static bool s_openCookieBatchAddPopup = false;
+    static std::array<char, 1024 * 16> s_batchCookieBuffer = {};
 
     if (!ImGui::BeginMainMenuBar()) {
         return false;
@@ -252,6 +356,10 @@ bool RenderMainMenu() {
                         }
                     }
                 );
+            }
+
+            if (ImGui::MenuItem("Add Multiple via Cookie")) {
+                s_openCookieBatchAddPopup = true;
             }
 
             ImGui::EndMenu();
@@ -551,6 +659,65 @@ bool RenderMainMenu() {
             ImGui::CloseCurrentPopup();
         }
 
+        ImGui::EndPopup();
+    }
+
+    DrainCookieBatchResults();
+
+    if (s_openCookieBatchAddPopup) {
+        ImGui::OpenPopup("BatchAddCookies");
+        s_openCookieBatchAddPopup = false;
+    }
+
+    if (ImGui::BeginPopupModal("BatchAddCookies", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        const bool inProgress = g_cookieBatchInProgress.load();
+
+        ImGui::TextUnformatted("Paste one cookie per line:");
+        ImGui::Spacing();
+
+        ImGui::BeginDisabled(inProgress);
+        ImGui::InputTextMultiline(
+            "##BatchCookies",
+            s_batchCookieBuffer.data(),
+            s_batchCookieBuffer.size(),
+            ImVec2(ImGui::GetFontSize() * 30, ImGui::GetFontSize() * 10),
+            ImGuiInputTextFlags_AutoSelectAll
+        );
+        ImGui::EndDisabled();
+
+        ImGui::Spacing();
+        ImGui::BeginDisabled(inProgress);
+
+        if (ImGui::Button("Add All", ImVec2(100, 0))) {
+            std::vector<std::string> cookies;
+            std::istringstream stream(s_batchCookieBuffer.data());
+            std::string line;
+            while (std::getline(stream, line)) {
+                const std::string trimmed = TrimWhitespace(line);
+                if (!trimmed.empty()) {
+                    cookies.push_back(trimmed);
+                }
+            }
+
+            if (cookies.empty()) {
+                BottomRightStatus::Error("No cookies entered.");
+            } else {
+                BottomRightStatus::Loading("Importing cookies...");
+                LOG_INFO("Starting batch add for {} cookies", cookies.size());
+                s_batchCookieBuffer.fill('\0');
+                RunCookieBatchAdd(std::move(cookies));
+                ImGui::CloseCurrentPopup();
+            }
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+            s_batchCookieBuffer.fill('\0');
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndDisabled();
         ImGui::EndPopup();
     }
 
