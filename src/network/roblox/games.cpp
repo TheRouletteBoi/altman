@@ -398,4 +398,58 @@ namespace Roblox {
         return page;
     }
 
+    static VipServerInfo parseVipServerInfo(const nlohmann::json &j) {
+        VipServerInfo info;
+        info.id       = j.value("id", 0ULL);
+        info.name     = j.value("name", "");
+        info.link     = j.value("link", "");
+        info.joinCode = j.value("joinCode", "");
+        info.active   = j.value("active", false);
+        return info;
+    }
+
+    ApiResult<VipServerInfo> getVipServerInfo(uint64_t vipServerId, const std::string &cookie) {
+        const std::string url = std::format("https://games.roblox.com/v1/vip-servers/{}", vipServerId);
+
+        auto resp = HttpClient::get(
+            url,
+            {
+                {"Cookie", ".ROBLOSECURITY=" + cookie},
+                {"Accept", "application/json"        }
+            }
+        );
+
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("getVipServerInfo failed: HTTP {}", resp.status_code);
+            return std::unexpected(httpStatusToError(resp.status_code));
+        }
+
+        try {
+            auto j = HttpClient::decode(resp);
+            return parseVipServerInfo(j);
+        } catch (const std::exception &e) {
+            LOG_ERROR("getVipServerInfo parse error: {}", e.what());
+            return std::unexpected(ApiError::ParseError);
+        }
+    }
+
+    ApiResult<VipServerInfo> regenerateVipServerLink(uint64_t vipServerId, const std::string &cookie) {
+        const std::string url = std::format("https://games.roblox.com/v1/vip-servers/{}", vipServerId);
+
+        auto resp = authenticatedPatch(url, cookie, R"({"newJoinCode":true})");
+
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("regenerateVipServerLink failed: HTTP {}", resp.status_code);
+            return std::unexpected(httpStatusToError(resp.status_code));
+        }
+
+        try {
+            auto j = HttpClient::decode(resp);
+            return parseVipServerInfo(j);
+        } catch (const std::exception &e) {
+            LOG_ERROR("regenerateVipServerLink parse error: {}", e.what());
+            return std::unexpected(ApiError::ParseError);
+        }
+    }
+
 } // namespace Roblox

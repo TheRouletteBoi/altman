@@ -91,6 +91,14 @@ namespace Roblox {
             std::optional<std::string> prevCursor;
     };
 
+    struct VipServerInfo {
+            uint64_t id {};
+            std::string name;
+            std::string link;
+            std::string joinCode;
+            bool active {};
+    };
+
     GameDetail getGameDetail(uint64_t universeId);
 
     ApiResult<GameDetail> getGameDetailResult(uint64_t universeId);
@@ -114,5 +122,9 @@ namespace Roblox {
 
     ApiResult<MyPrivateServersPage>
     getAllPrivateServersResult(int serverTab, const std::string &cookie, const std::string &cursor = {});
+
+    ApiResult<VipServerInfo> getVipServerInfo(uint64_t vipServerId, const std::string &cookie);
+
+    ApiResult<VipServerInfo> regenerateVipServerLink(uint64_t vipServerId, const std::string &cookie);
 
 } // namespace Roblox

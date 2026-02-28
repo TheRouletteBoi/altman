@@ -90,6 +90,8 @@ namespace {
             int playing;
             double fps;
             int ping;
+
+            std::string shareLink;
     };
 
     struct ServerState {
@@ -565,6 +567,46 @@ namespace {
                 });
             }
 
+            void copyShareLink(const PrivateServer &server, const std::string &cookie) {
+                WorkerThreads::runBackground([vipServerId = server.vipServerId, cookie]() {
+                    auto result = Roblox::getVipServerInfo(vipServerId, cookie);
+                    if (result && !result->link.empty()) {
+                        ImGui::SetClipboardText(result->link.c_str());
+                    } else {
+                        const auto reason = result
+                            ? std::string("link was empty")
+                            : std::string(Roblox::apiErrorToString(result.error()));
+                        LOG_ERROR("Failed to fetch share link for vip server {}: {}", vipServerId, reason);
+                    }
+                });
+            }
+
+            void regenerateShareLink(const PrivateServer &server, const std::string &cookie) {
+                ModalPopup::AddYesNo(
+                    std::format(
+                        "Regenerate the share link for \"{}\"?\n\n"
+                        "The old link will stop working immediately.\n"
+                        "The new link will be copied to your clipboard.",
+                        server.name
+                    ),
+                    [this, vipServerId = server.vipServerId, cookie]() {
+                        WorkerThreads::runBackground([vipServerId, cookie]() {
+                            auto result = Roblox::regenerateVipServerLink(vipServerId, cookie);
+                            if (result) {
+                                ImGui::SetClipboardText(result->link.c_str());
+                                LOG_INFO("Regenerated share link for vip server {}: {}", vipServerId, result->link);
+                            } else {
+                                LOG_ERROR(
+                                    "Failed to regenerate link for vip server {}: {}",
+                                    vipServerId,
+                                    Roblox::apiErrorToString(result.error())
+                                );
+                            }
+                        });
+                    }
+                );
+            }
+
             void render(const AccountData &account) {
                 const auto &style = ImGui::GetStyle();
 
@@ -708,7 +750,30 @@ namespace {
                     ImGui::PushID(static_cast<int>(server.vipServerId));
 
                     ImGui::TableNextColumn();
-                    ImGui::TextUnformatted(server.name.c_str());
+                    {
+                        const RowMetrics rowMetrics = calculateRowMetrics();
+                        ImGui::Selectable(
+                            "##row",
+                            false,
+                            ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
+                            ImVec2(0, rowMetrics.height)
+                        );
+
+                        if (selectedTab == 0 && ImGui::BeginPopupContextItem("##PrivateServerRowCtx")) {
+                            if (ImGui::MenuItem("Copy Share Link")) {
+                                const_cast<PrivateServerUI *>(this)->copyShareLink(server, cookie);
+                            }
+
+                            if (ImGui::MenuItem("Regenerate Share Link")) {
+                                const_cast<PrivateServerUI *>(this)->regenerateShareLink(server, cookie);
+                            }
+
+                            ImGui::EndPopup();
+                        }
+
+                        ImGui::SameLine();
+                        ImGui::TextUnformatted(server.name.c_str());
+                    }
 
                     ImGui::TableNextColumn();
                     ImGui::TextWrapped("%s", server.universeName.c_str());
