@@ -213,20 +213,16 @@ namespace MultiInstance {
     } // namespace
 
     void Enable() {
-        /*if (g_semaphore == SEM_FAILED) {
-            g_semaphore = sem_open(SEMAPHORE_NAME, O_CREAT, 0644, 1);
-            if (g_semaphore == SEM_FAILED) {
-                return;
-            }
-        }*/
+        sem_unlink(SEMAPHORE_NAME);
+        g_semaphore = sem_open(SEMAPHORE_NAME, O_CREAT | O_EXCL, 0666, 1);
     }
 
     void Disable() {
-        /*if (g_semaphore != SEM_FAILED) {
+        if (g_semaphore && g_semaphore != SEM_FAILED) {
             sem_close(g_semaphore);
             sem_unlink(SEMAPHORE_NAME);
-            g_semaphore = SEM_FAILED;
-        }*/
+            g_semaphore = nullptr;
+        }
     }
 
     bool isMobileClient(std::string_view clientName) {
@@ -539,6 +535,9 @@ namespace MultiInstance {
                                             : std::format("<string>com.roblox.RobloxPlayer.{}</string>", profileId);
 
         plistContent = std::regex_replace(plistContent, bundleIdRegex, newBundleId);
+
+        const std::regex multipleInstancesRegex(R"((<key>LSMultipleInstancesProhibited</key>\s*)<true/>)");
+        plistContent = std::regex_replace(plistContent, multipleInstancesRegex, "$1<false/>");
 
         {
             std::ofstream plistOut(plistPath, std::ios::out | std::ios::trunc);
