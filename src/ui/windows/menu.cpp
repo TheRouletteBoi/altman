@@ -642,15 +642,13 @@ bool RenderMainMenu() {
     }
 
     if (ImGui::BeginPopupModal("About AltMan", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("AltMan");
+        ImGui::Text("AltMan Version: %s", APP_VERSION.data());
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextWrapped("Open source Roblox account manager");
-        ImGui::Spacing();
-        ImGui::Text("Version: %s", APP_VERSION.data());
-        ImGui::Spacing();
+        ImGui::TextUnformatted("Open source Roblox account manager with multi instance");
+        ImGui::TextWrapped("Made by 6E6B, tooslzy, TheRouLetteBoi");
 
         const float closeButtonWidth = 120.0f;
         ImGui::SetCursorPosX((ImGui::GetWindowSize().x - closeButtonWidth) * 0.5f);
