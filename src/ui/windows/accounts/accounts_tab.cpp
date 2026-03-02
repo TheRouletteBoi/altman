@@ -577,33 +577,9 @@ namespace {
             auto &group = g_accountGroups[i];
             ImGui::PushID(group.id);
 
-            bool tabOpen = true;
-            if (ImGui::BeginTabItem(group.name.c_str(), &tabOpen)) {
+            if (ImGui::BeginTabItem(group.name.c_str())) {
                 g_activeGroupTab = group.id;
                 ImGui::EndTabItem();
-            }
-
-            if (!tabOpen) {
-                tabOpen = true;
-
-                const int groupId = group.id;
-                const std::string groupName = group.name;
-                ModalPopup::AddYesNo(
-                    std::format("Are you sure you want to delete the group \"{}\"?", groupName),
-                    [groupId]() {
-                        for (int i = 0; i < static_cast<int>(g_accountGroups.size()); ++i) {
-                            if (g_accountGroups[i].id == groupId) {
-                                LOG_INFO("Deleted group '{}' (id={})", g_accountGroups[i].name, groupId);
-                                if (g_activeGroupTab == groupId) {
-                                    g_activeGroupTab = -1;
-                                }
-                                g_accountGroups.erase(g_accountGroups.begin() + i);
-                                Data::SaveAccountGroups();
-                                break;
-                            }
-                        }
-                    }
-                );
             }
 
             if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
