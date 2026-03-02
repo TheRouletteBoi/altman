@@ -25,6 +25,7 @@
 #include "ui/ui.h"
 #include "ui/webview/webview.h"
 #include "ui/widgets/bottom_right_status.h"
+#include "ui/widgets/modal_popup.h"
 #include "ui/windows/components.h"
 #include "utils/worker_thread.h"
 #include "utils/time_utils.h"
@@ -42,13 +43,16 @@ namespace {
     constexpr float COL_VOICE_WEIGHT = 0.4500f;
     constexpr float COL_NOTE_WEIGHT = 2.0000f;
 
-    constexpr ImVec4 COLOR_VOICE_ENABLED {0.7f, 1.0f, 0.7f, 1.0f}; // Pastel green
-    constexpr ImVec4 COLOR_VOICE_DISABLED {1.0f, 1.0f, 0.7f, 1.0f}; // Pastel yellow
-    constexpr ImVec4 COLOR_VOICE_BANNED {1.0f, 0.7f, 0.7f, 1.0f}; // Pastel red
-    constexpr ImVec4 COLOR_VOICE_NA {0.7f, 0.7f, 0.7f, 1.0f}; // Gray
+    constexpr ImVec4 COLOR_VOICE_ENABLED {0.7f, 1.0f, 0.7f, 1.0f};
+    constexpr ImVec4 COLOR_VOICE_DISABLED {1.0f, 1.0f, 0.7f, 1.0f};
+    constexpr ImVec4 COLOR_VOICE_BANNED {1.0f, 0.7f, 0.7f, 1.0f};
+    constexpr ImVec4 COLOR_VOICE_NA {0.7f, 0.7f, 0.7f, 1.0f};
+
+    constexpr const char *PAYLOAD_ROW_REORDER = "ACCOUNT_ROW_REORDER";
 
     struct DragDropState {
             int draggedIndex = -1;
+            int draggedAccountId = -1;
             bool isDragging = false;
             ImVec4 dragIndicatorColor = ImVec4(0.4f, 0.6f, 1.0f, 0.8f);
     };
@@ -61,7 +65,15 @@ namespace {
             char buffer[256] {};
     };
 
+    struct GroupPopupState {
+            bool openCreate = false;
+            bool openRename = false;
+            int editingGroupId = -1;
+            char nameBuffer[128] {};
+    };
+
     UrlPopupState g_urlPopup;
+    GroupPopupState g_groupPopup;
     std::unordered_set<int> g_voiceUpdateInProgress;
     std::unordered_map<int, double> g_holdStartTimes;
 
@@ -212,7 +224,7 @@ namespace {
             ImGui::TextUnformatted(text.data());
             ImGui::PopStyleColor();
 
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            ImDrawList *drawList = ImGui::GetWindowDrawList();
             const ImVec2 barMin(pos.x - 2.0f, pos.y - 1.0f);
             const ImVec2 barMax(pos.x + textWidth + 2.0f, pos.y + barHeight + 1.0f);
             const ImVec2 clipMin = ImGui::GetWindowPos();
@@ -220,7 +232,7 @@ namespace {
 
             drawList->PushClipRect(clipMin, clipMax, true);
             const ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_TableHeaderBg);
-            drawList->AddRectFilled(barMin, barMax, IM_COL32(col.x*255, col.y*255, col.z*255, 220), 3.0f);
+            drawList->AddRectFilled(barMin, barMax, IM_COL32(col.x * 255, col.y * 255, col.z * 255, 220), 3.0f);
             drawList->PopClipRect();
         } else {
             ImGui::TextUnformatted(text.data());
@@ -292,19 +304,26 @@ namespace {
         ImGui::SetCursorPosY(currentY + rowHeight);
     }
 
-    void renderDragDropTarget(int targetIndex, const std::vector<AccountData> &accounts) {
-        if (ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ACCOUNT_ROW_REORDER")) {
-                const int sourceIndex = *(const int *) payload->Data;
+    void renderDragDropTarget(int targetIndex) {
+        if (!ImGui::BeginDragDropTarget()) {
+            return;
+        }
 
-                if (sourceIndex != targetIndex && sourceIndex >= 0 && sourceIndex < accounts.size() && targetIndex >= 0
-                    && targetIndex < accounts.size()) {
+        if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload(PAYLOAD_ROW_REORDER)) {
+            const int sourceIndex = *(const int *) payload->Data;
 
-                    // Perform the reorder
+            if (sourceIndex == targetIndex) {
+                ImGui::EndDragDropTarget();
+                return;
+            }
+
+            if (g_activeGroupTab == -1) {
+                if (sourceIndex >= 0 && sourceIndex < static_cast<int>(g_accounts.size()) && targetIndex >= 0
+                    && targetIndex < static_cast<int>(g_accounts.size())) {
+
                     auto accountCopy = g_accounts[sourceIndex];
                     g_accounts.erase(g_accounts.begin() + sourceIndex);
 
-                    // Adjust target index if source was before target
                     int insertIndex = targetIndex;
                     if (sourceIndex < targetIndex) {
                         insertIndex--;
@@ -313,12 +332,29 @@ namespace {
                     g_accounts.insert(g_accounts.begin() + insertIndex, accountCopy);
                     invalidateAccountIndex();
                     Data::SaveAccounts();
-
                     LOG_INFO("Reordered account from index {} to {}", sourceIndex, insertIndex);
                 }
+            } else {
+                if (AccountGroup *group = getGroupById(g_activeGroupTab)) {
+                    if (sourceIndex >= 0 && sourceIndex < static_cast<int>(group->accountIds.size()) && targetIndex >= 0
+                        && targetIndex < static_cast<int>(group->accountIds.size())) {
+
+                        const int movedId = group->accountIds[sourceIndex];
+                        group->accountIds.erase(group->accountIds.begin() + sourceIndex);
+
+                        int insertIndex = targetIndex;
+                        if (sourceIndex < targetIndex) {
+                            insertIndex--;
+                        }
+                        group->accountIds.insert(group->accountIds.begin() + insertIndex, movedId);
+                        Data::SaveAccountGroups();
+                        LOG_INFO("Reordered account in group from index {} to {}", sourceIndex, insertIndex);
+                    }
+                }
             }
-            ImGui::EndDragDropTarget();
         }
+
+        ImGui::EndDragDropTarget();
     }
 
     void renderDragDropIndicator(int currentIndex, int draggedIndex) {
@@ -326,7 +362,6 @@ namespace {
             return;
         }
 
-        // Draw a line indicator where the item will be dropped
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
             const ImVec2 min = ImGui::GetItemRectMin();
             const ImVec2 max = ImGui::GetItemRectMax();
@@ -334,7 +369,6 @@ namespace {
             ImDrawList *drawList = ImGui::GetWindowDrawList();
             const ImU32 color = ImGui::GetColorU32(g_dragDropState.dragIndicatorColor);
 
-            // Draw horizontal line at the top or bottom depending on relative position
             const float lineThickness = 3.0f;
             const float y = (currentIndex < draggedIndex) ? min.y : max.y;
 
@@ -342,11 +376,26 @@ namespace {
         }
     }
 
+    int getDisplayIndex(int accountId) {
+        if (g_activeGroupTab == -1) {
+            return getAccountIndexById(accountId);
+        }
+
+        if (const AccountGroup *group = getGroupById(g_activeGroupTab)) {
+            for (int i = 0; i < static_cast<int>(group->accountIds.size()); ++i) {
+                if (group->accountIds[i] == accountId) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
     void renderAccountRow(AccountData &account, const RowMetrics &metrics) {
         ImGui::TableNextRow();
         ImGui::PushID(account.id);
 
-        const int currentIndex = getAccountIndexById(account.id);
+        const int currentIndex = getDisplayIndex(account.id);
 
         const bool isSelected = g_selectedAccountIds.contains(account.id);
         if (isSelected) {
@@ -371,27 +420,26 @@ namespace {
         }
 
         if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
-            ImGui::SetDragDropPayload("ACCOUNT_ROW_REORDER", &currentIndex, sizeof(int));
+            ImGui::SetDragDropPayload(PAYLOAD_ROW_REORDER, &currentIndex, sizeof(int));
             g_dragDropState.isDragging = true;
             g_dragDropState.draggedIndex = currentIndex;
+            g_dragDropState.draggedAccountId = account.id;
 
-            // Show preview
             ImGui::Text("Moving: %s", account.displayName.c_str());
             ImGui::EndDragDropSource();
         }
 
-        // Reset drag state when not dragging
         if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
             g_dragDropState.isDragging = false;
             g_dragDropState.draggedIndex = -1;
+            g_dragDropState.draggedAccountId = -1;
         }
 
         if (currentIndex >= 0) {
-            renderDragDropTarget(currentIndex, g_accounts);
+            renderDragDropTarget(currentIndex);
             renderDragDropIndicator(currentIndex, g_dragDropState.draggedIndex);
         }
 
-        // Handle hold gesture
         if (ImGui::IsItemActivated() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             g_holdStartTimes[account.id] = ImGui::GetTime();
         }
@@ -457,7 +505,6 @@ namespace {
 
         if (ImGui::Button("Open", ImVec2(openWidth, 0)) && g_urlPopup.buffer[0] != '\0') {
             if (const AccountData *acc = getAccountById(g_urlPopup.accountId)) {
-                // Copy account for thread safety
                 WorkerThreads::runBackground([account = *acc, url = std::string(g_urlPopup.buffer)]() {
                     LaunchWebview(url, account);
                 });
@@ -475,17 +522,237 @@ namespace {
         ImGui::EndPopup();
     }
 
+    void renderCreateGroupPopup() {
+        if (g_groupPopup.openCreate) {
+            ImGui::OpenPopup("Create Group");
+            g_groupPopup.openCreate = false;
+        }
+
+        if (!ImGui::BeginPopupModal("Create Group", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            return;
+        }
+
+        ImGui::Text("Group Name:");
+        ImGui::PushItemWidth(250.0f);
+        ImGui::InputText("##GroupName", g_groupPopup.nameBuffer, sizeof(g_groupPopup.nameBuffer));
+        ImGui::PopItemWidth();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Create") && g_groupPopup.nameBuffer[0] != '\0') {
+            AccountGroup newGroup {};
+            newGroup.id = generateGroupId();
+            newGroup.name = g_groupPopup.nameBuffer;
+
+            g_accountGroups.push_back(std::move(newGroup));
+            Data::SaveAccountGroups();
+            LOG_INFO("Created group '{}'", g_groupPopup.nameBuffer);
+
+            g_groupPopup.nameBuffer[0] = '\0';
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            g_groupPopup.nameBuffer[0] = '\0';
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    void renderRenameGroupPopup() {
+        if (g_groupPopup.openRename) {
+            ImGui::OpenPopup("Rename Group");
+            g_groupPopup.openRename = false;
+        }
+
+        if (!ImGui::BeginPopupModal("Rename Group", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            return;
+        }
+
+        ImGui::Text("New Name:");
+        ImGui::PushItemWidth(250.0f);
+        ImGui::InputText("##RenameGroupName", g_groupPopup.nameBuffer, sizeof(g_groupPopup.nameBuffer));
+        ImGui::PopItemWidth();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Save") && g_groupPopup.nameBuffer[0] != '\0') {
+            if (AccountGroup *group = getGroupById(g_groupPopup.editingGroupId)) {
+                group->name = g_groupPopup.nameBuffer;
+                Data::SaveAccountGroups();
+                LOG_INFO("Renamed group {} to '{}'", group->id, group->name);
+            }
+            g_groupPopup.nameBuffer[0] = '\0';
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            g_groupPopup.nameBuffer[0] = '\0';
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    void renderGroupTabBar() {
+        constexpr ImGuiTabBarFlags tabBarFlags = ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_FittingPolicyScroll;
+
+        if (!ImGui::BeginTabBar("AccountGroupTabs", tabBarFlags)) {
+            return;
+        }
+
+        if (ImGui::BeginTabItem("All")) {
+            g_activeGroupTab = -1;
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload(PAYLOAD_ROW_REORDER)) {
+                const int accountId = g_dragDropState.draggedAccountId;
+                if (accountId >= 0) {
+                    if (g_selectedAccountIds.contains(accountId) && g_selectedAccountIds.size() > 1) {
+                        for (int id: g_selectedAccountIds) {
+                            removeAccountFromAllGroups(id);
+                        }
+                        Data::SaveAccountGroups();
+                        LOG_INFO("Removed {} selected accounts from all groups", g_selectedAccountIds.size());
+                    } else {
+                        removeAccountFromAllGroups(accountId);
+                        Data::SaveAccountGroups();
+                        LOG_INFO("Removed account {} from all groups", accountId);
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        for (int i = 0; i < static_cast<int>(g_accountGroups.size()); ++i) {
+            auto &group = g_accountGroups[i];
+            ImGui::PushID(group.id);
+
+            bool tabOpen = true;
+            if (ImGui::BeginTabItem(group.name.c_str(), &tabOpen)) {
+                g_activeGroupTab = group.id;
+                ImGui::EndTabItem();
+            }
+
+            if (!tabOpen) {
+                tabOpen = true;
+
+                const int groupId = group.id;
+                const std::string groupName = group.name;
+                ModalPopup::AddYesNo(
+                    std::format("Are you sure you want to delete the group \"{}\"?", groupName),
+                    [groupId]() {
+                        for (int i = 0; i < static_cast<int>(g_accountGroups.size()); ++i) {
+                            if (g_accountGroups[i].id == groupId) {
+                                LOG_INFO("Deleted group '{}' (id={})", g_accountGroups[i].name, groupId);
+                                if (g_activeGroupTab == groupId) {
+                                    g_activeGroupTab = -1;
+                                }
+                                g_accountGroups.erase(g_accountGroups.begin() + i);
+                                Data::SaveAccountGroups();
+                                break;
+                            }
+                        }
+                    }
+                );
+            }
+
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                ImGui::OpenPopup("GroupTabContextMenu");
+            }
+
+            if (ImGui::BeginPopup("GroupTabContextMenu")) {
+                if (ImGui::MenuItem("Rename")) {
+                    g_groupPopup.openRename = true;
+                    g_groupPopup.editingGroupId = group.id;
+                    std::strncpy(g_groupPopup.nameBuffer, group.name.c_str(), sizeof(g_groupPopup.nameBuffer) - 1);
+                    g_groupPopup.nameBuffer[sizeof(g_groupPopup.nameBuffer) - 1] = '\0';
+                }
+
+                if (ImGui::MenuItem("Delete")) {
+                    const int groupId = group.id;
+                    const std::string groupName = group.name;
+                    ModalPopup::AddYesNo(
+                        std::format("Are you sure you want to delete the group \"{}\"?", groupName),
+                        [groupId]() {
+                            for (int i = 0; i < static_cast<int>(g_accountGroups.size()); ++i) {
+                                if (g_accountGroups[i].id == groupId) {
+                                    LOG_INFO("Deleted group '{}' (id={})", g_accountGroups[i].name, groupId);
+                                    if (g_activeGroupTab == groupId) {
+                                        g_activeGroupTab = -1;
+                                    }
+                                    g_accountGroups.erase(g_accountGroups.begin() + i);
+                                    Data::SaveAccountGroups();
+                                    break;
+                                }
+                            }
+                        }
+                    );
+                }
+
+                ImGui::EndPopup();
+            }
+
+            if (ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload(PAYLOAD_ROW_REORDER)) {
+                    const int accountId = g_dragDropState.draggedAccountId;
+                    if (accountId >= 0) {
+                        std::vector<int> accountsToAdd;
+                        if (g_selectedAccountIds.contains(accountId) && g_selectedAccountIds.size() > 1) {
+                            accountsToAdd.assign(g_selectedAccountIds.begin(), g_selectedAccountIds.end());
+                        } else {
+                            accountsToAdd.push_back(accountId);
+                        }
+
+                        int addedCount = 0;
+                        for (int id: accountsToAdd) {
+                            const bool alreadyInGroup
+                                = std::ranges::find(group.accountIds, id) != group.accountIds.end();
+                            if (!alreadyInGroup) {
+                                group.accountIds.push_back(id);
+                                ++addedCount;
+                            }
+                        }
+
+                        if (addedCount > 0) {
+                            Data::SaveAccountGroups();
+                            LOG_INFO("Added {} account(s) to group '{}'", addedCount, group.name);
+                        }
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            ImGui::PopID();
+        }
+
+        if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
+            g_groupPopup.openCreate = true;
+            g_groupPopup.nameBuffer[0] = '\0';
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Create new group");
+        }
+
+        ImGui::EndTabBar();
+    }
+
     float calculateJoinOptionsHeight(JoinType joinType) {
         const auto &style = ImGui::GetStyle();
         float height = 0.0f;
 
-        // Title + help marker
         height += ImGui::GetTextLineHeight() + style.ItemSpacing.y;
-
-        // Combo box
         height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
 
-        // Input fields
         if (joinType == JoinType::GameServer) {
             height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
             height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
@@ -493,10 +760,7 @@ namespace {
             height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
         }
 
-        // Separator
         height += 1.0f + style.ItemSpacing.y;
-
-        // Buttons
         height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
         height += style.ItemSpacing.y;
 
@@ -505,7 +769,7 @@ namespace {
 
 } // namespace
 
-void RenderAccountsTable(std::vector<AccountData> &accountsToDisplay, const char *tableId, float tableHeight) {
+void RenderAccountsTable(std::vector<AccountData *> &accountsToDisplay, const char *tableId, float tableHeight) {
     // Auto-select default account if nothing selected
     if (g_selectedAccountIds.empty() && g_defaultAccountId != -1) {
         g_selectedAccountIds.insert(g_defaultAccountId);
@@ -543,8 +807,8 @@ void RenderAccountsTable(std::vector<AccountData> &accountsToDisplay, const char
     ImGui::TextUnformatted("Note");
 
     const auto metrics = calculateRowMetrics();
-    for (auto &account: accountsToDisplay) {
-        renderAccountRow(account, metrics);
+    for (auto *account: accountsToDisplay) {
+        renderAccountRow(*account, metrics);
     }
 
     ImGui::EndTable();
@@ -554,11 +818,11 @@ void RenderFullAccountsTabContent() {
     const float availHeight = ImGui::GetContentRegionAvail().y;
     const auto &style = ImGui::GetStyle();
 
+    const float tabBarHeight = ImGui::GetFrameHeight() + style.ItemSpacing.y;
     const float joinOptionsHeight = calculateJoinOptionsHeight(static_cast<JoinType>(join_type_combo_index));
     const float separatorHeight = 1.0f + style.ItemSpacing.y;
-    const float totalReserved = separatorHeight + joinOptionsHeight;
+    const float totalReserved = tabBarHeight + separatorHeight + joinOptionsHeight;
 
-    // Calculate table height with minimum constraints
     constexpr float MIN_TABLE_HEIGHT_MULTIPLIER = 3.0f;
     const float minTableHeight = ImGui::GetFrameHeight() * MIN_TABLE_HEIGHT_MULTIPLIER;
 
@@ -567,7 +831,25 @@ void RenderFullAccountsTabContent() {
         tableHeight = minTableHeight;
     }
 
-    RenderAccountsTable(g_accounts, "AccountsTable", tableHeight);
+    renderGroupTabBar();
+
+    if (g_activeGroupTab == -1) {
+        std::vector<AccountData *> ptrs;
+        ptrs.reserve(g_accounts.size());
+        for (auto &acc: g_accounts) {
+            ptrs.push_back(&acc);
+        }
+        RenderAccountsTable(ptrs, "AccountsTable", tableHeight);
+    } else {
+        auto ptrs = getAccountsForGroupMutable(g_activeGroupTab);
+        const auto tableId = std::format("GroupTable_{}", g_activeGroupTab);
+        RenderAccountsTable(ptrs, tableId.c_str(), tableHeight);
+    }
+
     ImGui::Separator();
     RenderJoinOptions();
+
+    //renderUrlPopup();
+    renderCreateGroupPopup();
+    renderRenameGroupPopup();
 }

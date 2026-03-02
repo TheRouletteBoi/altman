@@ -40,6 +40,12 @@ struct AccountData {
         std::string hbaPrivateKey;
 };
 
+struct AccountGroup {
+    int id = 0;
+    std::string name;
+    std::vector<int> accountIds; // Ordered list of account IDs in this group
+};
+
 struct FavoriteGame {
         std::string name;
         uint64_t universeId;
@@ -67,6 +73,12 @@ inline std::vector<FriendInfo> g_friends;
 inline std::unordered_map<int, std::vector<FriendInfo>> g_accountFriends;
 inline std::unordered_map<int, std::vector<FriendInfo>> g_unfriendedFriends;
 
+inline std::vector<std::string> g_privateServerHistory;
+constexpr int k_privateServerHistoryMax = 20;
+
+inline std::vector<AccountGroup> g_accountGroups;
+inline int g_activeGroupTab = -1;
+
 inline int g_defaultAccountId = -1;
 inline std::array<char, 128> s_jobIdBuffer = {};
 inline std::array<char, 128> s_playerBuffer = {};
@@ -80,8 +92,6 @@ inline bool g_forceLatestRobloxVersion = false;
 inline std::vector<std::string> g_availableClientsNames = {"Default", "MacSploit", "Hydrogen", "Delta"};
 inline bool g_privacyModeEnabled = false;
 inline bool g_autoCookieRefresh = false;
-inline std::vector<std::string> g_privateServerHistory;
-constexpr int k_privateServerHistoryMax = 20;
 
 void invalidateAccountIndex();
 AccountData *getAccountById(int id);
@@ -90,6 +100,12 @@ std::vector<const AccountData *> getSelectedAccountsOrdered();
 std::vector<AccountData *> getSelectedAccountsOrderedMutable();
 int getAccountIndexById(int id);
 std::string getPrimaryAccountCookie();
+
+AccountGroup *getGroupById(int groupId);
+int generateGroupId();
+void removeAccountFromAllGroups(int accountId);
+std::vector<AccountData> getAccountsForGroup(int groupId);
+std::vector<AccountData *> getAccountsForGroupMutable(int groupId);
 
 namespace Data {
 
@@ -110,4 +126,7 @@ namespace Data {
 
     void LoadPrivateServerHistory(std::string_view filename = "private_server_history.json");
     void SavePrivateServerHistory(std::string_view filename = "private_server_history.json");
+
+    void LoadAccountGroups(std::string_view filename = "account_groups.json");
+    void SaveAccountGroups(std::string_view filename = "account_groups.json");
 } // namespace Data

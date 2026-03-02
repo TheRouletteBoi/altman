@@ -1010,6 +1010,86 @@ void RenderAccountContextMenu(AccountData &account, const std::string &uniqueCon
 
     ImGui::Separator();
 
+    if (!g_accountGroups.empty()) {
+        const auto targetIds = [&]() -> std::vector<int> {
+            if (isMultiSelection) {
+                return {g_selectedAccountIds.begin(), g_selectedAccountIds.end()};
+            }
+            return {account.id};
+        }();
+
+        if (ImGui::BeginMenu("Add to Group")) {
+            bool anyAdded = false;
+            for (auto &group : g_accountGroups) {
+                const bool allAlreadyIn = std::ranges::all_of(targetIds, [&](int id) {
+                    return std::ranges::find(group.accountIds, id) != group.accountIds.end();
+                });
+
+                if (allAlreadyIn) {
+                    ImGui::BeginDisabled();
+                    ImGui::MenuItem(group.name.c_str());
+                    ImGui::EndDisabled();
+                } else if (ImGui::MenuItem(group.name.c_str())) {
+                    int addedCount = 0;
+                    for (int id : targetIds) {
+                        if (std::ranges::find(group.accountIds, id) == group.accountIds.end()) {
+                            group.accountIds.push_back(id);
+                            ++addedCount;
+                        }
+                    }
+                    if (addedCount > 0) {
+                        Data::SaveAccountGroups();
+                        LOG_INFO("Added {} account(s) to group '{}'", addedCount, group.name);
+                    }
+                }
+                anyAdded = true;
+            }
+
+            if (!anyAdded) {
+                ImGui::TextDisabled("No groups available");
+            }
+            ImGui::EndMenu();
+        }
+
+        const bool inAnyGroup = std::ranges::any_of(g_accountGroups, [&](const auto &group) {
+            return std::ranges::any_of(targetIds, [&](int id) {
+                return std::ranges::find(group.accountIds, id) != group.accountIds.end();
+            });
+        });
+
+        if (inAnyGroup) {
+            if (ImGui::BeginMenu("Remove from Group")) {
+                for (auto &group : g_accountGroups) {
+                    const bool hasAny = std::ranges::any_of(targetIds, [&](int id) {
+                        return std::ranges::find(group.accountIds, id) != group.accountIds.end();
+                    });
+
+                    if (!hasAny) {
+                        continue;
+                    }
+
+                    if (ImGui::MenuItem(group.name.c_str())) {
+                        int removedCount = 0;
+                        for (int id : targetIds) {
+                            const auto sizeBefore = group.accountIds.size();
+                            std::erase(group.accountIds, id);
+                            if (group.accountIds.size() < sizeBefore) {
+                                ++removedCount;
+                            }
+                        }
+                        if (removedCount > 0) {
+                            Data::SaveAccountGroups();
+                            LOG_INFO("Removed {} account(s) from group '{}'", removedCount, group.name);
+                        }
+                    }
+                }
+                ImGui::EndMenu();
+            }
+        }
+
+        ImGui::Separator();
+    }
+
     if (!isMultiSelection) {
         if (ImGui::MenuItem("Set as Default Account")) {
             g_defaultAccountId = account.id;

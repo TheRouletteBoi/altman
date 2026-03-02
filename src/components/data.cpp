@@ -286,6 +286,65 @@ std::string getPrimaryAccountCookie() {
     return {};
 }
 
+AccountGroup *getGroupById(int groupId) {
+    for (auto &group : g_accountGroups) {
+        if (group.id == groupId) {
+            return &group;
+        }
+    }
+    return nullptr;
+}
+
+int generateGroupId() {
+    int maxId = 0;
+    for (const auto &group : g_accountGroups) {
+        if (group.id > maxId) {
+            maxId = group.id;
+        }
+    }
+    return maxId + 1;
+}
+
+void removeAccountFromAllGroups(int accountId) {
+    for (auto &group : g_accountGroups) {
+        std::erase(group.accountIds, accountId);
+    }
+}
+
+std::vector<AccountData> getAccountsForGroup(int groupId) {
+    const AccountGroup *group = getGroupById(groupId);
+    if (!group) {
+        return {};
+    }
+
+    std::vector<AccountData> result;
+    result.reserve(group->accountIds.size());
+
+    for (int accId : group->accountIds) {
+        if (const AccountData *acc = getAccountById(accId)) {
+            result.push_back(*acc);
+        }
+    }
+    return result;
+}
+
+std::vector<AccountData *> getAccountsForGroupMutable(int groupId) {
+    const AccountGroup *group = getGroupById(groupId);
+    if (!group) {
+        return {};
+    }
+
+    std::vector<AccountData *> result;
+    result.reserve(group->accountIds.size());
+
+    for (int accId : group->accountIds) {
+        if (AccountData *acc = getAccountById(accId)) {
+            result.push_back(acc);
+        }
+    }
+    return result;
+}
+
 namespace Data {
 
     void LoadAccounts(std::string_view filename) {
@@ -417,7 +476,6 @@ namespace Data {
                         g_clientKeys[key] = value.get<std::string>();
                     }
                 }
-                LOG_INFO("Loaded {} client keys", g_clientKeys.size());
             }
 
             LOG_INFO("Default account ID = {}", g_defaultAccountId);
@@ -605,6 +663,80 @@ namespace Data {
 
         out << arr.dump(4);
         LOG_INFO("Saved {} private server history entries", g_privateServerHistory.size());
+    }
+
+    void LoadAccountGroups(std::string_view filename) {
+        const auto path = AltMan::Paths::Config(filename).string();
+        std::ifstream fin {path};
+
+        if (!fin.is_open()) {
+            LOG_INFO("No {}, starting with no account groups", path);
+            return;
+        }
+
+        try {
+            nlohmann::json arr;
+            fin >> arr;
+
+            if (!arr.is_array()) {
+                LOG_ERROR("Invalid account groups format");
+                return;
+            }
+
+            g_accountGroups.clear();
+            g_accountGroups.reserve(arr.size());
+
+            for (const auto &j : arr) {
+                if (!j.is_object()) {
+                    continue;
+                }
+
+                AccountGroup group {};
+                group.id = safeGet(j, "id", 0);
+                group.name = safeGet<std::string>(j, "name", "Unnamed");
+
+                if (j.contains("accountIds") && j["accountIds"].is_array()) {
+                    for (const auto &idVal : j["accountIds"]) {
+                        if (idVal.is_number_integer()) {
+                            group.accountIds.push_back(idVal.get<int>());
+                        }
+                    }
+                }
+
+                g_accountGroups.push_back(std::move(group));
+            }
+
+            LOG_INFO("Loaded {} account groups", g_accountGroups.size());
+        } catch (const std::exception &e) {
+            LOG_ERROR("Failed to parse {}: {}", filename, e.what());
+        }
+    }
+
+    void SaveAccountGroups(std::string_view filename) {
+        const auto path = AltMan::Paths::Config(filename).string();
+        std::ofstream out {path};
+
+        if (!out.is_open()) {
+            LOG_ERROR("Could not open '{}' for writing", path);
+            return;
+        }
+
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto &group : g_accountGroups) {
+            nlohmann::json idsArr = nlohmann::json::array();
+            for (int id : group.accountIds) {
+                idsArr.push_back(id);
+            }
+
+            arr.push_back({
+                {"id",         group.id  },
+                {"name",       group.name},
+                {"accountIds", idsArr    }
+            });
+        }
+
+        out << arr.dump(4);
+        LOG_INFO("Saved {} account groups", g_accountGroups.size());
     }
 
     std::optional<std::string> encryptLocalData(std::string_view plaintext) {

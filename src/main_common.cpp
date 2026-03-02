@@ -428,6 +428,7 @@ bool initializeApp() {
     Data::LoadFriends("friends.json");
     Data::LoadFavorites("favorites.json");
     Data::LoadPrivateServerHistory("private_server_history.json");
+    Data::LoadAccountGroups("account_groups.json");
 
     startAccountRefreshLoop();
     //checkAndRefreshCookiesLoop();
