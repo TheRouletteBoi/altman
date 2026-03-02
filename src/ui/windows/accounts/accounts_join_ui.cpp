@@ -225,9 +225,59 @@ namespace {
                 for (int i = 0; i < static_cast<int>(g_privateServerHistory.size()); ++i) {
                     const auto &entry = g_privateServerHistory[i];
 
-                    const std::string label = entry.size() > 60
-                        ? "..." + entry.substr(entry.size() - 60)
-                        : entry;
+                    const std::string label = [&]() -> std::string {
+                        if (g_privacyModeEnabled) {
+                            constexpr std::string_view code_key = "code=";
+                            if (auto pos = entry.find(code_key); pos != std::string::npos) {
+                                auto codeStart = pos + code_key.size();
+                                auto codeEnd = entry.find('&', codeStart);
+                                std::string_view code = std::string_view(entry).substr(
+                                    codeStart,
+                                    codeEnd != std::string::npos ? codeEnd - codeStart : std::string::npos
+                                );
+
+                                if (code.size() > 8) {
+                                    std::string masked = entry.substr(0, codeStart);
+                                    masked += code.substr(0, 4);
+                                    masked += "****";
+                                    masked += code.substr(code.size() - 4);
+                                    if (codeEnd != std::string::npos) {
+                                        masked += entry.substr(codeEnd);
+                                    }
+                                    if (masked.size() > 60) {
+                                        return "..." + masked.substr(masked.size() - 60);
+                                    }
+                                    return masked;
+                                }
+                            }
+
+                            constexpr std::string_view link_key = "privateServerLinkCode=";
+                            if (auto pos = entry.find(link_key); pos != std::string::npos) {
+                                auto codeStart = pos + link_key.size();
+                                auto codeEnd = entry.find('&', codeStart);
+                                std::string_view code = std::string_view(entry).substr(
+                                    codeStart,
+                                    codeEnd != std::string::npos ? codeEnd - codeStart : std::string::npos
+                                );
+
+                                if (code.size() > 8) {
+                                    std::string masked = entry.substr(0, codeStart);
+                                    masked += code.substr(0, 4);
+                                    masked += "****";
+                                    masked += code.substr(code.size() - 4);
+                                    if (codeEnd != std::string::npos) {
+                                        masked += entry.substr(codeEnd);
+                                    }
+                                    if (masked.size() > 60) {
+                                        return "..." + masked.substr(masked.size() - 60);
+                                    }
+                                    return masked;
+                                }
+                            }
+                        }
+
+                        return entry.size() > 60 ? "..." + entry.substr(entry.size() - 60) : entry;
+                    }();
 
                     if (ImGui::Selectable(std::format("{}##psh{}", label, i).c_str())) {
                         std::strncpy(join_value_buf, entry.c_str(), sizeof(join_value_buf) - 1);
@@ -338,11 +388,18 @@ namespace {
         if (showError) {
             renderErrorBorder();
         }
+
+        ImGuiInputTextFlags flags = ImGuiInputTextFlags_None;
+        if (joinType == JoinType::PrivateServer && g_privacyModeEnabled) {
+            flags |= ImGuiInputTextFlags_Password;
+        }
+
         ImGui::InputTextWithHint(
             "##JoinValue",
             getJoinHint(static_cast<JoinType>(joinType)),
             join_value_buf,
-            IM_ARRAYSIZE(join_value_buf)
+            IM_ARRAYSIZE(join_value_buf),
+            flags
         );
         if (showError) {
             endErrorBorder();
