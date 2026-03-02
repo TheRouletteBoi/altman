@@ -59,12 +59,6 @@ namespace {
 
     DragDropState g_dragDropState;
 
-    struct UrlPopupState {
-            bool open {false};
-            int accountId {-1};
-            char buffer[256] {};
-    };
-
     struct GroupPopupState {
             bool openCreate = false;
             bool openRename = false;
@@ -72,7 +66,6 @@ namespace {
             char nameBuffer[128] {};
     };
 
-    UrlPopupState g_urlPopup;
     GroupPopupState g_groupPopup;
     std::unordered_set<int> g_voiceUpdateInProgress;
     std::unordered_map<int, double> g_holdStartTimes;
@@ -119,17 +112,6 @@ namespace {
         WorkerThreads::runBackground([account]() {
             LaunchBrowserWithCookie(account);
         });
-    }
-
-    void handleHoldAction(const AccountData &account) {
-        if (account.cookie.empty()) {
-            LOG_WARN("Cannot open browser - cookie is empty for account: {}", account.displayName);
-            return;
-        }
-
-        g_urlPopup.open = true;
-        g_urlPopup.accountId = account.id;
-        g_urlPopup.buffer[0] = '\0';
     }
 
     void checkVoiceBanExpiry(AccountData &account) {
@@ -460,7 +442,7 @@ namespace {
         }
 
         if (holdTriggered) {
-            handleHoldAction(account);
+
         }
 
         const auto contextMenuId = std::format("AccountsTable_ContextMenu_{}", account.id);
@@ -478,48 +460,6 @@ namespace {
         renderCenteredTextCell(account.note, cellStartY, metrics.height, metrics.verticalPadding);
 
         ImGui::PopID();
-    }
-
-    void renderUrlPopup() {
-        if (g_urlPopup.open) {
-            ImGui::OpenPopup("Open URL");
-            g_urlPopup.open = false;
-        }
-
-        if (!ImGui::BeginPopupModal("Open URL", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            return;
-        }
-
-        const auto &style = ImGui::GetStyle();
-        const float openWidth = ImGui::CalcTextSize("Open").x + style.FramePadding.x * 2.0f;
-        const float cancelWidth = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f;
-        const float inputWidth = std::max(
-            MIN_INPUT_WIDTH,
-            ImGui::GetContentRegionAvail().x - openWidth - cancelWidth - style.ItemSpacing.x
-        );
-
-        ImGui::PushItemWidth(inputWidth);
-        ImGui::InputTextWithHint("##WebviewUrl", "Enter URL", g_urlPopup.buffer, sizeof(g_urlPopup.buffer));
-        ImGui::PopItemWidth();
-        ImGui::Spacing();
-
-        if (ImGui::Button("Open", ImVec2(openWidth, 0)) && g_urlPopup.buffer[0] != '\0') {
-            if (const AccountData *acc = getAccountById(g_urlPopup.accountId)) {
-                WorkerThreads::runBackground([account = *acc, url = std::string(g_urlPopup.buffer)]() {
-                    LaunchWebview(url, account);
-                });
-            }
-            g_urlPopup.buffer[0] = '\0';
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::SameLine(0, style.ItemSpacing.x);
-        if (ImGui::Button("Cancel", ImVec2(cancelWidth, 0))) {
-            g_urlPopup.buffer[0] = '\0';
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
     }
 
     void renderCreateGroupPopup() {
@@ -849,7 +789,6 @@ void RenderFullAccountsTabContent() {
     ImGui::Separator();
     RenderJoinOptions();
 
-    //renderUrlPopup();
     renderCreateGroupPopup();
     renderRenameGroupPopup();
 }
