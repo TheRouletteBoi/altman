@@ -956,6 +956,44 @@ void RenderAccountContextMenu(AccountData &account, const std::string &uniqueCon
     }
     ImGui::Separator();
 
+    if (!g_accountGroups.empty() && ImGui::BeginMenu("Groups")) {
+        std::vector<int> targetIds;
+        if (isMultiSelection) {
+            targetIds.assign(g_selectedAccountIds.begin(), g_selectedAccountIds.end());
+        } else {
+            targetIds.push_back(account.id);
+        }
+
+        for (auto &group : g_accountGroups) {
+            const bool allInGroup = std::ranges::all_of(targetIds, [&group](int id) {
+                return std::ranges::find(group.accountIds, id) != group.accountIds.end();
+            });
+
+            if (ImGui::BeginMenu(group.name.c_str())) {
+                if (allInGroup) {
+                    if (ImGui::MenuItem("Remove from Group")) {
+                        for (int id : targetIds) {
+                            std::erase(group.accountIds, id);
+                        }
+                        Data::SaveAccountGroups();
+                    }
+                } else {
+                    if (ImGui::MenuItem("Add to Group")) {
+                        for (int id : targetIds) {
+                            if (std::ranges::find(group.accountIds, id) == group.accountIds.end()) {
+                                group.accountIds.push_back(id);
+                            }
+                        }
+                        Data::SaveAccountGroups();
+                    }
+                }
+                ImGui::EndMenu();
+            }
+        }
+
+        ImGui::EndMenu();
+    }
+
     if (ImGui::BeginMenu("Copy Info")) {
         if (isMultiSelection) {
             renderCopyInfoMenuMulti(getSelectedAccountsOrdered());
@@ -1009,38 +1047,6 @@ void RenderAccountContextMenu(AccountData &account, const std::string &uniqueCon
     }
 
     ImGui::Separator();
-
-    if (!g_accountGroups.empty() && ImGui::BeginMenu("Groups")) {
-        std::vector<int> targetIds;
-        if (isMultiSelection) {
-            targetIds.assign(g_selectedAccountIds.begin(), g_selectedAccountIds.end());
-        } else {
-            targetIds.push_back(account.id);
-        }
-
-        for (auto &group : g_accountGroups) {
-            const bool allInGroup = std::ranges::all_of(targetIds, [&group](int id) {
-                return std::ranges::find(group.accountIds, id) != group.accountIds.end();
-            });
-
-            if (ImGui::MenuItem(group.name.c_str(), nullptr, allInGroup)) {
-                if (allInGroup) {
-                    for (int id : targetIds) {
-                        std::erase(group.accountIds, id);
-                    }
-                } else {
-                    for (int id : targetIds) {
-                        if (std::ranges::find(group.accountIds, id) == group.accountIds.end()) {
-                            group.accountIds.push_back(id);
-                        }
-                    }
-                }
-                Data::SaveAccountGroups();
-            }
-        }
-
-        ImGui::EndMenu();
-    }
 
     if (!isMultiSelection) {
         if (ImGui::MenuItem("Set as Default Account")) {
