@@ -262,7 +262,7 @@ namespace AccountProcessor {
     }
 
     bool shouldRefreshCookies(const AccountData& account) {
-        if (account.cookie.empty())
+        if (!account.cookieAutoRefresh || account.cookie.empty())
             return false;
 
         auto now = std::time(nullptr);
@@ -393,13 +393,11 @@ void refreshAccountsCookies() {
     }
 }
 
-void checkAndRefreshCookiesLoop() {
-    if (g_autoCookieRefresh) {
-        WorkerThreads::runBackground([] {
-            std::this_thread::sleep_for(std::chrono::seconds(30));
-             refreshAccountsCookies();
-        });
-    }
+void checkAndRefreshCookiesOnce() {
+    WorkerThreads::runBackground([] {
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        refreshAccountsCookies();
+    });
 }
 
 void initializeAutoUpdater() {
@@ -431,7 +429,7 @@ bool initializeApp() {
     Data::LoadAccountGroups("account_groups.json");
 
     startAccountRefreshLoop();
-    //checkAndRefreshCookiesLoop();
+    checkAndRefreshCookiesOnce();
 
     return true;
 }

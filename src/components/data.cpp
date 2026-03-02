@@ -97,6 +97,7 @@ namespace {
         account.isUsingCustomClient = safeGet<bool>(item, "isUsingCustomClient", false);
         account.clientName = safeGet<std::string>(item, "clientName", "");
         account.customClientBase = safeGet<std::string>(item, "customClientBase", "");
+        account.cookieAutoRefresh = safeGet<bool>(item, "cookieAutoRefresh", false);
         account.cookieLastUse = safeGet(item, "cookieLastUse", std::time(nullptr));
         account.cookieLastRefreshAttempt = safeGet(item, "cookieLastRefreshAttempt", 0);
         account.hbaPublicKey = safeGet<std::string>(item, "hbaPublicKey", "");
@@ -136,6 +137,7 @@ namespace {
             {"isUsingCustomClient",      account.isUsingCustomClient     },
             {"clientName",               account.clientName              },
             {"customClientBase",         account.customClientBase        },
+            {"cookieAutoRefresh",        account.cookieAutoRefresh       },
             {"cookieLastUse",            account.cookieLastUse           },
             {"cookieLastRefreshAttempt", account.cookieLastRefreshAttempt},
             {"hbaPublicKey",             account.hbaPublicKey            },
@@ -467,7 +469,6 @@ namespace Data {
             g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
             g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
             g_privacyModeEnabled = safeGet(j, "privacyModeEnabled", false);
-            g_autoCookieRefresh = safeGet(j, "autoCookieRefresh", false);
 
             if (j.contains("clientKeys") && j["clientKeys"].is_object()) {
                 g_clientKeys.clear();
@@ -494,8 +495,7 @@ namespace Data {
             {"clearCacheOnLaunch",    g_clearCacheOnLaunch   },
             {"multiRobloxEnabled",    g_multiRobloxEnabled   },
             {"clientKeys",            g_clientKeys           },
-            {"privacyModeEnabled",    g_privacyModeEnabled   },
-            {"autoCookieRefresh",     g_autoCookieRefresh    }
+            {"privacyModeEnabled",    g_privacyModeEnabled   }
         };
 
         const auto path = AltMan::Paths::Config(filename).string();

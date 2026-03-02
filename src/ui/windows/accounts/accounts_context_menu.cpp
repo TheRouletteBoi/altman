@@ -43,6 +43,9 @@ namespace {
     constexpr std::string_view ICON_RADIO_UNCHECKED = "\xEF\x84\x91";
     constexpr std::string_view ICON_RADIO_CHECKED = "\xEF\x86\x92";
 
+    constexpr std::string_view ICON_CHECKBOX_UNCHECKED = "\xEF\x83\x88";
+    constexpr std::string_view ICON_CHECKBOX_CHECKED = "\xEF\x85\x8A";
+
     struct VisibilityMenuState {
         bool isLoadingVisibility = false;
         bool isLoadingJoinRestriction = false;
@@ -954,6 +957,35 @@ void RenderAccountContextMenu(AccountData &account, const std::string &uniqueCon
         }
         ImGui::EndMenu();
     }
+
+    if (isMultiSelection) {
+        auto selectedAccounts = getSelectedAccountsOrderedMutable();
+        const bool allEnabled = std::ranges::all_of(selectedAccounts, [](const auto *acc) {
+            return acc->cookieAutoRefresh;
+        });
+        const auto& icon = allEnabled ? ICON_CHECKBOX_CHECKED : ICON_CHECKBOX_UNCHECKED;
+        if (ImGui::MenuItem(std::format("Auto Cookie Refresh  {}", icon).c_str())) {
+            for (auto *acc : selectedAccounts) {
+                acc->cookieAutoRefresh = !allEnabled;
+            }
+            Data::SaveAccounts();
+        }
+    } else {
+        const auto& icon = account.cookieAutoRefresh ? ICON_CHECKBOX_CHECKED : ICON_CHECKBOX_UNCHECKED;
+        if (ImGui::MenuItem(std::format("Auto Cookie Refresh  {}", icon).c_str())) {
+            account.cookieAutoRefresh = !account.cookieAutoRefresh;
+            Data::SaveAccounts();
+        }
+    }
+
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Refreshes cookies unused for 20+ days (checked every 7 days)\n"
+            "Only works while the cookie is still valid.\n"
+            "Warning: Signs out other active sessions\n"
+        );
+    }
+
     ImGui::Separator();
 
     if (ImGui::BeginMenu("Copy Info")) {

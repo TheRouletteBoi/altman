@@ -891,21 +891,6 @@ void RenderSettingsTab() {
     if (!g_accounts.empty()) {
         ImGui::SeparatorText("Accounts");
 
-        /*bool autoCookieRefresh = g_autoCookieRefresh;
-        if (ImGui::Checkbox("Auto Cookie Refresh", &autoCookieRefresh)) {
-            g_autoCookieRefresh = autoCookieRefresh;
-            Data::SaveSettings();
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "Automatically refreshes cookies for accounts unused for 20+ days.\n"
-                "A refresh is attempted at most once every 7 days per account.\n\n"
-                "Warning: This will sign out all other active sessions on that account.\n"
-                "Note: Only works while the cookie is still valid.\n"
-                "Expired cookies must be relogged in manually."
-            );
-        }*/
-
         int interval = g_statusRefreshInterval;
         if (ImGui::InputInt("Status Refresh Interval (min)", &interval)) {
             interval = std::max(1, interval);

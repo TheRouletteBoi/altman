@@ -34,6 +34,7 @@ struct AccountData {
         bool isUsingCustomClient = false;
         std::string clientName;
         std::string customClientBase;
+        bool cookieAutoRefresh = false;
         time_t cookieLastUse = 0;
         time_t cookieLastRefreshAttempt = 0;
         std::string hbaPublicKey; // HBA keypair: persisted so Roblox sees the same device across restarts
@@ -91,7 +92,6 @@ inline std::unordered_map<std::string, std::string> g_clientKeys;
 inline bool g_forceLatestRobloxVersion = false;
 inline std::vector<std::string> g_availableClientsNames = {"Default", "MacSploit", "Hydrogen", "Delta"};
 inline bool g_privacyModeEnabled = false;
-inline bool g_autoCookieRefresh = false;
 
 void invalidateAccountIndex();
 AccountData *getAccountById(int id);
