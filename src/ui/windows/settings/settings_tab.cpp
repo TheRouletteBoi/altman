@@ -877,15 +877,6 @@ void RenderSettingsTab() {
 
     ImGui::EndDisabled();
 
-    static bool lowFPS = false;
-    if (ImGui::Checkbox("Low FPS", &lowFPS)) {
-        // roblox-player.exe --fps=60
-    }
-    static bool noSound = false;
-    if (ImGui::Checkbox("No Sound", &noSound)) {
-        // roblox-player.exe --no-sound"
-    }
-
     ImGui::Spacing();
 
     if (!g_accounts.empty()) {
