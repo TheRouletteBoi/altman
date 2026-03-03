@@ -69,7 +69,7 @@ namespace {
 
     constexpr std::array serverTabs = {
         SeverTabInfo {"Public Servers", ServerTab::Public,  renderPublicServers },
-        SeverTabInfo {"Private Server", ServerTab::Private, renderPrivateServers}
+        SeverTabInfo {"Private Servers", ServerTab::Private, renderPrivateServers}
     };
 
     struct PrivateServer {
