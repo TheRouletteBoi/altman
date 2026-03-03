@@ -235,7 +235,7 @@ namespace AccountProcessor {
         invalidateAccountIndex();
     }
 
-    void showInvalidCookieModal(std::vector<int> invalidIds, std::string invalidNames) {
+    void showInvalidCookieModal(std::vector < int > invalidIds, std::string invalidNames) {
         if (invalidIds.empty()) {
             return;
         }
@@ -244,19 +244,25 @@ namespace AccountProcessor {
             auto message = std::format("Invalid cookies for: {}. Remove them?", names);
 
             ModalPopup::AddYesNo(message.c_str(), [ids]() {
-                std::unique_lock lock(g_accountsMutex);
+                WorkerThreads::runBackground([ids]() {
+                    {
+                        std::unique_lock lock(g_accountsMutex);
 
-                std::erase_if(g_accounts, [&ids](const AccountData &a) {
-                    return std::ranges::find(ids, a.id) != ids.end();
+                        std::erase_if(g_accounts, [ & ids](const AccountData & a) {
+                            return std::ranges::find(ids, a.id) != ids.end();
+                        });
+                        invalidateAccountIndex();
+                    }
+
+                    {
+                        std::lock_guard selLock(g_selectionMutex);
+                        for (int id: ids) {
+                            g_selectedAccountIds.erase(id);
+                        }
+                    }
+
+                    Data::SaveAccounts();
                 });
-
-                invalidateAccountIndex();
-
-                for (int id : ids) {
-                    g_selectedAccountIds.erase(id);
-                }
-
-                Data::SaveAccounts();
             });
         });
     }
