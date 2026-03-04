@@ -12,36 +12,10 @@
 #include <vector>
 
 #include "console/console.h"
+#include "system/system_info.h"
 #include "http.h"
 
 namespace IPAInstaller {
-
-    bool ExecuteCommand(const std::string &command, std::string &output) {
-        std::array<char, 128> buffer;
-        output.clear();
-
-        FILE *pipe = popen((command + " 2>&1").c_str(), "r");
-        if (!pipe) {
-            return false;
-        }
-
-        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-            output += buffer.data();
-        }
-
-        const int exitCode = pclose(pipe);
-        return WEXITSTATUS(exitCode) == 0;
-    }
-
-    std::string GetHardwareArchitecture() {
-        int isArm = 0;
-        size_t size = sizeof(isArm);
-
-        if (sysctlbyname("hw.optional.arm64", &isArm, &size, nullptr, 0) == 0 && isArm) {
-            return "aarch64";
-        }
-        return "x86_64";
-    }
 
     bool DownloadPackage(
         const std::filesystem::path &appDataDir,
@@ -194,7 +168,7 @@ namespace IPAInstaller {
             = std::format("/usr/bin/unzip -o -q -d \"{}\" \"{}\"", clientsDir.string(), ipaPath.string());
 
         std::string output;
-        if (!ExecuteCommand(unzipCmd, output)) {
+        if (!SystemInfo::ExecuteCommand(unzipCmd, output)) {
             LOG_ERROR("Failed to unzip {}: {}", client, output);
             return false;
         }
@@ -226,7 +200,7 @@ namespace IPAInstaller {
         const std::string chmodCmd
             = std::format("/bin/chmod +x \"{}\"", (finalAppPath / "Contents" / "MacOS" / "Roblox").string());
 
-        if (!ExecuteCommand(chmodCmd, output)) {
+        if (!SystemInfo::ExecuteCommand(chmodCmd, output)) {
             LOG_ERROR("Failed to chmod: {}", output);
             return false;
         }
@@ -252,7 +226,7 @@ namespace IPAInstaller {
                                          : std::format("/usr/bin/codesign --remove-signature \"{}\"", path.string());
 
         std::string output;
-        if (!ExecuteCommand(command, output)) {
+        if (!SystemInfo::ExecuteCommand(command, output)) {
             LOG_ERROR("Codesign failed: {}", output);
             return false;
         }
@@ -280,7 +254,7 @@ namespace IPAInstaller {
             const std::string changeIdCmd
                 = std::format("/usr/bin/install_name_tool -id \"@rpath/libgloop.dylib\" \"{}\"", libgloopPath.string());
 
-            if (!ExecuteCommand(changeIdCmd, output)) {
+            if (!SystemInfo::ExecuteCommand(changeIdCmd, output)) {
                 LOG_ERROR("Failed to change libgloop.dylib id: {}", output);
                 return false;
             }
@@ -290,7 +264,7 @@ namespace IPAInstaller {
                 executablePath.string()
             );
 
-            if (!ExecuteCommand(changeRefNewCmd, output)) {
+            if (!SystemInfo::ExecuteCommand(changeRefNewCmd, output)) {
                 LOG_ERROR("Failed to change libgloop reference (new layout): {}", output);
                 return false;
             }
@@ -300,7 +274,7 @@ namespace IPAInstaller {
                 executablePath.string()
             );
 
-            if (!ExecuteCommand(changeRefOldCmd, output)) {
+            if (!SystemInfo::ExecuteCommand(changeRefOldCmd, output)) {
                 LOG_ERROR("Failed to change libgloop reference (old layout): {}", output);
                 return false;
             }
@@ -329,7 +303,7 @@ namespace IPAInstaller {
                 oldRpath,
                 executablePath.string()
             );
-            ExecuteCommand(deleteCmd, output);
+            SystemInfo::ExecuteCommand(deleteCmd, output);
         }
 
         const std::string addCmd = std::format(
@@ -337,7 +311,7 @@ namespace IPAInstaller {
             executablePath.string()
         );
 
-        if (!ExecuteCommand(addCmd, output)) {
+        if (!SystemInfo::ExecuteCommand(addCmd, output)) {
             LOG_ERROR("Failed to add rpath: {}", output);
             return false;
         }
@@ -362,7 +336,7 @@ namespace IPAInstaller {
         );
 
         std::string output;
-        if (!ExecuteCommand(command, output)) {
+        if (!SystemInfo::ExecuteCommand(command, output)) {
             LOG_ERROR("Convert failed: {}", output);
             return false;
         }
@@ -383,7 +357,7 @@ namespace IPAInstaller {
             = std::format("/usr/bin/plutil -convert xml1 -o \"{}\" \"{}\"", path.string(), path.string());
 
         std::string output;
-        if (!ExecuteCommand(command, output)) {
+        if (!SystemInfo::ExecuteCommand(command, output)) {
             LOG_ERROR("Convert plist failed: {}", output);
             return false;
         }
@@ -481,8 +455,8 @@ namespace IPAInstaller {
         const std::string &version,
         ProgressCallback progressCb
     ) {
-        const std::string arch = GetHardwareArchitecture();
-        if (arch != "aarch64") {
+        const std::string arch = SystemInfo::GetHardwareArchitecture();
+        if (arch != "arm64") {
             LOG_ERROR("IPA installation only available on Apple Silicon");
             return false;
         }

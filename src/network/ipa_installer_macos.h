@@ -8,9 +8,6 @@ namespace IPAInstaller {
     using ProgressCallback = std::function<void(float progress, const std::string &message)>;
     using CompletionCallback = std::function<void(bool success, const std::string &message)>;
 
-    bool ExecuteCommand(const std::string &command, std::string &output);
-    std::string GetHardwareArchitecture();
-
     bool DownloadPackage(
         const std::string &appDataDir,
         const std::string &url,
