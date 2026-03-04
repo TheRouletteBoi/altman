@@ -136,6 +136,15 @@ namespace IPAInstaller {
             std::filesystem::remove_all(oldFrameworks, ec);
         }
 
+        const std::filesystem::path rootLibgloop = appDir / "libgloop.dylib";
+        if (std::filesystem::exists(rootLibgloop)) {
+            std::filesystem::rename(rootLibgloop, frameworksDir / "libgloop.dylib", ec);
+            if (ec) {
+                LOG_ERROR("Failed to move libgloop.dylib to Frameworks: {}", ec.message());
+                return false;
+            }
+        }
+
         const std::filesystem::path oldPlist = appDir / "Info.plist";
         if (std::filesystem::exists(oldPlist)) {
             std::filesystem::rename(oldPlist, contentsDir / "Info.plist", ec);
@@ -276,13 +285,23 @@ namespace IPAInstaller {
                 return false;
             }
 
-            const std::string changeRefCmd = std::format(
+            const std::string changeRefNewCmd = std::format(
+                "/usr/bin/install_name_tool -change \"@executable_path/libgloop.dylib\" \"@rpath/libgloop.dylib\" \"{}\"",
+                executablePath.string()
+            );
+
+            if (!ExecuteCommand(changeRefNewCmd, output)) {
+                LOG_ERROR("Failed to change libgloop reference (new layout): {}", output);
+                return false;
+            }
+
+            const std::string changeRefOldCmd = std::format(
                 "/usr/bin/install_name_tool -change \"@executable_path/Frameworks/libgloop.dylib\" \"@rpath/libgloop.dylib\" \"{}\"",
                 executablePath.string()
             );
 
-            if (!ExecuteCommand(changeRefCmd, output)) {
-                LOG_ERROR("Failed to change libgloop reference in executable: {}", output);
+            if (!ExecuteCommand(changeRefOldCmd, output)) {
+                LOG_ERROR("Failed to change libgloop reference (old layout): {}", output);
                 return false;
             }
 
