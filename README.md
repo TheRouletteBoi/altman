@@ -6,7 +6,7 @@
             style="display: block; margin: 0 auto" />
 <h1>AltMan</h1>
 <h3>Roblox Account Manager & Multi Instance Launcher</h3>
-<p><strong>AltMan</strong> is a cross platform Roblox account manager focused on stability, transparency, and local user control. It enables managing multiple Roblox accounts, launching multiple instances, and switching accounts without repeated logins.</p>
+<p><strong>AltMan</strong> is a cross platform Roblox account manager. It lets you store multiple accounts, launch multiple Roblox instances, and switch between accounts without logging in every time.</p>
 
 <p>
     <img src="https://img.shields.io/badge/Roblox-Account%20Manager-red" alt="Roblox Account Manager"/>
@@ -14,23 +14,6 @@
     <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-blue" alt="Platform"/>
 </p>
 </div>
-
----
-
-## Project Goals
-
-* Provide a stable and predictable Roblox account manager
-* Keep all data local, encrypted, and under user control
-* Support multi instance workflows without background services
-* Maintain a clear, contributor friendly codebase
-
----
-
-## What is AltMan?
-
-AltMan allows you to manage multiple Roblox accounts within a single application. It simplifies switching between accounts, launching multiple Roblox clients simultaneously, and joining servers through multiple supported methods.
-
-The project is designed to be straightforward, auditable, and extensible rather than opaque or over automated.
 
 ---
 
@@ -47,7 +30,7 @@ The project is designed to be straightforward, auditable, and extensible rather 
   * View joinable private servers
   * Manage private servers you own
 * **Advanced Filtering** – Filter servers by ping or player count
-* **Game Discovery** – Search Roblox games by title or keyword
+* **Game Search** – Search Roblox games by title or keyword
 * **Log Parser** – Convert Roblox logs into a human readable format
 * **Multiple Client Support (macOS only)** – Assign different Roblox clients per account:
 
@@ -95,23 +78,23 @@ The project is designed to be straightforward, auditable, and extensible rather 
 
 ## Contributing
 
-This project is actively maintained and welcomes contributions.
+Contributions are welcome.
 
-### How to contribute
+If you want to help:
 
-* Fork the repository
-* Create a feature branch from `main`
-* Keep changes focused and well scoped
-* Follow existing project structure and code style
-* Open a pull request explaining **what** changed and **why**
+1.  Fork the repository
+2.  Create a branch from `main`
+3.  Keep changes small and focused
+4.  Follow the existing structure/style
+5.  Open a pull request explaining what you changed
 
-### Before submitting
+Before submitting a PR:
 
-* Open an issue first for large or architectural changes
-* Ensure the project builds successfully on your platform
-* Avoid unrelated refactors in the same pull request
+-   Open an issue first for major changes
+-   Make sure the project builds
+-   Avoid mixing refactors with new features
 
-Issues, bug reports, and feature discussions are welcome.
+Bug reports and feature ideas are always welcome.
 
 ---
 
@@ -172,34 +155,22 @@ cmake --build build --config Release --target AltMan -j 8
 
 ---
 
-## Security & Transparency
-
-AltMan is designed with a strong emphasis on transparency and user awareness.
+## Security
 
 * Account cookies are stored **locally** and **encrypted** on your machine
 * No account data is transmitted to third party servers
 
----
+## Risk notice
 
-## License
+Tools that manage cookies or run multiple Roblox clients can carry risk.
 
-This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+Depending on how they are used they **may violate Roblox Terms of
+Service** and could potentially lead to warnings, suspensions, or bans.
 
----
+AltMan does **not attempt to bypass Roblox security systems**, but you
+are responsible for how you use it.
 
-## Important risk notice
-
-Using account managers, multi instance tools, or automation related features may:
-
-* Violate Roblox’s Terms of Service depending on usage
-* Trigger automated moderation or anti cheat systems
-* Result in warnings, temporary suspensions, or permanent bans
-
-AltMan does **not** attempt to bypass Roblox security systems. However, any tool that manages cookies or launches multiple clients carries inherent risk.
-
-**You are solely responsible for how you use this app.**
-
-Never share your cookies with anyone.
+Never share your cookies.
 
 ---
 
