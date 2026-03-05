@@ -300,18 +300,12 @@ void AutoUpdater::LaunchUpdateScript() {
     const auto scriptPath = GetUpdateScriptPath();
 
 #ifdef _WIN32
-    if (!LaunchPowerShellScript(std::format("-ExecutionPolicy Bypass -File \"{}\"", scriptPath.string()), false)) {
+    if (!SystemInfo::LaunchPowerShellScript(std::format("-ExecutionPolicy Bypass -File \"{}\"", scriptPath.string()), false)) {
         LOG_ERROR("Failed to launch update script");
         return;
     }
 #else
-    pid_t pid;
-    std::string path = scriptPath.string();
-    char *argv[] = {const_cast<char *>("/bin/bash"), const_cast<char *>(path.c_str()), nullptr};
-
-    if (posix_spawn(&pid, "/bin/bash", nullptr, nullptr, argv, environ) != 0) {
-        LOG_ERROR("Failed to launch update script");
-    }
+    SystemInfo::LaunchBashScript(scriptPath);
 #endif
 }
 
@@ -535,49 +529,6 @@ bool AutoUpdater::ApplyUniversalDeltaUpdate(
     std::filesystem::remove_all(tempDir);
 
     LOG_INFO("Universal binary delta update applied successfully");
-    return true;
-}
-#endif
-
-#ifdef _WIN32
-bool AutoUpdater::LaunchPowerShellScript(const std::string &psArguments, bool waitForCompletion) {
-    SHELLEXECUTEINFOW sei {};
-    sei.cbSize    = sizeof(sei);
-    sei.fMask     = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb    = L"open";
-    sei.lpFile    = L"powershell.exe";
-    sei.nShow     = SW_HIDE;
-
-    const std::string fullArgs = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass " + psArguments;
-
-    const int wlen = MultiByteToWideChar(CP_UTF8, 0, fullArgs.c_str(), -1, nullptr, 0);
-    std::wstring argsW(wlen, 0);
-    MultiByteToWideChar(CP_UTF8, 0, fullArgs.c_str(), -1, argsW.data(), wlen);
-
-    sei.lpParameters = argsW.c_str();
-
-    if (!ShellExecuteExW(&sei)) {
-        LOG_ERROR("Failed to launch PowerShell: {}", GetLastError());
-        return false;
-    }
-
-    if (sei.hProcess) {
-        if (waitForCompletion) {
-            WaitForSingleObject(sei.hProcess, INFINITE);
-
-            DWORD exitCode = 0;
-            GetExitCodeProcess(sei.hProcess, &exitCode);
-            CloseHandle(sei.hProcess);
-
-            if (exitCode != 0) {
-                LOG_ERROR("PowerShell exited with code {}", exitCode);
-                return false;
-            }
-        } else {
-            CloseHandle(sei.hProcess);
-        }
-    }
-
     return true;
 }
 #endif

@@ -158,9 +158,69 @@ namespace SystemInfo {
         }
     }
 
-#ifdef __APPLE__
+#ifdef _WIN32
+    bool LaunchProcess(const std::string& command) {
+        SHELLEXECUTEINFOA info{sizeof(info)};
+        info.fMask = SEE_MASK_NOCLOSEPROCESS;
+        info.lpVerb = "open";
+        info.lpFile = command.c_str();
+        info.nShow = SW_SHOWNORMAL;
+
+        if (!ShellExecuteExA(&info)) {
+            LOG_ERROR("ShellExecuteExA failed. Error: {}", GetLastError());
+            return false;
+        }
+
+        if (info.hProcess) {
+            CloseHandle(info.hProcess);
+        }
+
+        return true;
+    }
+
+    bool LaunchPowerShellScript(const std::string &psArguments, bool waitForCompletion) {
+        SHELLEXECUTEINFOW sei {};
+        sei.cbSize    = sizeof(sei);
+        sei.fMask     = SEE_MASK_NOCLOSEPROCESS;
+        sei.lpVerb    = L"open";
+        sei.lpFile    = L"powershell.exe";
+        sei.nShow     = SW_HIDE;
+
+        const std::string fullArgs = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass " + psArguments;
+
+        const int wlen = MultiByteToWideChar(CP_UTF8, 0, fullArgs.c_str(), -1, nullptr, 0);
+        std::wstring argsW(wlen, 0);
+        MultiByteToWideChar(CP_UTF8, 0, fullArgs.c_str(), -1, argsW.data(), wlen);
+
+        sei.lpParameters = argsW.c_str();
+
+        if (!ShellExecuteExW(&sei)) {
+            LOG_ERROR("Failed to launch PowerShell: {}", GetLastError());
+            return false;
+        }
+
+        if (sei.hProcess) {
+            if (waitForCompletion) {
+                WaitForSingleObject(sei.hProcess, INFINITE);
+
+                DWORD exitCode = 0;
+                GetExitCodeProcess(sei.hProcess, &exitCode);
+                CloseHandle(sei.hProcess);
+
+                if (exitCode != 0) {
+                    LOG_ERROR("PowerShell exited with code {}", exitCode);
+                    return false;
+                }
+            } else {
+                CloseHandle(sei.hProcess);
+            }
+        }
+
+        return true;
+    }
+#elif __APPLE__
     bool ExecuteCommand(const std::string &command, std::string &output) {
-        std::array<char, 128> buffer;
+        std::array<char, 128> buffer{};
         output.clear();
 
         FILE *pipe = popen((command + " 2>&1").c_str(), "r");
@@ -296,6 +356,19 @@ namespace SystemInfo {
         };
         opts.waitForCompletion = true;
         return SpawnProcessWithEnv(program, args, opts);
+    }
+
+    bool LaunchBashScript(const std::filesystem::path& scriptPath) {
+        pid_t pid;
+        std::string path = scriptPath.string();
+        char* argv[] = {const_cast<char*>("/bin/bash"), const_cast<char*>(path.c_str()), nullptr};
+
+        if (posix_spawn(&pid, "/bin/bash", nullptr, nullptr, argv, environ) != 0) {
+            //LOG_ERROR("Failed to launch bash script: {}", scriptPath.string());
+            return false;
+        }
+
+        return true;
     }
 #endif
 

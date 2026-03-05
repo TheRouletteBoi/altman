@@ -10,17 +10,6 @@
 #include <regex>
 #include <sstream>
 
-#ifdef _WIN32
-#include <windows.h>
-#include <shellapi.h>
-#elif __APPLE__
-#include <spawn.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#include "utils/paths.h"
-#endif
-
 #include "components/data.h"
 #include "console/console.h"
 #include "multi_instance.h"
@@ -31,6 +20,7 @@
 #include "roblox_control.h"
 #include "ui/widgets/notifications.h"
 #include "utils/account_utils.h"
+#include "utils/paths.h"
 #include "utils/worker_thread.h"
 
 LaunchParams LaunchParams::standard(uint64_t placeId) {
@@ -281,19 +271,9 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
     const auto &launchUrl = urls->desktop;
     const auto protocolCommand = buildProtocolCommand(false, ticket, timestamp, launchUrl, browserTrackerId);
 
-    SHELLEXECUTEINFOA executionInfo {sizeof(executionInfo)};
-    executionInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
-    executionInfo.lpVerb = "open";
-    executionInfo.lpFile = protocolCommand.c_str();
-    executionInfo.nShow = SW_SHOWNORMAL;
-
-    if (!ShellExecuteExA(&executionInfo)) {
-        LOG_ERROR("ShellExecuteExA failed for Roblox launch. Error: {}", GetLastError());
+    if (!SystemInfo::LaunchProcess(protocolCommand)) {
+        LOG_ERROR("failed for Roblox launch.");
         return false;
-    }
-
-    if (executionInfo.hProcess) {
-        CloseHandle(executionInfo.hProcess);
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));

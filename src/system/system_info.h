@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <string>
@@ -30,7 +31,12 @@ namespace SystemInfo {
     std::string GetHardwareArchitecture();
 
     bool IsRunningUnderEmulation();
-#ifdef __APPLE__
+
+#ifdef _WIN32
+    bool LaunchProcess(const std::string& command);
+    bool LaunchPowerShellScript(const std::string &psArguments, bool waitForCompletion);
+
+#elif __APPLE__
     bool IsRunningUnderRosetta();
 
     struct SpawnOptions {
@@ -45,6 +51,8 @@ namespace SystemInfo {
     bool SpawnProcessWithEnv(const char *program, const std::vector<const char *> &args, const SpawnOptions &opts);
 
     bool SpawnWithCustomHome(const char *program, const std::vector<const char *> &args, const std::string &customHome);
+
+    bool LaunchBashScript(const std::filesystem::path& scriptPath);
 #endif
 
 } // namespace SystemInfo

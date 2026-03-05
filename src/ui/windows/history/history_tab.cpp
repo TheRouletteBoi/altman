@@ -13,6 +13,7 @@
 
 #include <imgui.h>
 
+#include "main_common.h"
 #include "../accounts/accounts_join_ui.h"
 #include "components/data.h"
 #include "console/console.h"
@@ -27,14 +28,6 @@
 #include "utils/account_utils.h"
 #include "utils/worker_thread.h"
 #include "utils/time_utils.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#include <shellapi.h>
-#elif __APPLE__
-#include <unistd.h>
-#endif
-
 
 namespace {
     constexpr auto ICON_REFRESH = "\xEF\x8B\xB1 ";
@@ -58,26 +51,6 @@ namespace {
     bool g_search_active = false;
     bool g_should_scroll_to_selection = false;
 } // namespace
-
-static void OpenFileOrFolder(const std::filesystem::path &path) {
-#ifdef _WIN32
-    ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-
-#elif defined(__APPLE__)
-    pid_t pid = fork();
-    if (pid == 0) {
-        execl("/usr/bin/open", "open", path.c_str(), (char *) nullptr);
-        _exit(1);
-    }
-
-#else // Linux / BSD
-    pid_t pid = fork();
-    if (pid == 0) {
-        execlp("xdg-open", "xdg-open", path.c_str(), (char *) nullptr);
-        _exit(1);
-    }
-#endif
-}
 
 static void openLogsFolder() {
     auto dir = GetLogsFolder();

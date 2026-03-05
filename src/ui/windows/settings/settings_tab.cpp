@@ -13,6 +13,7 @@
 #include <vector>
 #include "settings.h"
 
+#include "main_common.h"
 #include "components/data.h"
 #include "console/console.h"
 #include "system/auto_updater.h"
@@ -265,14 +266,8 @@ namespace {
             return;
         }
 
-        const std::string command = std::format("open \"{}\"", documentsPath);
-        const int result = std::system(command.c_str());
-
-        if (result == 0) {
-            LOG_INFO("Opened documents folder for: {}", acc.username);
-        } else {
-            LOG_ERROR("Failed to open documents folder for: {}", acc.username);
-        }
+        OpenFileOrFolder(documentsPath);
+        LOG_INFO("Opened documents folder for: {}", acc.username);
     }
 
     void OpenAccountEnvironmentFolder(const AccountData &acc) {
@@ -289,14 +284,8 @@ namespace {
             return;
         }
 
-        const std::string command = std::format("open \"{}\"", envPath);
-        const int result = std::system(command.c_str());
-
-        if (result == 0) {
-            LOG_INFO("Opened environment folder for: {}", acc.username);
-        } else {
-            LOG_ERROR("Failed to open environment folder for: {}", acc.username);
-        }
+        OpenFileOrFolder(envPath);
+        LOG_INFO("Opened environment folder for: {}", acc.username);
     }
 
     void CleanAccountEnvironment(const AccountData &acc) {

@@ -213,10 +213,6 @@ class AutoUpdater {
         );
 #endif
 
-#ifdef _WIN32
-        [[nodiscard]] static bool LaunchPowerShellScript(const std::string &psArguments, bool waitForCompletion);
-#endif
-
         [[nodiscard]] static UpdateInfo ParseReleaseInfo(const nlohmann::json &release, UpdateChannel channel);
         [[nodiscard]] static std::string GetReleaseEndpoint(UpdateChannel channel);
         [[nodiscard]] static bool MatchesChannel(const nlohmann::json &release, UpdateChannel channel);

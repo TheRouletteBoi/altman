@@ -86,6 +86,15 @@ void OpenURL(const char* url) {
     }
 }
 
+void OpenFileOrFolder(const std::filesystem::path &path) {
+    @autoreleasepool {
+        NSString *nsPath = [NSString stringWithUTF8String:path.c_str()];
+        if (nsPath) {
+            [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:nsPath]];
+       }
+    }
+}
+
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @end
 

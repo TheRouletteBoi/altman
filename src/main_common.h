@@ -42,6 +42,7 @@ inline std::atomic<bool> g_running = true;
 
 void LoadImGuiFonts(float scaledFontSize);
 void OpenURL(const char* url);
+void OpenFileOrFolder(const std::filesystem::path &path);
 
 namespace AccountProcessor {
 
