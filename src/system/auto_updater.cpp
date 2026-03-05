@@ -21,22 +21,11 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <shellapi.h>
-#else
-
-#include <sys/sysctl.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#ifdef __APPLE__
+#elif __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
-#include <Security/Security.h>
 #include <mach-o/dyld.h>
-#include <spawn.h>
 #include <sys/stat.h>
-extern char **environ;
-#endif
-
+#include <sys/sysctl.h>
 #endif
 
 std::filesystem::path UpdaterConfig::GetConfigPath() {

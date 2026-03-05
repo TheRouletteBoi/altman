@@ -22,6 +22,7 @@
 #include "utils/account_utils.h"
 #include "utils/paths.h"
 #include "utils/worker_thread.h"
+#include "system/system_info.h"
 
 LaunchParams LaunchParams::standard(uint64_t placeId) {
     return {LaunchMode::Job, placeId, ""};

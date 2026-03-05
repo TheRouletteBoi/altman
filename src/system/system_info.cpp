@@ -6,6 +6,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>
 #elif __APPLE__
 #include <fcntl.h>
 #include <spawn.h>
@@ -167,7 +168,7 @@ namespace SystemInfo {
         info.nShow = SW_SHOWNORMAL;
 
         if (!ShellExecuteExA(&info)) {
-            LOG_ERROR("ShellExecuteExA failed. Error: {}", GetLastError());
+            //LOG_ERROR("ShellExecuteExA failed. Error: {}", GetLastError());
             return false;
         }
 
@@ -195,7 +196,7 @@ namespace SystemInfo {
         sei.lpParameters = argsW.c_str();
 
         if (!ShellExecuteExW(&sei)) {
-            LOG_ERROR("Failed to launch PowerShell: {}", GetLastError());
+            //LOG_ERROR("Failed to launch PowerShell: {}", GetLastError());
             return false;
         }
 
@@ -208,7 +209,7 @@ namespace SystemInfo {
                 CloseHandle(sei.hProcess);
 
                 if (exitCode != 0) {
-                    LOG_ERROR("PowerShell exited with code {}", exitCode);
+                    //LOG_ERROR("PowerShell exited with code {}", exitCode);
                     return false;
                 }
             } else {
