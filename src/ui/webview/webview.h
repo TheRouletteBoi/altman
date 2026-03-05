@@ -6,7 +6,13 @@
 #include "components/data.h"
 #include "ui/webview/webview.h"
 
+struct LoginCredentials {
+    std::string cookie;
+    std::string password;
+};
+
 using CookieCallback = std::function<void(const std::string &)>;
+using CredentialsCallback = std::function<void(const LoginCredentials &)>;
 
 void LaunchWebviewImpl(
     const std::string &url,
@@ -21,3 +27,5 @@ void LaunchWebview(const std::string &url, const AccountData &account);
 void LaunchWebview(const std::string &url, const AccountData &account, const std::string &windowName);
 
 void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CookieCallback onCookieExtracted);
+
+void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CredentialsCallback onCredentialsExtracted);

@@ -92,14 +92,16 @@ static NSMutableDictionary *GetWebByUser() {
     return g_webByUser;
 }
 
-@interface WebViewWindowController : NSObject <NSWindowDelegate, WKNavigationDelegate>
+@interface WebViewWindowController : NSObject <NSWindowDelegate, WKNavigationDelegate, WKScriptMessageHandler>
 @property(strong) NSWindow *window;
 @property(strong) WKWebView *webView;
 @property(strong) NSString *cookieValue;
 @property(strong) NSString *userDataFolder;
 @property(strong) NSString *accountKey;
+@property(strong) NSString *capturedPassword;
 @property(assign) BOOL isLoginFlow;
 @property(copy) void (^cookieCallback)(NSString *);
+@property(copy) void (^credentialsCallback)(NSString *cookie, NSString *password);
 
 - (instancetype)initWithURL:(NSString *)url
                       title:(NSString *)title
@@ -107,7 +109,8 @@ static NSMutableDictionary *GetWebByUser() {
                  accountKey:(NSString *)accountKey
               userDataFolder:(NSString *)userDataFolder
                 isLoginFlow:(BOOL)isLoginFlow
-             cookieCallback:(void (^)(NSString *))callback;
+             cookieCallback:(void (^)(NSString *))callback
+        credentialsCallback:(void (^)(NSString *cookie, NSString *password))credCallback;
 - (void)show;
 - (void)extractAndNotifyCookie;
 @end
@@ -120,7 +123,8 @@ static NSMutableDictionary *GetWebByUser() {
                  accountKey:(NSString *)accountKey
               userDataFolder:(NSString *)userDataFolder
                 isLoginFlow:(BOOL)isLoginFlow
-             cookieCallback:(void (^)(NSString *))callback {
+             cookieCallback:(void (^)(NSString *))callback
+        credentialsCallback:(void (^)(NSString *cookie, NSString *password))credCallback {
     self = [super init];
     if (self) {
         _cookieValue = cookie;
@@ -128,6 +132,8 @@ static NSMutableDictionary *GetWebByUser() {
         _userDataFolder = [userDataFolder copy];
         _isLoginFlow = isLoginFlow;
         _cookieCallback = [callback copy];
+        _credentialsCallback = [credCallback copy];
+        _capturedPassword = @"";
 
         NSRect frame = NSMakeRect(100, 100, 1280, 800);
         NSWindowStyleMask styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
@@ -145,7 +151,7 @@ static NSMutableDictionary *GetWebByUser() {
 
         config.suppressesIncrementalRendering = NO;
 
-        if (callback != nil || (cookie && [cookie length] > 0)) {
+        if (callback != nil || credCallback != nil || (cookie && [cookie length] > 0)) {
             config.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
         } else {
             config.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
@@ -158,6 +164,35 @@ static NSMutableDictionary *GetWebByUser() {
             injectionTime:WKUserScriptInjectionTimeAtDocumentStart
             forMainFrameOnly:NO];
         [config.userContentController addUserScript:script];
+
+        if (isLoginFlow) {
+            [config.userContentController addScriptMessageHandler:self name:@"altmanPw"];
+
+            NSString *credentialCaptureJS = @""
+                "(function() {"
+                "    function hookPasswordField(pw) {"
+                "        if (!pw || pw.__altman_hooked) return;"
+                "        pw.__altman_hooked = true;"
+                "        pw.addEventListener('input', function() {"
+                "            window.webkit.messageHandlers.altmanPw.postMessage(pw.value);"
+                "        });"
+                "        if (pw.value) {"
+                "            window.webkit.messageHandlers.altmanPw.postMessage(pw.value);"
+                "        }"
+                "    }"
+                "    hookPasswordField(document.querySelector('input[type=\"password\"]'));"
+                "    new MutationObserver(function() {"
+                "        hookPasswordField(document.querySelector('input[type=\"password\"]'));"
+                "    }).observe(document, { subtree: true, childList: true });"
+                "})();"
+                ;
+
+            WKUserScript *credScript = [[WKUserScript alloc]
+                initWithSource:credentialCaptureJS
+                injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                forMainFrameOnly:YES];
+            [config.userContentController addUserScript:credScript];
+        }
 
         config.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
 
@@ -199,7 +234,7 @@ static NSMutableDictionary *GetWebByUser() {
 }
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
-    if (_cookieCallback) {
+    if (_cookieCallback || _credentialsCallback) {
         NSString *urlString = webView.URL.absoluteString;
 
         if ([urlString containsString:@"roblox.com"]) {
@@ -224,7 +259,22 @@ static NSMutableDictionary *GetWebByUser() {
       if (robloSecurityValue && self.cookieCallback) {
           self.cookieCallback(robloSecurityValue);
       }
+
+      if (robloSecurityValue && self.credentialsCallback) {
+          self.credentialsCallback(robloSecurityValue, self.capturedPassword ?: @"");
+          self.capturedPassword = @"";
+      }
     }];
+}
+
+- (void)userContentController:(WKUserContentController *)userContentController
+      didReceiveScriptMessage:(WKScriptMessage *)message {
+    if ([message.name isEqualToString:@"altmanPw"] && [message.body isKindOfClass:[NSString class]]) {
+        NSString *pw = (NSString *)message.body;
+        if ([pw length] > 0) {
+            _capturedPassword = [pw copy];
+        }
+    }
 }
 
 - (void)preWarmNetwork {
@@ -282,6 +332,10 @@ static NSMutableDictionary *GetWebByUser() {
         std::filesystem::remove_all([_userDataFolder UTF8String], ec);
     }
 
+    if (_isLoginFlow && _webView) {
+        [_webView.configuration.userContentController removeScriptMessageHandlerForName:@"altmanPw"];
+    }
+
     _webView = nil;
     _window = nil;
 }
@@ -335,7 +389,8 @@ void LaunchWebviewImpl(
                                                                                   accountKey:nsAccountKey
                                                                               userDataFolder:nsUserDataFolder
                                                                                  isLoginFlow:(isLoginFlow ? YES : NO)
-                                                                              cookieCallback:objcCallback];
+                                                                              cookieCallback:objcCallback
+                                                                         credentialsCallback:nil];
 
           dict[nsAccountKey] = controller;
 
@@ -367,4 +422,47 @@ void LaunchWebview(const std::string &url, const AccountData &account, const std
 
 void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CookieCallback onCookieExtracted) {
     LaunchWebviewImpl(url, windowName, "", "", std::move(onCookieExtracted));
+}
+
+void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CredentialsCallback onCredentialsExtracted) {
+    const bool isLoginFlow = true;
+    std::string accountKey = ComputeAccountKey(url, "", "", isLoginFlow);
+    std::string userDataPath = ComputeUserDataPath("", "", isLoginFlow);
+
+    std::string urlCopy = url;
+    std::string titleCopy = windowName;
+
+    void (^objcCredCallback)(NSString *, NSString *) = nullptr;
+    if (onCredentialsExtracted) {
+        objcCredCallback = ^(NSString *cookieValue, NSString *password) {
+          LoginCredentials creds;
+          creds.cookie = [cookieValue UTF8String];
+          creds.password = password ? [password UTF8String] : "";
+          onCredentialsExtracted(creds);
+        };
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+      @autoreleasepool {
+          NSString *nsUrl = [NSString stringWithUTF8String:urlCopy.c_str()];
+          NSString *nsTitle = [NSString stringWithUTF8String:titleCopy.c_str()];
+          NSString *nsAccountKey = [NSString stringWithUTF8String:accountKey.c_str()];
+          NSString *nsUserDataFolder = [NSString stringWithUTF8String:userDataPath.c_str()];
+
+          WebViewWindowController *controller = [[WebViewWindowController alloc] initWithURL:nsUrl
+                                                                                       title:nsTitle
+                                                                                      cookie:nil
+                                                                                  accountKey:nsAccountKey
+                                                                              userDataFolder:nsUserDataFolder
+                                                                                 isLoginFlow:YES
+                                                                              cookieCallback:nil
+                                                                         credentialsCallback:objcCredCallback];
+
+          NSMutableDictionary *dict = GetWebByUser();
+          dict[nsAccountKey] = controller;
+
+          [controller show];
+          [NSApp activateIgnoringOtherApps:YES];
+      }
+    });
 }

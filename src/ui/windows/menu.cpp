@@ -324,6 +324,19 @@ bool RenderMainMenu() {
         ImGui::Separator();
 
         if (ImGui::BeginMenu("Add Account")) {
+
+            if (ImGui::MenuItem("Add via Login")) {
+                LaunchWebviewForLogin(
+                    "https://www.roblox.com/login",
+                    "Login to Roblox",
+                    [](const std::string &extractedCookie) {
+                        if (!extractedCookie.empty()) {
+                            ValidateAndAddCookie(extractedCookie);
+                        }
+                    }
+                );
+            }
+
             if (ImGui::BeginMenu("Add via Cookie")) {
                 ImGui::TextUnformatted("Enter Cookie:");
                 ImGui::PushItemWidth(ImGui::GetFontSize() * 25);
@@ -344,18 +357,6 @@ bool RenderMainMenu() {
                     }
                 }
                 ImGui::EndMenu();
-            }
-
-            if (ImGui::MenuItem("Add via Login")) {
-                LaunchWebviewForLogin(
-                    "https://www.roblox.com/login",
-                    "Login to Roblox",
-                    [](const std::string &extractedCookie) {
-                        if (!extractedCookie.empty()) {
-                            ValidateAndAddCookie(extractedCookie);
-                        }
-                    }
-                );
             }
 
             if (ImGui::MenuItem("Add Multiple via Cookie")) {
