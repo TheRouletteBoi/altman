@@ -5,70 +5,70 @@
 
 #include <imgui.h>
 
-void RenderStandardJoinMenu(const StandardJoinMenuParams &p) {
-    if (ImGui::BeginMenu("Copy", p.placeId != 0)) {
+void RenderStandardJoinMenu(const StandardJoinMenuParams &params) {
+    if (ImGui::BeginMenu("Copy", params.placeId != 0)) {
         if (ImGui::MenuItem("Game ID")) {
-            ImGui::SetClipboardText(std::format("{}", p.placeId).c_str());
+            ImGui::SetClipboardText(std::format("{}", params.placeId).c_str());
         }
 
-        if (p.universeId != 0 && ImGui::MenuItem("Universe ID")) {
-            ImGui::SetClipboardText(std::format("{}", p.universeId).c_str());
+        if (params.universeId != 0 && ImGui::MenuItem("Universe ID")) {
+            ImGui::SetClipboardText(std::format("{}", params.universeId).c_str());
         }
 
-        if (!p.jobId.empty()) {
+        if (!params.jobId.empty()) {
             if (ImGui::MenuItem("Instance ID")) {
-                ImGui::SetClipboardText(p.jobId.c_str());
+                ImGui::SetClipboardText(params.jobId.c_str());
             }
         }
 
-        if (p.placeId != 0) {
+        if (params.placeId != 0) {
             ImGui::Separator();
             if (ImGui::MenuItem("Browser Link (Game)##game")) {
                 ImGui::SetClipboardText(
-                    std::format("https://www.roblox.com/games/start?placeId={}", p.placeId).c_str()
+                    std::format("https://www.roblox.com/games/start?placeId={}", params.placeId).c_str()
                 );
             }
             if (ImGui::MenuItem("Deep Link (Game)##game")) {
-                ImGui::SetClipboardText(std::format("roblox://placeId={}", p.placeId).c_str());
+                ImGui::SetClipboardText(std::format("roblox://placeId={}", params.placeId).c_str());
             }
             if (ImGui::MenuItem("JavaScript (Game)##game")) {
-                ImGui::SetClipboardText(std::format("Roblox.GameLauncher.joinGameInstance({})", p.placeId).c_str());
+                ImGui::SetClipboardText(std::format("Roblox.GameLauncher.joinGameInstance({})", params.placeId).c_str());
             }
             if (ImGui::MenuItem("Roblox Luau (Game)##game")) {
                 ImGui::SetClipboardText(
-                    std::format("game:GetService(\"TeleportService\"):Teleport({})", p.placeId).c_str()
+                    std::format("game:GetService(\"TeleportService\"):Teleport({})", params.placeId).c_str()
                 );
             }
 
-            if (!p.jobId.empty()) {
+            if (!params.jobId.empty()) {
                 ImGui::Separator();
 
                 if (ImGui::MenuItem("Browser Link (Instance)##instance")) {
                     ImGui::SetClipboardText(
                         std::format(
                             "https://www.roblox.com/games/start?placeId={}&gameInstanceId={}",
-                            p.placeId,
-                            p.jobId
+                            params.placeId,
+                            params.jobId
                         )
                             .c_str()
                     );
                 }
                 if (ImGui::MenuItem("Deep Link (Instance)##instance")) {
                     ImGui::SetClipboardText(
-                        std::format("roblox://placeId={}&gameInstanceId={}", p.placeId, p.jobId).c_str()
+                        std::format("roblox://placeId={}&gameInstanceId={}", params.placeId, params.jobId).c_str()
                     );
                 }
                 if (ImGui::MenuItem("JavaScript (Instance)##instance")) {
                     ImGui::SetClipboardText(
-                        std::format("Roblox.GameLauncher.joinGameInstance({}, \"{}\")", p.placeId, p.jobId).c_str()
+                        std::format("Roblox.GameLauncher.joinGameInstance({}, \"{}\")", params.placeId, params.jobId).c_str()
                     );
                 }
                 if (ImGui::MenuItem("Roblox Luau (Instance)##instance")) {
                     ImGui::SetClipboardText(
                         std::format(
                             "game:GetService(\"TeleportService\"):TeleportToPlaceInstance({}, \"{}\")",
-                            p.placeId,
-                            p.jobId
+                            params.placeId,
+                            params.jobId
                         )
                             .c_str()
                     );
@@ -77,16 +77,16 @@ void RenderStandardJoinMenu(const StandardJoinMenuParams &p) {
         }
         ImGui::EndMenu();
     }
-    if (ImGui::BeginMenu("Fill \"Join Options\"", p.placeId != 0)) {
+    if (ImGui::BeginMenu("Fill \"Join Options\"", params.placeId != 0)) {
         if (ImGui::MenuItem("Game")) {
-            if (p.onFillGame) {
-                p.onFillGame();
+            if (params.onFillGame) {
+                params.onFillGame();
             }
         }
-        if (!p.jobId.empty()) {
+        if (!params.jobId.empty()) {
             if (ImGui::MenuItem("Game Server")) {
-                if (p.onFillInstance) {
-                    p.onFillInstance();
+                if (params.onFillInstance) {
+                    params.onFillInstance();
                 }
             }
         }
@@ -97,25 +97,57 @@ void RenderStandardJoinMenu(const StandardJoinMenuParams &p) {
 
     ImGui::TextDisabled("Launch options");
 
-    const std::string gameLbl = (p.launchGameLabel.empty() ? "Launch Game" : p.launchGameLabel) + "##game";
+    const std::string gameLbl = (params.launchGameLabel.empty() ? "Launch Game" : params.launchGameLabel) + "##game";
     const std::string instLbl
-        = (p.launchInstanceLabel.empty() ? "Launch Game Server" : p.launchInstanceLabel) + "##instance";
+        = (params.launchInstanceLabel.empty() ? "Launch Game Server" : params.launchInstanceLabel) + "##instance";
 
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.18f, 0.80f, 0.44f, 1.0f));
 
-    if (ImGui::MenuItem(gameLbl.c_str(), nullptr, false, p.enableLaunchGame && p.placeId != 0)) {
-        if (p.onLaunchGame) {
-            p.onLaunchGame();
+    if (ImGui::MenuItem(gameLbl.c_str(), nullptr, false, params.enableLaunchGame && params.placeId != 0)) {
+        if (params.onLaunchGame) {
+            params.onLaunchGame();
         }
     }
 
-    if (!p.jobId.empty()) {
-        if (ImGui::MenuItem(instLbl.c_str(), nullptr, false, p.enableLaunchInstance && p.placeId != 0)) {
-            if (p.onLaunchInstance) {
-                p.onLaunchInstance();
+    if (!params.jobId.empty()) {
+        if (ImGui::MenuItem(instLbl.c_str(), nullptr, false, params.enableLaunchInstance && params.placeId != 0)) {
+            if (params.onLaunchInstance) {
+                params.onLaunchInstance();
             }
         }
     }
 
     ImGui::PopStyleColor();
+}
+
+void RenderPrivateServerJoinMenu(const PrivateServerMenuParams& params) {
+    if (ImGui::BeginMenu("Copy")) {
+        if (ImGui::MenuItem("Share Link")) {
+            if (params.onCopyShareLink) {
+                params.onCopyShareLink();
+            }
+        }
+
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Fill \"Join Options\"")) {
+        if (ImGui::MenuItem("Private Server")) {
+            if (params.onFillJoinOption) {
+                params.onFillJoinOption();
+            }
+
+        }
+        ImGui::EndMenu();
+    }
+
+    ImGui::Separator();
+
+    ImGui::TextDisabled("Server settings");
+
+    if (ImGui::MenuItem("Regenerate Share Link", nullptr, false)) {
+        if (params.onRegenerateShareLink) {
+            params.onRegenerateShareLink();
+        }
+    }
 }

@@ -5,8 +5,8 @@
 
 bool RenderUI();
 
-constexpr int JOIN_VALUE_BUF_SIZE = 128;
-constexpr int JOIN_JOBID_BUF_SIZE = 128;
+constexpr int JOIN_VALUE_BUF_SIZE = 256;
+constexpr int JOIN_JOBID_BUF_SIZE = 256;
 
 inline char join_value_buf[JOIN_VALUE_BUF_SIZE] = "";
 inline char join_jobid_buf[JOIN_JOBID_BUF_SIZE] = "";

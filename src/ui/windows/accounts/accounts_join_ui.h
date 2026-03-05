@@ -10,3 +10,4 @@ enum JoinType {
 void RenderJoinOptions();
 
 void FillJoinOptions(uint64_t placeId, const std::string &jobId);
+void FillJoinOptions(const std::string &privateServerLink);

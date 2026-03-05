@@ -492,6 +492,13 @@ void FillJoinOptions(uint64_t placeId, const std::string &jobId) {
     g_activeTab = Tab_Accounts;
 }
 
+void FillJoinOptions(const std::string &privateServerLink) {
+    std::snprintf(join_value_buf, sizeof(join_value_buf), "%s", privateServerLink.c_str());
+    join_jobid_buf[0] = '\0';
+    join_type_combo_index = JoinType::PrivateServer;
+    g_activeTab = Tab_Accounts;
+}
+
 void RenderJoinOptions() {
     ImGui::Spacing();
     ImGui::Text("Join Options");

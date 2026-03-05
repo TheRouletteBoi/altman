@@ -764,13 +764,23 @@ namespace {
                         );
 
                         if (selectedTab == ServerType::MyServers && ImGui::BeginPopupContextItem("##PrivateServerRowCtx")) {
-                            if (ImGui::MenuItem("Copy Share Link")) {
-                                const_cast<PrivateServerUI *>(this)->copyShareLink(server, cookie);
-                            }
-
-                            if (ImGui::MenuItem("Regenerate Share Link")) {
-                                const_cast<PrivateServerUI *>(this)->regenerateShareLink(server, cookie);
-                            }
+                            PrivateServerMenuParams menu {};
+                            menu.vipServerId = server.vipServerId;
+                            menu.placeId = server.placeId;
+                            menu.serverName = server.name;
+                            menu.onCopyShareLink = [this, &server, &cookie]() { copyShareLink(server, cookie); };
+                            menu.onRegenerateShareLink = [this, &server, &cookie]() { regenerateShareLink(server, cookie); };
+                            menu.onFillJoinOption = [vipServerId = server.vipServerId, cookie]() {
+                                WorkerThreads::runBackground([vipServerId, cookie]() {
+                                    auto result = Roblox::getVipServerInfo(vipServerId, cookie);
+                                    if (result && !result->link.empty()) {
+                                        FillJoinOptions(result->link);
+                                    } else {
+                                        LOG_ERROR("Failed to fetch share link for fill join option");
+                                    }
+                                });
+                            };
+                            RenderPrivateServerJoinMenu(menu);
 
                             ImGui::EndPopup();
                         }

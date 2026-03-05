@@ -18,4 +18,17 @@ struct StandardJoinMenuParams {
         std::function<void()> onFillInstance; // optional
 };
 
+struct PrivateServerMenuParams {
+    uint64_t vipServerId{};
+    //std::string accessCode;
+    uint64_t placeId{};
+    std::string serverName;
+
+    std::function<void()> onCopyShareLink;
+    std::function<void()> onRegenerateShareLink;
+    std::function<void()> onFillJoinOption;
+    std::function<void()> onJoinServer;
+};
+
 void RenderStandardJoinMenu(const StandardJoinMenuParams &params);
+void RenderPrivateServerJoinMenu(const PrivateServerMenuParams& params);
