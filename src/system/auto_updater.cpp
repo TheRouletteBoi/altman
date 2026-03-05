@@ -978,7 +978,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInst
                     extractPath.string()
                 );
 
-                if (!LaunchPowerShellScript(psArgs, true)) {
+                if (!SystemInfo::LaunchPowerShellScript(psArgs, true)) {
                     LOG_ERROR("Failed to extract update zip");
                     success = false;
                 } else {
