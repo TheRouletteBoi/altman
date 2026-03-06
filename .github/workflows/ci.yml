@@ -44,17 +44,22 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Install create-dmg
+        run: brew install create-dmg
+
       - name: Package .dmg
         run: |
-          mkdir dmg
+          mkdir -p dmg
           cp -R build/bin/AltMan.app dmg/
-          ln -s /Applications dmg/Applications
-          hdiutil create \
-            -volname "AltMan v${{ env.VERSION }}" \
-            -srcfolder dmg \
-            -ov \
-            -format UDZO \
-            "AltMan-v${{ env.VERSION }}-macOS.dmg"
+          create-dmg \
+            --window-size 800 400 \
+            --icon "AltMan.app" 200 190 \
+            --hide-extension "AltMan.app" \
+            --app-drop-link 600 185 \
+            --no-internet-enable \
+            "AltMan-v${{ env.VERSION }}-macOS.dmg" \
+            dmg/ \
+          || test $? -eq 2
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
