@@ -313,6 +313,11 @@ bool RenderMainMenu() {
         if (ImGui::MenuItem("Import Backup")) {
             s_openImportPopup = true;
         }
+
+        if (ImGui::MenuItem("Open Backup Folder")) {
+            OpenFileOrFolder(AltMan::Paths::Backups());
+        }
+
         ImGui::EndMenu();
     }
 
