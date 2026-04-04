@@ -707,7 +707,7 @@ namespace MultiInstance {
 
     bool createSandboxedRoblox(AccountData &acc, const std::string &protocolURL) {
         std::string baseClientName
-            = acc.isUsingCustomClient && !acc.customClientBase.empty() ? acc.customClientBase : "Default";
+            = !acc.customClientBase.empty() ? acc.customClientBase : "Default";
 
         if (baseClientName == "Hydrogen" || baseClientName == "Delta") {
             auto keyIt = g_clientKeys.find(baseClientName);
@@ -728,11 +728,11 @@ namespace MultiInstance {
 
         std::string clientName = "Roblox_" + acc.username;
 
-        if (acc.clientName != clientName) {
+        /*if (acc.clientName != clientName) {
             acc.clientName = clientName;
             acc.isUsingCustomClient = true;
             Data::SaveAccounts();
-        }
+        }*/
 
         if (!copyClientToUserEnvironment(acc.username, clientName)) {
             LOG_ERROR("Failed to copy client to user environment");
@@ -767,10 +767,10 @@ namespace MultiInstance {
             return false;
         }
 
-        if (!acc.isUsingCustomClient) {
+        /*if (!acc.isUsingCustomClient) {
             acc.isUsingCustomClient = true;
             Data::SaveAccounts();
-        }
+        }*/
 
         return true;
     }

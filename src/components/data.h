@@ -31,8 +31,8 @@ struct AccountData {
         std::string lastLocation;
         uint64_t placeId = 0;
         std::string jobId;
-        bool isUsingCustomClient = false;
-        std::string clientName;
+        //bool isUsingCustomClient = false;
+        //std::string clientName;
         std::string customClientBase;
         bool cookieAutoRefresh = false;
         time_t cookieLastUse = 0;

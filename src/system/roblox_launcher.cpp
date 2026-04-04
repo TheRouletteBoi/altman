@@ -309,11 +309,11 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
     }
 
     const auto clientName = std::format("Roblox_{}", acc.username);
-    if (acc.clientName != clientName) {
+    /*if (acc.clientName != clientName) {
         acc.clientName = clientName;
         acc.isUsingCustomClient = true;
         Data::SaveAccounts();
-    }
+    }*/
 
     if (!MultiInstance::createSandboxedRoblox(acc, protocolCommand)) {
         LOG_ERROR("Failed to create sandboxed client instance");

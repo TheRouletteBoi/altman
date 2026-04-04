@@ -94,8 +94,8 @@ namespace {
         account.lastLocation = safeGet<std::string>(item, "lastLocation", "");
         account.placeId = safeGet(item, "placeId", 0ULL);
         account.jobId = safeGet<std::string>(item, "jobId", "");
-        account.isUsingCustomClient = safeGet<bool>(item, "isUsingCustomClient", false);
-        account.clientName = safeGet<std::string>(item, "clientName", "");
+        //account.isUsingCustomClient = safeGet<bool>(item, "isUsingCustomClient", false);
+        //account.clientName = safeGet<std::string>(item, "clientName", "");
         account.customClientBase = safeGet<std::string>(item, "customClientBase", "");
         account.cookieAutoRefresh = safeGet<bool>(item, "cookieAutoRefresh", false);
         account.cookieLastUse = safeGet(item, "cookieLastUse", std::time(nullptr));
@@ -134,8 +134,8 @@ namespace {
             {"lastLocation",             account.lastLocation            },
             {"placeId",                  account.placeId                 },
             {"jobId",                    account.jobId                   },
-            {"isUsingCustomClient",      account.isUsingCustomClient     },
-            {"clientName",               account.clientName              },
+            //{"isUsingCustomClient",      account.isUsingCustomClient     },
+            //{"clientName",               account.clientName              },
             {"customClientBase",         account.customClientBase        },
             {"cookieAutoRefresh",        account.cookieAutoRefresh       },
             {"cookieLastUse",            account.cookieLastUse           },
