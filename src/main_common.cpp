@@ -485,7 +485,7 @@ void configureRefreshConcurrency(size_t accountCount) {
 
     const int rateLimit = static_cast<int>(std::clamp(static_cast<double>(accountCount) * 1.8, 30.0, 150.0));
     HttpClient::RateLimiter::instance().configure(rateLimit, std::chrono::seconds(g_rateLimitWindow));
-    LOG_INFO("Refresh config: {} accounts → rate limit {}/{}s, concurrency {} | refresh interval {}min",
+    LOG_INFO("Refresh config: {} accounts with rate limit {}/{}s, concurrency {}, refresh interval {}min",
         accountCount, rateLimit, g_rateLimitWindow, rateLimit / 5, g_statusRefreshInterval);
 }
 
