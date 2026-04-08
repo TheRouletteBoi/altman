@@ -474,7 +474,7 @@ void checkAndRefreshCookiesOnce() {
 
 void initializeAutoUpdater() {
     AutoUpdater::Initialize();
-    AutoUpdater::SetBandwidthLimit(5_MB);
+    AutoUpdater::SetBandwidthLimit(50_MB);
     AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
     AutoUpdater::SetAutoUpdate(true, true, false);
 }
