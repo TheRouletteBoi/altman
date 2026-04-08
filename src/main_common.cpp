@@ -472,13 +472,6 @@ void checkAndRefreshCookiesOnce() {
     });
 }
 
-void initializeAutoUpdater() {
-    AutoUpdater::Initialize();
-    AutoUpdater::SetBandwidthLimit(50_MB);
-    AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
-    AutoUpdater::SetAutoUpdate(true, true, false);
-}
-
 void configureRefreshConcurrency(size_t accountCount) {
     // Target: peak in flight ≈ concurrency × 3 requests (ban → restriction → voice), at ~60% of rate limit budget
     // Formula: rateLimit = clamp(accountCount * 1.8, 30, 150) concurrency = rateLimit / 5 (keeps peak at 60% of budget)
@@ -487,6 +480,13 @@ void configureRefreshConcurrency(size_t accountCount) {
     HttpClient::RateLimiter::instance().configure(rateLimit, std::chrono::seconds(g_rateLimitWindow));
     LOG_INFO("Refresh config: {} accounts with rate limit {}/{}s, concurrency {}, refresh interval {}min",
         accountCount, rateLimit, g_rateLimitWindow, rateLimit / 5, g_statusRefreshInterval);
+}
+
+void initializeAutoUpdater() {
+    AutoUpdater::Initialize();
+    AutoUpdater::SetBandwidthLimit(50_MB);
+    AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
+    AutoUpdater::SetAutoUpdate(true, true, false);
 }
 
 [[nodiscard]]
