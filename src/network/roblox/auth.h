@@ -10,6 +10,7 @@
 
 #include "common.h"
 #include "session.h"
+#include <optional>
 
 namespace Roblox {
 
@@ -90,7 +91,7 @@ namespace Roblox {
             BanInfo banInfo;
             RestrictionInfo restrictionInfo;
 
-            std::string presence;
+            std::optional<PresenceData> presenceData;
             VoiceSettings voiceSettings;
     };
 

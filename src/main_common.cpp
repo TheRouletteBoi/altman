@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <semaphore>
 
 void LoadImGuiFonts(float scaledFontSize) {
     ImGuiIO &io = ImGui::GetIO();
@@ -80,7 +81,7 @@ namespace AccountProcessor {
     }
 
     [[nodiscard]]
-    ProcessResult processAccount(const AccountSnapshot &account) {
+    ProcessResult processAccount(const AccountSnapshot &account, const Roblox::FullAccountInfo &info) {
         ProcessResult result {
             .id = account.id,
             .userId = account.userId,
@@ -88,38 +89,6 @@ namespace AccountProcessor {
             .displayName = account.displayName,
             .status = "Unknown"
         };
-
-        if (account.cookie.empty()) {
-            return result;
-        }
-
-        auto accountInfo = Roblox::fetchFullAccountInfo(account.cookie);
-
-        if (!accountInfo) {
-            switch (accountInfo.error()) {
-                case Roblox::ApiError::InvalidCookie:
-                    result.isInvalid = true;
-                    result.status = "InvalidCookie";
-                    result.voiceStatus = "N/A";
-                    result.shouldDeselect = true;
-                    return result;
-
-                case Roblox::ApiError::NetworkError:
-                case Roblox::ApiError::Timeout:
-                case Roblox::ApiError::ConnectionFailed:
-                    result.status = "Network Error";
-                    result.voiceStatus = "N/A";
-                    result.shouldDeselect = false;
-                    return result;
-
-                default:
-                    result.status = "Error";
-                    result.voiceStatus = "N/A";
-                    return result;
-            }
-        }
-
-        const auto &info = *accountInfo;
 
         result.userId = std::to_string(info.userId);
         result.username = info.username;
@@ -142,8 +111,9 @@ namespace AccountProcessor {
 
             case Roblox::BanCheckResult::Warned:
                 result.status = "Warned";
+                result.voiceStatus = "N/A";
                 result.shouldDeselect = true;
-                break;
+                return result;
 
             case Roblox::BanCheckResult::Terminated:
                 result.status = "Terminated";
@@ -179,23 +149,21 @@ namespace AccountProcessor {
                 result.voiceStatus = "N/A";
                 result.shouldDeselect = true;
                 return result;
+
+            default:
+                break;
         }
 
         result.voiceStatus = info.voiceSettings.status;
         result.voiceBanExpiry = info.voiceSettings.bannedUntil;
 
-        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
-            auto presenceData = Roblox::getPresenceData(account.cookie, info.userId);
-            if (presenceData) {
-                result.status = presenceData->presence;
-                result.lastLocation = presenceData->lastLocation;
-                result.placeId = presenceData->placeId;
-                result.jobId = presenceData->jobId;
-            } else {
-                result.status = info.presence;
-            }
+        if (info.presenceData) {
+            result.status = info.presenceData->presence;
+            result.lastLocation = info.presenceData->lastLocation;
+            result.placeId = info.presenceData->placeId;
+            result.jobId = info.presenceData->jobId;
         } else {
-            result.status = info.presence;
+            result.status = "Offline";
         }
 
         return result;
@@ -287,30 +255,128 @@ void refreshAccounts() {
         return;
     }
 
-    std::vector<std::future<AccountProcessor::ProcessResult>> futures;
+    // Phase 1: fetch per-account info in parallel (ban/restriction/user/voice, no presence)
+    using InfoEntry = std::pair<size_t, Roblox::FullAccountInfo>;
+    std::vector<std::future<std::optional<InfoEntry>>> futures;
     futures.reserve(snapshots.size());
 
-    for (const auto &snapshot : snapshots) {
-        futures.push_back(std::async(std::launch::async, [snapshot]() {
-            return AccountProcessor::processAccount(snapshot);
+    // Dynamic concurrency limit based on current account count
+    const int concurrencyLimit = std::clamp(static_cast<int>(snapshots.size()) / 5, 4, 30);
+
+    std::mutex semMutex;
+    std::condition_variable semCv;
+    int semCount = 0;
+
+    for (size_t i = 0; i < snapshots.size(); ++i) {
+        futures.push_back(std::async(std::launch::async, [&, i]() -> std::optional<InfoEntry> {
+            const auto &snapshot = snapshots[i];
+            if (snapshot.cookie.empty())
+                return std::nullopt;
+
+            {
+                std::unique_lock lock(semMutex);
+                semCv.wait(lock, [&] { return semCount < concurrencyLimit; });
+                ++semCount;
+            }
+
+            struct SemGuard {
+                std::mutex &m;
+                std::condition_variable &cv;
+                int &count;
+                ~SemGuard() {
+                    std::unique_lock lock(m);
+                    --count;
+                    cv.notify_one();
+                }
+            } guard { semMutex, semCv, semCount };
+
+            auto result = Roblox::fetchFullAccountInfo(snapshot.cookie);
+            if (!result)
+                return std::nullopt;
+            return InfoEntry { i, std::move(*result) };
         }));
     }
 
+    std::vector<std::optional<InfoEntry>> infoResults;
+    infoResults.reserve(futures.size());
+    for (auto &f : futures) {
+        infoResults.push_back(f.get());
+    }
+
+    // Phase 2: collect userIds for unbanned accounts and batch presence
+    std::vector<uint64_t> presenceUserIds;
+    std::string presenceCookie;
+
+    for (const auto &entry : infoResults) {
+        if (!entry) continue;
+        const auto &info = entry->second;
+        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
+            presenceUserIds.push_back(info.userId);
+            if (presenceCookie.empty()) {
+                presenceCookie = snapshots[entry->first].cookie;
+            }
+        }
+    }
+
+    std::unordered_map<uint64_t, Roblox::PresenceData> presences;
+    if (!presenceUserIds.empty() && !presenceCookie.empty()) {
+        if (auto batch = Roblox::getPresencesBatch(presenceUserIds, presenceCookie)) {
+            presences = std::move(*batch);
+        }
+    }
+
+    // Phase 3: distribute presence into FullAccountInfo, then build ProcessResults
     std::vector<AccountProcessor::ProcessResult> results;
-    results.reserve(futures.size());
+    results.reserve(snapshots.size());
 
     std::vector<int> invalidIds;
     std::string invalidNames;
 
-    for (size_t i = 0; i < futures.size(); ++i) {
-        auto result = futures[i].get();
+    for (size_t i = 0; i < snapshots.size(); ++i) {
+        const auto &snapshot = snapshots[i];
+        const auto &entry = infoResults[i];
+
+        if (snapshot.cookie.empty()) {
+            AccountProcessor::ProcessResult r {};
+            r.id = snapshot.id;
+            r.userId = snapshot.userId;
+            r.username = snapshot.username;
+            r.displayName = snapshot.displayName;
+            r.status = "Unknown";
+            results.push_back(std::move(r));
+            continue;
+        }
+
+        if (!entry) {
+            // fetchFullAccountInfo failed, treat as network/invalid error
+            // Recheck the error by looking at a cached ban status if available
+            AccountProcessor::ProcessResult r {};
+            r.id = snapshot.id;
+            r.userId = snapshot.userId;
+            r.username = snapshot.username;
+            r.displayName = snapshot.displayName;
+            r.status = "Error";
+            r.voiceStatus = "N/A";
+            results.push_back(std::move(r));
+            continue;
+        }
+
+        Roblox::FullAccountInfo info = entry->second;
+
+        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
+            auto it = presences.find(info.userId);
+            if (it != presences.end()) {
+                info.presenceData = it->second;
+            }
+        }
+
+        auto result = AccountProcessor::processAccount(snapshot, info);
 
         if (result.isInvalid) {
             invalidIds.push_back(result.id);
             if (!invalidNames.empty()) {
                 invalidNames.append(", ");
             }
-            const auto &snapshot = snapshots[i];
             invalidNames.append(snapshot.displayName.empty() ? snapshot.username : snapshot.displayName);
         }
 
@@ -413,14 +479,22 @@ void initializeAutoUpdater() {
     AutoUpdater::SetAutoUpdate(true, true, false);
 }
 
+void configureRefreshConcurrency(size_t accountCount) {
+    // Target: peak in flight ≈ concurrency × 3 requests (ban → restriction → voice), at ~60% of rate limit budget
+    // Formula: rateLimit = clamp(accountCount * 1.8, 30, 150) concurrency = rateLimit / 5 (keeps peak at 60% of budget)
+
+    const int rateLimit = static_cast<int>(std::clamp(static_cast<double>(accountCount) * 1.8, 30.0, 150.0));
+    HttpClient::RateLimiter::instance().configure(rateLimit, std::chrono::seconds(g_rateLimitWindow));
+    LOG_INFO("Refresh config: {} accounts → rate limit {}/{}s, concurrency {} | refresh interval {}min",
+        accountCount, rateLimit, g_rateLimitWindow, rateLimit / 5, g_statusRefreshInterval);
+}
+
 [[nodiscard]]
 bool initializeApp() {
     if (auto result = Crypto::initialize(); !result) {
         std::println("Failed to initialize crypto library {}", Crypto::errorToString(result.error()));
         return false;
     }
-
-    HttpClient::RateLimiter::instance().configure(50, std::chrono::milliseconds(1000));
 
     Data::LoadSettings("settings.json");
 
@@ -434,6 +508,7 @@ bool initializeApp() {
     Data::LoadPrivateServerHistory("private_server_history.json");
     Data::LoadAccountGroups("account_groups.json");
 
+    configureRefreshConcurrency(g_accounts.size());
     startAccountRefreshLoop();
     checkAndRefreshCookiesOnce();
 

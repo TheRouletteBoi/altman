@@ -182,7 +182,7 @@ namespace {
                 trimmedCookie,
                 info.username,
                 info.displayName,
-                info.presence,
+                info.presenceData ? info.presenceData->presence : "Offline",
                 userIdStr,
                 info.voiceSettings,
                 existingAccount->id,
@@ -195,7 +195,7 @@ namespace {
                 userIdStr,
                 info.username,
                 info.displayName,
-                info.presence,
+                info.presenceData ? info.presenceData->presence : "Offline",
                 info.voiceSettings
             );
         }
@@ -259,7 +259,7 @@ namespace {
                 result.cookie = cookie;
                 result.username = info.username;
                 result.displayName = info.displayName;
-                result.presence = info.presence;
+                result.presence = info.presenceData ? info.presenceData->presence : "Offline";
                 result.userId = userIdStr;
                 result.voiceSettings = info.voiceSettings;
 

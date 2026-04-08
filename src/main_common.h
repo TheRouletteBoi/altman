@@ -65,7 +65,7 @@ namespace AccountProcessor {
     };
 
     [[nodiscard]] std::vector<AccountSnapshot> takeAccountSnapshots();
-    [[nodiscard]] ProcessResult processAccount(const AccountSnapshot &account);
+    [[nodiscard]] ProcessResult processAccount(const AccountSnapshot &account, const Roblox::FullAccountInfo &info);
     void applyResults(const std::vector<ProcessResult> &results);
     void showInvalidCookieModal(std::vector<int> invalidIds, std::string invalidNames);
 

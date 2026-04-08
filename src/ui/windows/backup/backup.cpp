@@ -152,10 +152,10 @@ namespace {
                 acct.status = "Terminated";
                 break;
             case Roblox::BanCheckResult::Unbanned:
-                acct.status = info.presence;
+                acct.status = info.presenceData ? info.presenceData->presence : "Offline";
                 break;
             default:
-                acct.status = info.presence;
+                acct.status = info.presenceData ? info.presenceData->presence : "Offline";
                 break;
         }
 
