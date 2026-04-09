@@ -139,6 +139,7 @@ static NSMutableDictionary *GetWebByUser() {
         [_window setDelegate:self];
 
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+        config.applicationNameForUserAgent = @"";
 
         WKWebpagePreferences *pagePrefs = [[WKWebpagePreferences alloc] init];
         config.defaultWebpagePreferences = pagePrefs;
@@ -167,6 +168,10 @@ static NSMutableDictionary *GetWebByUser() {
 
         [_webView setWantsLayer:YES];
         _webView.layer.drawsAsynchronously = YES;
+
+        _webView.customUserAgent = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                            @"AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                            @"Version/17.4.1 Safari/605.1.15";
 
         [_webView.configuration.preferences setValue:@YES forKey:@"developerExtrasEnabled"];
 
