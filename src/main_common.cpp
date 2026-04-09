@@ -90,9 +90,9 @@ namespace AccountProcessor {
             .status = "Unknown"
         };
 
-        result.userId = std::to_string(info.userId);
-        result.username = info.username;
-        result.displayName = info.displayName;
+        result.userId = info.userId != 0 ? std::to_string(info.userId) : account.userId;
+        result.username = !info.username.empty() ? info.username : account.username;
+        result.displayName = !info.displayName.empty() ? info.displayName : account.displayName;
 
         switch (info.banInfo.status) {
             case Roblox::BanCheckResult::InvalidCookie:
@@ -256,22 +256,23 @@ void refreshAccounts() {
     }
 
     // Phase 1: fetch per-account info in parallel (ban/restriction/user/voice, no presence)
-    using InfoEntry = std::pair<size_t, Roblox::FullAccountInfo>;
-    std::vector<std::future<std::optional<InfoEntry>>> futures;
-    futures.reserve(snapshots.size());
-
-    // Dynamic concurrency limit based on current account count
     const int concurrencyLimit = std::clamp(static_cast<int>(snapshots.size()) / 5, 4, 30);
 
     std::mutex semMutex;
     std::condition_variable semCv;
     int semCount = 0;
 
+    using InfoEntry = std::pair<size_t, Roblox::FullAccountInfo>;
+    using InfoResult = std::expected<InfoEntry, Roblox::ApiError>;
+    std::vector<std::future<InfoResult>> futures;
+    futures.reserve(snapshots.size());
+
     for (size_t i = 0; i < snapshots.size(); ++i) {
-        futures.push_back(std::async(std::launch::async, [&, i]() -> std::optional<InfoEntry> {
+        futures.push_back(std::async(std::launch::async, [&, i]() -> InfoResult {
             const auto &snapshot = snapshots[i];
+
             if (snapshot.cookie.empty())
-                return std::nullopt;
+                return std::unexpected(Roblox::ApiError::InvalidInput);
 
             {
                 std::unique_lock lock(semMutex);
@@ -291,13 +292,14 @@ void refreshAccounts() {
             } guard { semMutex, semCv, semCount };
 
             auto result = Roblox::fetchFullAccountInfo(snapshot.cookie);
-            if (!result)
-                return std::nullopt;
+            if (!result) {
+                return std::unexpected(result.error());
+            }
             return InfoEntry { i, std::move(*result) };
         }));
     }
 
-    std::vector<std::optional<InfoEntry>> infoResults;
+    std::vector<InfoResult> infoResults;
     infoResults.reserve(futures.size());
     for (auto &f : futures) {
         infoResults.push_back(f.get());
@@ -348,14 +350,12 @@ void refreshAccounts() {
         }
 
         if (!entry) {
-            // fetchFullAccountInfo failed, treat as network/invalid error
-            // Recheck the error by looking at a cached ban status if available
             AccountProcessor::ProcessResult r {};
             r.id = snapshot.id;
             r.userId = snapshot.userId;
             r.username = snapshot.username;
             r.displayName = snapshot.displayName;
-            r.status = "Error";
+            r.status = "Network Error";
             r.voiceStatus = "N/A";
             results.push_back(std::move(r));
             continue;
