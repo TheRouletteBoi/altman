@@ -139,6 +139,7 @@ namespace AccountProcessor {
                 return result;
 
             case Roblox::RestrictionCheckResult::AccountLocked:
+                result.isInvalid = true;
                 result.status = "Locked";
                 result.voiceStatus = "N/A";
                 result.shouldDeselect = true;
