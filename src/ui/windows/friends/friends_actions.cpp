@@ -77,15 +77,14 @@ namespace {
         const std::vector<uint64_t> &ids,
         const std::string &cookie
     ) {
-        auto presMap = Roblox::getPresencesBatch(ids, cookie);
-
-        if (!presMap) {
-            LOG_WARN("Failed to fetch presences: {}", Roblox::apiErrorToString(presMap.error()));
+        auto presMap = Roblox::getPresences(ids, cookie);
+        if (presMap.empty()) {
+            LOG_WARN("Failed to fetch friend presences");
             return;
         }
 
         // O(1) lookup instead of O(n) find_if
-        for (const auto &[uid, pdata]: *presMap) {
+        for (const auto &[uid, pdata]: presMap) {
             if (auto it = friendIndex.find(uid); it != friendIndex.end()) {
                 auto *friend_ptr = it->second;
                 friend_ptr->presence = pdata.presence;
