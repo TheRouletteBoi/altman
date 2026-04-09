@@ -2,7 +2,6 @@
 #include "network/roblox/hba.h"
 
 #include <format>
-#include <future>
 
 #include "common.h"
 #include "console/console.h"
@@ -144,18 +143,18 @@ namespace Roblox {
         return {RestrictionCheckResult::Unknown0, moderationStatus, startTime, endTime, durationSeconds};
     }
 
-    BanCheckResult cachedBanStatus(const std::string &cookie) {
+    BanInfo cachedBanInfo(const std::string &cookie) {
         if (auto cached = g_banCache.get(cookie)) {
-            return cached->status;
+            return *cached;
         }
 
         BanInfo info = checkBanStatus(cookie);
         g_banCache.set(cookie, info);
 
-        return info.status;
+        return info;
     }
 
-    RestrictionInfo cachedRestrictionStatus(const std::string &cookie) {
+    RestrictionInfo cachedRestrictionInfo(const std::string &cookie) {
         if (auto cached = g_restrictionCache.get(cookie)) {
             return *cached;
         }
@@ -165,21 +164,21 @@ namespace Roblox {
         return info;
     }
 
-    BanCheckResult refreshBanStatus(const std::string &cookie) {
+    BanInfo refreshBanInfo(const std::string &cookie) {
         g_banCache.invalidate(cookie);
         BanInfo info = checkBanStatus(cookie);
         g_banCache.set(cookie, info);
-        return info.status;
+        return info;
     }
 
     bool isCookieValid(const std::string &cookie) {
-        return cachedBanStatus(cookie) != BanCheckResult::InvalidCookie;
+        return cachedBanInfo(cookie).status != BanCheckResult::InvalidCookie;
     }
 
     bool canUseCookie(const std::string &cookie) {
-        BanCheckResult banStatus = cachedBanStatus(cookie);
+        BanInfo banInfo = cachedBanInfo(cookie);
 
-        switch (banStatus) {
+        switch (banInfo.status) {
             case BanCheckResult::Banned:
                 LOG_ERROR("Skipping request: cookie is banned");
                 return false;
@@ -200,7 +199,7 @@ namespace Roblox {
                 break;
         }
 
-        RestrictionInfo restriction = cachedRestrictionStatus(cookie);
+        RestrictionInfo restriction = cachedRestrictionInfo(cookie);
 
         switch (restriction.status) {
             case RestrictionCheckResult::Banned:
@@ -301,50 +300,57 @@ namespace Roblox {
         BanInfo banInfo = checkBanStatus(cookie);
         g_banCache.set(cookie, banInfo);
 
-        if (banInfo.status == BanCheckResult::InvalidCookie) {
-            return std::unexpected(ApiError::InvalidCookie);
-        }
-
         FullAccountInfo result;
         result.banInfo = banInfo;
+        result.restrictionInfo = cachedRestrictionInfo(cookie);
 
-        result.restrictionInfo = cachedRestrictionStatus(cookie);
-
-        if (banInfo.status == BanCheckResult::Unbanned) {
-            HttpClient::Response userResponse = HttpClient::rateLimitedGet(
-                "https://users.roblox.com/v1/users/authenticated",
-                {
-                    {"Cookie", ".ROBLOSECURITY=" + cookie}
+        if (banInfo.status == BanCheckResult::InvalidCookie) {
+            if (result.restrictionInfo.status != RestrictionCheckResult::AccountLocked) {
+                result.voiceSettings = {"N/A", 0};
+                return result;
             }
-            );
+        }
 
-            if (userResponse.status_code >= 200 && userResponse.status_code < 300) {
-                auto userJson = HttpClient::decode(userResponse);
-                if (userJson.is_object()) {
-                    result.userId = userJson.value("id", 0ULL);
-                    result.username = userJson.value("name", "");
-                    result.displayName = userJson.value("displayName", "");
+        const bool shouldFetchUserInfo =
+            banInfo.status == BanCheckResult::Unbanned ||
+            result.restrictionInfo.status == RestrictionCheckResult::AccountLocked;
 
-                    AuthenticatedUserInfo userInfo {result.userId, result.username, result.displayName};
-                    g_userInfoCache.set(cookie, userInfo);
+        if (shouldFetchUserInfo) {
+            if (auto cached = g_userInfoCache.get(cookie)) {
+                result.userId      = cached->userId;
+                result.username    = cached->username;
+                result.displayName = cached->displayName;
+            }
+            else {
+                auto userResponse = HttpClient::rateLimitedGet(
+                    "https://users.roblox.com/v1/users/authenticated",
+                    {{"Cookie", ".ROBLOSECURITY=" + cookie}}
+                );
+
+                if (userResponse.status_code >= 200 && userResponse.status_code < 300) {
+                    auto userJson = HttpClient::decode(userResponse);
+                    if (userJson.is_object()) {
+                        result.userId      = userJson.value("id", 0ULL);
+                        result.username    = userJson.value("name", "");
+                        result.displayName = userJson.value("displayName", "");
+                        g_userInfoCache.set(cookie, {result.userId, result.username, result.displayName});
+                    }
                 }
             }
+        }
 
-            auto presenceFuture = std::async(std::launch::async, [&]() {
-                return getPresence(cookie, result.userId);
-            });
+        const bool shouldFetchVoice =
+            banInfo.status == BanCheckResult::Unbanned &&
+            result.restrictionInfo.status != RestrictionCheckResult::AccountLocked;
 
-            /*auto ageGroupFuture = std::async(std::launch::async, [&]() {
-                return getAgeGroup(cookie);
-            });*/
-
+        if (shouldFetchVoice) {
             result.voiceSettings = getVoiceChatStatus(cookie);
-            result.presence = presenceFuture.get();
-            // result.ageGroup = ageGroupFuture.get();
-        } else {
-            result.presence = std::string(banResultToString(banInfo.status));
+        }
+        else {
             result.voiceSettings = {"N/A", 0};
         }
+
+        result.ageGroup = getAgeGroup(cookie);
 
         return result;
     }

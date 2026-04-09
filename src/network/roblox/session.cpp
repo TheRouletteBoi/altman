@@ -34,12 +34,12 @@ namespace Roblox {
     } // namespace
 
     std::string getPresence(const std::string &cookie, uint64_t userId) {
-        BanCheckResult status = cachedBanStatus(cookie);
-        if (status == BanCheckResult::InvalidCookie) {
+        BanInfo banInfo = cachedBanInfo(cookie);
+        if (banInfo.status == BanCheckResult::InvalidCookie) {
             return "InvalidCookie";
         }
         if (!canUseCookie(cookie)) {
-            return std::string(banResultToString(status));
+            return std::string(banResultToString(banInfo.status));
         }
 
         if (auto cached = g_presenceCache.get(userId)) {
@@ -245,9 +245,9 @@ namespace Roblox {
 
     VoiceSettings getVoiceChatStatus(const std::string &cookie) {
         // First check if account is banned/warned/terminated
-        BanCheckResult status = cachedBanStatus(cookie);
-        if (status == BanCheckResult::Banned || status == BanCheckResult::Warned || status == BanCheckResult::Terminated
-            || status == BanCheckResult::InvalidCookie) {
+        BanInfo info = cachedBanInfo(cookie);
+        if (info.status == BanCheckResult::Banned || info.status == BanCheckResult::Warned || info.status == BanCheckResult::Terminated
+            || info.status == BanCheckResult::InvalidCookie) {
             return {"N/A", 0};
         }
 

@@ -98,11 +98,11 @@ namespace Roblox {
     // Fetch ban status directly from API (no caching)
     BanInfo checkBanStatus(const std::string &cookie);
 
-    // Get cached ban status (uses TTL cache, 30 minute expiry)
+    // Fetch restriction status directly from API (no caching)
     RestrictionInfo checkRestrictionStatus(const std::string &cookie);
 
-    // Refresh ban status (invalidates cache and re-fetches)
-    BanCheckResult refreshBanStatus(const std::string &cookie);
+    // Refresh ban info (invalidates cache and refetches)
+    BanInfo refreshBanInfo(const std::string &cookie);
 
     bool isCookieValid(const std::string &cookie);
     bool canUseCookie(const std::string &cookie);

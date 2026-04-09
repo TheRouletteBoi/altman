@@ -160,9 +160,9 @@ namespace Roblox {
             return ApiError::InvalidInput;
         }
 
-        BanCheckResult status = cachedBanStatus(cookie);
+        BanInfo info = cachedBanInfo(cookie);
 
-        switch (status) {
+        switch (info.status) {
             case BanCheckResult::Unbanned:
                 return ApiError::Success;
             case BanCheckResult::InvalidCookie:

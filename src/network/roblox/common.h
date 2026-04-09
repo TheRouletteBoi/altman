@@ -228,8 +228,13 @@ namespace Roblox {
        std::initializer_list<std::pair<const std::string, std::string>> extraHeaders = {}
    );
 
-    enum class BanCheckResult;
-    BanCheckResult cachedBanStatus(const std::string &cookie);
+    // Get cached ban status (uses TTL cache, 30 minute expiry)
+    struct BanInfo;
+    BanInfo cachedBanInfo(const std::string &cookie);
+
+    // Get cached restriction status (uses TTL cache, 30 minute expiry)
+    struct RestrictionInfo;
+    RestrictionInfo cachedRestrictionInfo(const std::string &cookie);
 
     // Check if cookie is usable for requests (not banned/warned/terminated/invalid)
     // Returns the specific error if not usable, or Success if usable
