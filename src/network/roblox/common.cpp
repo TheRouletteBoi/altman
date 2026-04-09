@@ -156,13 +156,12 @@ namespace Roblox {
     }
 
     ApiError validateCookieForRequest(const std::string &cookie) {
-        if (cookie.empty()) {
+        if (cookie.empty())
             return ApiError::InvalidInput;
-        }
 
-        BanInfo info = cachedBanInfo(cookie);
+        BanInfo banInfo = cachedBanInfo(cookie);
 
-        switch (info.status) {
+        switch (banInfo.status) {
             case BanCheckResult::Unbanned:
                 return ApiError::Success;
             case BanCheckResult::InvalidCookie:
@@ -178,6 +177,14 @@ namespace Roblox {
             default:
                 return ApiError::Unknown;
         }
+
+        /*RestrictionInfo restrictionInfo = cachedRestrictionInfo(cookie);
+        switch (restrictionInfo.status) {
+            case RestrictionCheckResult::Banned:           return ApiError::CookieBanned;
+            case RestrictionCheckResult::AccountLocked:    return ApiError::AccountLocked;
+            case RestrictionCheckResult::ScreenTimeLimit:  return ApiError::ScreenTimeLimit;
+            default:                                       return ApiError::Success;
+        }*/
     }
 
 } // namespace Roblox

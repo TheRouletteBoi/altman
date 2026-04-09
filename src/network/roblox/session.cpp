@@ -34,13 +34,8 @@ namespace Roblox {
     } // namespace
 
     std::string getPresence(const std::string &cookie, uint64_t userId) {
-        BanInfo banInfo = cachedBanInfo(cookie);
-        if (banInfo.status == BanCheckResult::InvalidCookie) {
-            return "InvalidCookie";
-        }
-        if (!canUseCookie(cookie)) {
-            return std::string(banResultToString(banInfo.status));
-        }
+        if (!canUseCookie(cookie))
+            return "Offline";
 
         if (auto cached = g_presenceCache.get(userId)) {
             return cached->presence;

@@ -176,44 +176,7 @@ namespace Roblox {
     }
 
     bool canUseCookie(const std::string &cookie) {
-        BanInfo banInfo = cachedBanInfo(cookie);
-
-        switch (banInfo.status) {
-            case BanCheckResult::Banned:
-                LOG_ERROR("Skipping request: cookie is banned");
-                return false;
-            case BanCheckResult::Warned:
-                LOG_ERROR("Skipping request: cookie is warned");
-                return false;
-            case BanCheckResult::Terminated:
-                LOG_ERROR("Skipping request: cookie is terminated");
-                return false;
-            case BanCheckResult::InvalidCookie:
-                LOG_ERROR("Skipping request: invalid cookie");
-                return false;
-            case BanCheckResult::NetworkError:
-                LOG_ERROR("Skipping request: network error during ban check");
-                return false;
-            case BanCheckResult::Unbanned:
-            default:
-                break;
-        }
-
-        RestrictionInfo restriction = cachedRestrictionInfo(cookie);
-
-        switch (restriction.status) {
-            case RestrictionCheckResult::Banned:
-                LOG_ERROR("Skipping request: cookie is banned");
-                return false;
-            case RestrictionCheckResult::AccountLocked:
-                LOG_ERROR("Skipping request: account is locked");
-                return false;
-            case RestrictionCheckResult::ScreenTimeLimit:
-                LOG_ERROR("Skipping request: account has screen time restriction");
-                return false;
-            default:
-                return true;
-        }
+        return validateCookieForRequest(cookie) == ApiError::Success;
     }
 
     nlohmann::json getAuthenticatedUser(const std::string &cookie) {
@@ -297,14 +260,11 @@ namespace Roblox {
     }
 
     ApiResult<FullAccountInfo> fetchFullAccountInfo(const std::string &cookie) {
-        BanInfo banInfo = checkBanStatus(cookie);
-        g_banCache.set(cookie, banInfo);
-
         FullAccountInfo result;
-        result.banInfo = banInfo;
+        result.banInfo = cachedBanInfo(cookie);
         result.restrictionInfo = cachedRestrictionInfo(cookie);
 
-        if (banInfo.status == BanCheckResult::InvalidCookie) {
+        if (result.banInfo.status == BanCheckResult::InvalidCookie) {
             if (result.restrictionInfo.status != RestrictionCheckResult::AccountLocked) {
                 result.voiceSettings = {"N/A", 0};
                 return result;
@@ -312,35 +272,20 @@ namespace Roblox {
         }
 
         const bool shouldFetchUserInfo =
-            banInfo.status == BanCheckResult::Unbanned ||
+            result.banInfo.status == BanCheckResult::Unbanned ||
             result.restrictionInfo.status == RestrictionCheckResult::AccountLocked;
 
         if (shouldFetchUserInfo) {
-            if (auto cached = g_userInfoCache.get(cookie)) {
-                result.userId      = cached->userId;
-                result.username    = cached->username;
-                result.displayName = cached->displayName;
-            }
-            else {
-                auto userResponse = HttpClient::rateLimitedGet(
-                    "https://users.roblox.com/v1/users/authenticated",
-                    {{"Cookie", ".ROBLOSECURITY=" + cookie}}
-                );
-
-                if (userResponse.status_code >= 200 && userResponse.status_code < 300) {
-                    auto userJson = HttpClient::decode(userResponse);
-                    if (userJson.is_object()) {
-                        result.userId      = userJson.value("id", 0ULL);
-                        result.username    = userJson.value("name", "");
-                        result.displayName = userJson.value("displayName", "");
-                        g_userInfoCache.set(cookie, {result.userId, result.username, result.displayName});
-                    }
-                }
+            auto userInfo = getAuthenticatedUserInfo(cookie);
+            if (userInfo) {
+                result.userId = userInfo->userId;
+                result.username = userInfo->username;
+                result.displayName = userInfo->displayName;
             }
         }
 
         const bool shouldFetchVoice =
-            banInfo.status == BanCheckResult::Unbanned &&
+            result.banInfo.status == BanCheckResult::Unbanned &&
             result.restrictionInfo.status != RestrictionCheckResult::AccountLocked;
 
         if (shouldFetchVoice) {
@@ -350,7 +295,7 @@ namespace Roblox {
             result.voiceSettings = {"N/A", 0};
         }
 
-        result.ageGroup = getAgeGroup(cookie);
+        //result.ageGroup = getAgeGroup(cookie);
 
         return result;
     }
