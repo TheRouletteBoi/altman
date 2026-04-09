@@ -224,20 +224,6 @@ namespace Roblox {
         return result;
     }
 
-    ApiResult<std::unordered_map<uint64_t, PresenceData>>
-    getPresencesBatch(const std::vector<uint64_t> &userIds, const std::string &cookie) {
-        ApiError validationError = validateCookieForRequest(cookie);
-        if (validationError != ApiError::Success) {
-            return std::unexpected(validationError);
-        }
-
-        if (userIds.empty()) {
-            return std::unordered_map<uint64_t, PresenceData> {};
-        }
-
-        return getPresences(userIds, cookie);
-    }
-
     VoiceSettings getVoiceChatStatus(const std::string &cookie) {
         // First check if account is banned/warned/terminated
         BanInfo info = cachedBanInfo(cookie);

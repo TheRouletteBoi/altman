@@ -255,7 +255,7 @@ void refreshAccounts() {
         return;
     }
 
-    // Phase 1: fetch per-account info in parallel (ban/restriction/user/voice, no presence)
+    // Phase 1: fetch per account info in parallel (ban/restriction/user/voice, no presence)
     const int concurrencyLimit = std::clamp(static_cast<int>(snapshots.size()) / 5, 4, 30);
 
     std::mutex semMutex;
@@ -305,26 +305,45 @@ void refreshAccounts() {
         infoResults.push_back(f.get());
     }
 
-    // Phase 2: collect userIds for unbanned accounts and batch presence
-    std::vector<uint64_t> presenceUserIds;
-    std::string presenceCookie;
+    // Phase 2: per account presence fetch in parallel, each using its own cookie to get last location
+    using PresenceResult = std::optional<Roblox::PresenceData>;
+    std::vector<std::future<PresenceResult>> presenceFutures;
+    presenceFutures.reserve(snapshots.size());
 
-    for (const auto &entry : infoResults) {
-        if (!entry) continue;
-        const auto &info = entry->second;
-        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
-            presenceUserIds.push_back(info.userId);
-            if (presenceCookie.empty()) {
-                presenceCookie = snapshots[entry->first].cookie;
+    for (size_t i = 0; i < snapshots.size(); ++i) {
+        const auto &entry = infoResults[i];
+
+        if (!entry || entry->second.userId == 0 ||
+            entry->second.banInfo.status != Roblox::BanCheckResult::Unbanned) {
+            presenceFutures.push_back({});
+            continue;
+        }
+
+        uint64_t userId = entry->second.userId;
+        std::string cookie = snapshots[i].cookie;
+
+        presenceFutures.push_back(std::async(std::launch::async, [&, userId, cookie]() -> PresenceResult {
+            {
+                std::unique_lock lock(semMutex);
+                semCv.wait(lock, [&] { return semCount < concurrencyLimit; });
+                ++semCount;
             }
-        }
-    }
 
-    std::unordered_map<uint64_t, Roblox::PresenceData> presences;
-    if (!presenceUserIds.empty() && !presenceCookie.empty()) {
-        if (auto batch = Roblox::getPresencesBatch(presenceUserIds, presenceCookie)) {
-            presences = std::move(*batch);
-        }
+            struct SemGuard {
+                std::mutex &m;
+                std::condition_variable &cv;
+                int &count;
+                ~SemGuard() {
+                    std::unique_lock lock(m);
+                    --count;
+                    cv.notify_one();
+                }
+            } guard { semMutex, semCv, semCount };
+
+            auto result = Roblox::getPresenceData(cookie, userId);
+            if (result) return *result;
+            return std::nullopt;
+        }));
     }
 
     // Phase 3: distribute presence into FullAccountInfo, then build ProcessResults
@@ -363,10 +382,10 @@ void refreshAccounts() {
 
         Roblox::FullAccountInfo info = entry->second;
 
-        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
-            auto it = presences.find(info.userId);
-            if (it != presences.end()) {
-                info.presenceData = it->second;
+        if (presenceFutures[i].valid()) {
+            auto presence = presenceFutures[i].get();
+            if (presence) {
+                info.presenceData = std::move(*presence);
             }
         }
 
