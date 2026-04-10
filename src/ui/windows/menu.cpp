@@ -122,11 +122,13 @@ namespace {
         const std::string &username,
         const std::string &displayName,
         const std::string &presence,
-        const Roblox::VoiceSettings &voiceSettings
+        const Roblox::VoiceSettings &voiceSettings,
+        const std::string &password = ""
     ) {
         AccountData newAcct;
         newAcct.id = id;
         newAcct.cookie = cookie;
+        newAcct.password = password;
         newAcct.userId = userId;
         newAcct.username = username;
         newAcct.displayName = displayName;
@@ -143,7 +145,7 @@ namespace {
         Data::SaveAccounts();
     }
 
-    bool ValidateAndAddCookie(const std::string &cookie) {
+    bool ValidateAndAddCookie(const std::string &cookie, const std::string &password = "") {
         const std::string trimmedCookie = TrimWhitespace(cookie);
 
         if (trimmedCookie.empty()) {
@@ -196,7 +198,8 @@ namespace {
                 info.username,
                 info.displayName,
                 info.presenceData ? info.presenceData->presence : "Offline",
-                info.voiceSettings
+                info.voiceSettings,
+                password
             );
         }
 
@@ -334,9 +337,9 @@ bool RenderMainMenu() {
                 LaunchWebviewForLogin(
                     "https://www.roblox.com/login",
                     "Login to Roblox",
-                    [](const std::string &extractedCookie) {
-                        if (!extractedCookie.empty()) {
-                            ValidateAndAddCookie(extractedCookie);
+                    [](const LoginCredentials &extractedCredentials) {
+                        if (!extractedCredentials.cookie.empty()) {
+                            ValidateAndAddCookie(extractedCredentials.cookie, extractedCredentials.password);
                         }
                     }
                 );

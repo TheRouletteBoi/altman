@@ -11,7 +11,6 @@ struct LoginCredentials {
     std::string password;
 };
 
-using CookieCallback = std::function<void(const std::string &)>;
 using CredentialsCallback = std::function<void(const LoginCredentials &)>;
 
 void LaunchWebviewImpl(
@@ -19,13 +18,11 @@ void LaunchWebviewImpl(
     const std::string &windowName = "Altman Webview",
     const std::string &cookie = "",
     const std::string &userId = "",
-    CookieCallback onCookieExtracted = nullptr
+    CredentialsCallback onCredentialsExtracted = nullptr
 );
 
 void LaunchWebview(const std::string &url, const AccountData &account);
 
 void LaunchWebview(const std::string &url, const AccountData &account, const std::string &windowName);
 
-void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CookieCallback onCookieExtracted);
-
-//void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CredentialsCallback onCredentialsExtracted);
+void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CredentialsCallback onCredentialsExtracted);

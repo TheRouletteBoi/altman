@@ -27,6 +27,7 @@ struct AccountData {
         time_t banExpiry = 0;
         std::string note;
         std::string cookie;
+        std::string password;
         bool isFavorite = false;
         std::string lastLocation;
         uint64_t placeId = 0;

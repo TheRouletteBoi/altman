@@ -107,6 +107,11 @@ namespace {
             account.cookie = Data::decryptLocalData(encrypted);
         }
 
+        if (item.contains("encryptedPassword")) {
+            const auto encrypted = safeGet<std::string>(item, "encryptedPassword", "");
+            account.password = Data::decryptLocalData(encrypted);
+        }
+
         if (item.contains("hbaEncryptedPrivateKey")) {
             const auto encrypted = safeGet<std::string>(item, "hbaEncryptedPrivateKey", "");
             account.hbaPrivateKey = Data::decryptLocalData(encrypted);
@@ -117,6 +122,7 @@ namespace {
 
     nlohmann::json serializeAccount(const AccountData &account) {
         const auto encryptedCookie = Data::encryptLocalData(account.cookie).value_or("");
+        const auto encryptedPassword = Data::encryptLocalData(account.password).value_or("");
         const auto encryptedHbaPrivateKey = Data::encryptLocalData(account.hbaPrivateKey).value_or("");
 
         return {
@@ -130,6 +136,7 @@ namespace {
             {"banExpiry",                account.banExpiry               },
             {"note",                     account.note                    },
             {"encryptedCookie",          encryptedCookie                 },
+            {"encryptedPassword",        encryptedPassword               },
             {"isFavorite",               account.isFavorite              },
             {"lastLocation",             account.lastLocation            },
             {"placeId",                  account.placeId                 },
@@ -400,7 +407,7 @@ namespace Data {
         std::ifstream fin {path};
 
         if (!fin.is_open()) {
-            LOG_INFO("No {}, starting with 0 favourites", path);
+            LOG_INFO("No {}, starting with 0 favorites", path);
             return;
         }
 
@@ -421,7 +428,7 @@ namespace Data {
                 );
             }
 
-            LOG_INFO("Loaded {} favourites", g_favorites.size());
+            LOG_INFO("Loaded {} favorites", g_favorites.size());
         } catch (const std::exception &e) {
             LOG_INFO("Could not parse {}: {}", filename, e.what());
         }
@@ -446,7 +453,7 @@ namespace Data {
         }
 
         out << arr.dump(4);
-        LOG_INFO("Saved {} favourites", g_favorites.size());
+        LOG_INFO("Saved {} favorites", g_favorites.size());
     }
 
     void LoadSettings(std::string_view filename) {

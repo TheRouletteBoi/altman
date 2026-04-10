@@ -177,6 +177,14 @@ namespace {
         }
         ImGui::PopStyleColor();
 
+        if (!account.password.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
+            if (ImGui::MenuItem("Password", nullptr, false, true)) {
+                ImGui::SetClipboardText(account.password.c_str());
+            }
+            ImGui::PopStyleColor();
+        }
+
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
         if (ImGui::MenuItem("Launch Link", nullptr, false, hasCookie)) {
             WorkerThreads::runBackground([cookie = account.cookie,
