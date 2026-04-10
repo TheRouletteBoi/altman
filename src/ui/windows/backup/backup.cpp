@@ -26,7 +26,7 @@
 namespace {
 
     static std::atomic<bool> g_importInProgress = false;
-    constexpr int kBackupVersion = 2;
+    constexpr int kBackupVersion = 3;
 
     std::string buildBackupPath() {
         std::time_t t = std::time(nullptr);
@@ -112,8 +112,10 @@ namespace {
 
     std::optional<AccountData> processImportedAccount(
         const std::string &cookie,
+        const std::string &password,
         const std::string &note,
         bool isFavorite,
+        bool cookieAutoRefresh,
         std::uint64_t originalId
     ) {
         auto accountInfo = Roblox::fetchFullAccountInfo(cookie);
@@ -139,6 +141,8 @@ namespace {
         acct.userId = std::to_string(info.userId);
         acct.username = info.username;
         acct.displayName = info.displayName;
+        acct.password = password;
+        acct.cookieAutoRefresh = cookieAutoRefresh;
 
         switch (info.banInfo.status) {
             case Roblox::BanCheckResult::Banned:
@@ -205,8 +209,10 @@ namespace Backup {
                 accounts.push_back({
                     {"id",         acct.id        },
                     {"cookie",     acct.cookie    },
+                    {"password",   acct.password  },
                     {"note",       acct.note      },
-                    {"isFavorite", acct.isFavorite}
+                    {"isFavorite", acct.isFavorite},
+                    {"cookieAutoRefresh", acct.cookieAutoRefresh}
                 });
             }
 
@@ -230,6 +236,32 @@ namespace Backup {
             }
             if (!j.contains("favorites") || !j["favorites"].is_array()) {
                 j["favorites"] = nlohmann::json::array();
+            }
+        }
+
+        {
+            auto historyContents = readFileContents(AltMan::Paths::Config("private_server_history.json").string());
+            if (historyContents) {
+                auto parsed = parseJson(*historyContents);
+                if (parsed && parsed->is_array()) {
+                    j["privateServerHistory"] = std::move(*parsed);
+                }
+            }
+            if (!j.contains("privateServerHistory") || !j["privateServerHistory"].is_array()) {
+                j["privateServerHistory"] = nlohmann::json::array();
+            }
+        }
+
+        {
+            auto groupsContents = readFileContents(AltMan::Paths::Config("account_groups.json").string());
+            if (groupsContents) {
+                auto parsed = parseJson(*groupsContents);
+                if (parsed && parsed->is_array()) {
+                    j["accountGroups"] = std::move(*parsed);
+                }
+            }
+            if (!j.contains("accountGroups") || !j["accountGroups"].is_array()) {
+                j["accountGroups"] = nlohmann::json::array();
             }
         }
 
@@ -311,8 +343,10 @@ namespace Backup {
 
         struct ImportTask {
                 std::string cookie;
+                std::string password;
                 std::string note;
                 bool isFavorite;
+                bool cookieAutoRefresh;
                 std::uint64_t id;
         };
 
@@ -331,8 +365,10 @@ namespace Backup {
 
             tasks.push_back({
                 .cookie = std::move(cookie),
+                .password = item.value("password", ""),
                 .note = item.value("note", ""),
                 .isFavorite = item.value("isFavorite", false),
+                .cookieAutoRefresh = item.value("cookieAutoRefresh", false),
                 .id = item.value("id", static_cast<std::uint64_t>(0))
             });
         }
@@ -342,7 +378,7 @@ namespace Backup {
 
         for (const auto &task: tasks) {
             futures.push_back(std::async(std::launch::async, [task]() {
-                return processImportedAccount(task.cookie, task.note, task.isFavorite, task.id);
+                return processImportedAccount(task.cookie, task.password, task.note, task.isFavorite, task.cookieAutoRefresh, task.id);
             }));
         }
 
@@ -387,10 +423,30 @@ namespace Backup {
             }
         }
 
+        if (j->contains("privateServerHistory") && (*j)["privateServerHistory"].is_array()) {
+            std::ofstream f(AltMan::Paths::Config("private_server_history.json"));
+            if (!f.is_open())
+                return std::unexpected(Error::FileWriteFailed);
+            f << (*j)["privateServerHistory"].dump(4);
+            if (!f.good())
+                return std::unexpected(Error::FileWriteFailed);
+        }
+
+        if (j->contains("accountGroups") && (*j)["accountGroups"].is_array()) {
+            std::ofstream f(AltMan::Paths::Config("account_groups.json"));
+            if (!f.is_open())
+                return std::unexpected(Error::FileWriteFailed);
+            f << (*j)["accountGroups"].dump(4);
+            if (!f.good())
+                return std::unexpected(Error::FileWriteFailed);
+        }
+
         Data::SaveAccounts();
         Data::LoadAccounts();
         Data::LoadSettings();
         Data::LoadFavorites();
+        Data::LoadPrivateServerHistory();
+        Data::LoadAccountGroups();
 
         LOG_INFO("Successfully imported backup from: {}", filePath);
         return {};
