@@ -35,6 +35,7 @@
 struct DuplicateAccountModalState {
         bool showModal = false;
         std::string pendingCookie;
+        std::string pendingPassword;
         std::string pendingUsername;
         std::string pendingDisplayName;
         std::string pendingPresence;
@@ -102,7 +103,8 @@ namespace {
         const std::string &userId,
         const Roblox::VoiceSettings &voiceSettings,
         int existingId,
-        int nextId
+        int nextId,
+        const std::string &password = ""
     ) {
         g_duplicateAccountModal.pendingCookie = cookie;
         g_duplicateAccountModal.pendingUsername = username;
@@ -113,6 +115,7 @@ namespace {
         g_duplicateAccountModal.existingId = existingId;
         g_duplicateAccountModal.nextId = nextId;
         g_duplicateAccountModal.showModal = true;
+        g_duplicateAccountModal.pendingPassword = password;
     }
 
     void CreateNewAccount(
@@ -188,7 +191,8 @@ namespace {
                 userIdStr,
                 info.voiceSettings,
                 existingAccount->id,
-                nextId
+                nextId,
+                password
             );
         } else {
             CreateNewAccount(
@@ -604,6 +608,7 @@ bool RenderMainMenu() {
         if (ImGui::Button("Update", ImVec2(100, 0))) {
             if (AccountData *acc = getAccountById(g_duplicateAccountModal.existingId)) {
                 acc->cookie = g_duplicateAccountModal.pendingCookie;
+                acc->password = g_duplicateAccountModal.pendingPassword;
                 acc->username = g_duplicateAccountModal.pendingUsername;
                 acc->displayName = g_duplicateAccountModal.pendingDisplayName;
                 acc->status = g_duplicateAccountModal.pendingPresence;
@@ -631,7 +636,8 @@ bool RenderMainMenu() {
                 g_duplicateAccountModal.pendingUsername,
                 g_duplicateAccountModal.pendingDisplayName,
                 g_duplicateAccountModal.pendingPresence,
-                g_duplicateAccountModal.pendingVoiceStatus
+                g_duplicateAccountModal.pendingVoiceStatus,
+                g_duplicateAccountModal.pendingPassword
             );
 
             LOG_INFO(
