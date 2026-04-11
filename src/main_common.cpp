@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <semaphore>
 
 void LoadImGuiFonts(float scaledFontSize) {
     ImGuiIO &io = ImGui::GetIO();
@@ -90,8 +89,8 @@ namespace AccountProcessor {
             .status = "Unknown"
         };
 
-        result.userId = info.userId != 0 ? std::to_string(info.userId) : account.userId;
-        result.username = !info.username.empty() ? info.username : account.username;
+        result.userId      = info.userId != 0        ? std::to_string(info.userId) : account.userId;
+        result.username    = !info.username.empty()    ? info.username    : account.username;
         result.displayName = !info.displayName.empty() ? info.displayName : account.displayName;
 
         switch (info.banInfo.status) {
@@ -155,14 +154,14 @@ namespace AccountProcessor {
                 break;
         }
 
-        result.voiceStatus = info.voiceSettings.status;
+        result.voiceStatus    = info.voiceSettings.status;
         result.voiceBanExpiry = info.voiceSettings.bannedUntil;
 
         if (info.presenceData) {
-            result.status = info.presenceData->presence;
+            result.status       = info.presenceData->presence;
             result.lastLocation = info.presenceData->lastLocation;
-            result.placeId = info.presenceData->placeId;
-            result.jobId = info.presenceData->jobId;
+            result.placeId      = info.presenceData->placeId;
+            result.jobId        = info.presenceData->jobId;
         } else {
             result.status = "Offline";
         }
@@ -293,9 +292,8 @@ void refreshAccounts() {
             } guard { semMutex, semCv, semCount };
 
             auto result = Roblox::fetchFullAccountInfo(snapshot.cookie);
-            if (!result) {
+            if (!result)
                 return std::unexpected(result.error());
-            }
             return InfoEntry { i, std::move(*result) };
         }));
     }
@@ -306,45 +304,42 @@ void refreshAccounts() {
         infoResults.push_back(f.get());
     }
 
-    // Phase 2: per account presence fetch in parallel, each using its own cookie to get last location
-    using PresenceResult = std::optional<Roblox::PresenceData>;
-    std::vector<std::future<PresenceResult>> presenceFutures;
-    presenceFutures.reserve(snapshots.size());
+    // Phase 2: single batch presence call using first valid cookie
+    // Then targeted per account followups only for InGame accounts with empty lastLocation
+    std::vector<uint64_t> presenceUserIds;
+    std::string presenceCookie;
+    std::unordered_map<uint64_t, std::string> userCookies; // userId -> own cookie for followups
 
-    for (size_t i = 0; i < snapshots.size(); ++i) {
-        const auto &entry = infoResults[i];
-
-        if (!entry || entry->second.userId == 0 ||
-            entry->second.banInfo.status != Roblox::BanCheckResult::Unbanned) {
-            presenceFutures.push_back({});
-            continue;
+    for (const auto &entry : infoResults) {
+        if (!entry) continue;
+        const auto &info = entry->second;
+        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
+            presenceUserIds.push_back(info.userId);
+            userCookies[info.userId] = snapshots[entry->first].cookie;
+            if (presenceCookie.empty())
+                presenceCookie = snapshots[entry->first].cookie;
         }
+    }
 
-        uint64_t userId = entry->second.userId;
-        std::string cookie = snapshots[i].cookie;
+    std::unordered_map<uint64_t, Roblox::PresenceData> presences;
+    if (!presenceUserIds.empty() && !presenceCookie.empty()) {
+        presences = Roblox::getPresences(presenceUserIds, presenceCookie);
+    }
 
-        presenceFutures.push_back(std::async(std::launch::async, [&, userId, cookie]() -> PresenceResult {
-            {
-                std::unique_lock lock(semMutex);
-                semCv.wait(lock, [&] { return semCount < concurrencyLimit; });
-                ++semCount;
-            }
-
-            struct SemGuard {
-                std::mutex &m;
-                std::condition_variable &cv;
-                int &count;
-                ~SemGuard() {
-                    std::unique_lock lock(m);
-                    --count;
-                    cv.notify_one();
+    // Followup: for InGame accounts with empty lastLocation, fetch own presence using own cookie
+    for (auto &[userId, presence] : presences) {
+        if (presence.presence == "InGame" && presence.lastLocation.empty()) {
+            auto cookieIt = userCookies.find(userId);
+            if (cookieIt != userCookies.end()) {
+                // Invalidate cache first so getPresenceData hits the API with own cookie
+                Roblox::invalidatePresenceCache(userId);
+                if (auto own = Roblox::getPresenceData(cookieIt->second, userId)) {
+                    presence.lastLocation = own->lastLocation;
+                    presence.placeId      = own->placeId;
+                    presence.jobId        = own->jobId;
                 }
-            } guard { semMutex, semCv, semCount };
-
-            auto result = Roblox::getPresenceData(cookie, userId);
-            if (result) return *result;
-            return std::nullopt;
-        }));
+            }
+        }
     }
 
     // Phase 3: distribute presence into FullAccountInfo, then build ProcessResults
@@ -383,20 +378,18 @@ void refreshAccounts() {
 
         Roblox::FullAccountInfo info = entry->second;
 
-        if (presenceFutures[i].valid()) {
-            auto presence = presenceFutures[i].get();
-            if (presence) {
-                info.presenceData = std::move(*presence);
-            }
+        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
+            auto it = presences.find(info.userId);
+            if (it != presences.end())
+                info.presenceData = it->second;
         }
 
         auto result = AccountProcessor::processAccount(snapshot, info);
 
         if (result.isInvalid) {
             invalidIds.push_back(result.id);
-            if (!invalidNames.empty()) {
+            if (!invalidNames.empty())
                 invalidNames.append(", ");
-            }
             invalidNames.append(snapshot.displayName.empty() ? snapshot.username : snapshot.displayName);
         }
 
