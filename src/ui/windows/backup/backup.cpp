@@ -116,6 +116,8 @@ namespace {
         const std::string &note,
         bool isFavorite,
         bool cookieAutoRefresh,
+        time_t cookieLastUse,
+        time_t cookieLastRefreshAttempt,
         std::uint64_t originalId
     ) {
         auto accountInfo = Roblox::fetchFullAccountInfo(cookie);
@@ -143,6 +145,8 @@ namespace {
         acct.displayName = info.displayName;
         acct.password = password;
         acct.cookieAutoRefresh = cookieAutoRefresh;
+        acct.cookieLastUse = cookieLastUse;
+        acct.cookieLastRefreshAttempt = cookieLastRefreshAttempt;
 
         switch (info.banInfo.status) {
             case Roblox::BanCheckResult::Banned:
@@ -212,7 +216,9 @@ namespace Backup {
                     {"password",   acct.password  },
                     {"note",       acct.note      },
                     {"isFavorite", acct.isFavorite},
-                    {"cookieAutoRefresh", acct.cookieAutoRefresh}
+                    {"cookieAutoRefresh", acct.cookieAutoRefresh},
+                    {"cookieLastUse", acct.cookieLastUse},
+                    {"cookieLastRefreshAttempt", acct.cookieLastRefreshAttempt}
                 });
             }
 
@@ -347,6 +353,8 @@ namespace Backup {
                 std::string note;
                 bool isFavorite;
                 bool cookieAutoRefresh;
+                time_t cookieLastUse;
+                time_t cookieLastRefreshAttempt;
                 std::uint64_t id;
         };
 
@@ -369,6 +377,8 @@ namespace Backup {
                 .note = item.value("note", ""),
                 .isFavorite = item.value("isFavorite", false),
                 .cookieAutoRefresh = item.value("cookieAutoRefresh", false),
+                .cookieLastUse = item.value("cookieLastUse", 0),
+                .cookieLastRefreshAttempt = item.value("cookieLastRefreshAttempt", 0),
                 .id = item.value("id", static_cast<std::uint64_t>(0))
             });
         }
@@ -378,7 +388,7 @@ namespace Backup {
 
         for (const auto &task: tasks) {
             futures.push_back(std::async(std::launch::async, [task]() {
-                return processImportedAccount(task.cookie, task.password, task.note, task.isFavorite, task.cookieAutoRefresh, task.id);
+                return processImportedAccount(task.cookie, task.password, task.note, task.isFavorite, task.cookieAutoRefresh, task.cookieLastUse, task.cookieLastRefreshAttempt, task.id);
             }));
         }
 
