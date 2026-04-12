@@ -1,4 +1,4 @@
 #pragma once
 #include <string_view>
 
-constexpr std::string_view APP_VERSION = "1.7.3";
+constexpr std::string_view APP_VERSION = "1.7.4";
