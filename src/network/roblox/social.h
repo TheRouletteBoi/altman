@@ -71,28 +71,14 @@ namespace Roblox {
 
     SocialActionResult declineFriendRequest(const std::string &targetUserId, const std::string &cookie);
 
-    bool sendFriendRequest(
-        const std::string &targetUserId,
-        const std::string &cookie,
-        std::string *outResponse = nullptr
-    );
+    SocialActionResult sendFriendRequest(const std::string &targetUserId, const std::string &cookie);
 
-    SocialActionResult sendFriendRequestResult(const std::string &targetUserId, const std::string &cookie);
+    SocialActionResult unfriend(const std::string &targetUserId, const std::string &cookie);
 
-    bool unfriend(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr);
+    SocialActionResult followUser(const std::string &targetUserId, const std::string &cookie);
 
-    SocialActionResult unfriendResult(const std::string &targetUserId, const std::string &cookie);
+    SocialActionResult unfollowUser(const std::string &targetUserId, const std::string &cookie);
 
-    bool followUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr);
-
-    SocialActionResult followUserResult(const std::string &targetUserId, const std::string &cookie);
-
-    bool unfollowUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr);
-
-    SocialActionResult unfollowUserResult(const std::string &targetUserId, const std::string &cookie);
-
-    bool blockUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr);
-
-    SocialActionResult blockUserResult(const std::string &targetUserId, const std::string &cookie);
+    SocialActionResult blockUser(const std::string &targetUserId, const std::string &cookie);
 
 } // namespace Roblox

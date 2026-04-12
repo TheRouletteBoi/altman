@@ -25,6 +25,7 @@ namespace Roblox {
         Timeout,
         ConnectionFailed,
 
+        BadRequest,
         InvalidCookie,
         CookieBanned,
         CookieWarned,
@@ -95,6 +96,9 @@ namespace Roblox {
     inline ApiError httpStatusToError(int statusCode) {
         if (statusCode >= 200 && statusCode < 300) {
             return ApiError::Success;
+        }
+        if (statusCode == 400) {
+            return ApiError::BadRequest;
         }
         if (statusCode == 401) {
             return ApiError::InvalidCookie;

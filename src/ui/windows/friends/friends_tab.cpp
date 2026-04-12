@@ -65,7 +65,7 @@ namespace {
 
     struct AddFriendState {
             bool openPopup {false};
-            char buffer[512] {};
+            char buffer[2048] {};
             std::atomic<bool> loading {false};
     };
 
@@ -113,23 +113,28 @@ namespace {
     bool parseMultiUserInput(std::string_view input, std::vector<UserSpecifier> &outSpecs, std::string &error) {
         outSpecs.clear();
         const auto trimmed = trim(input);
-        if (trimmed.empty()) {
+        if (trimmed.empty())
             return false;
-        }
 
-        for (const auto token: std::views::split(trimmed, std::string_view(",\n\r"))) {
-            const auto tokenStr = trim(std::string_view(token));
-            if (tokenStr.empty()) {
-                continue;
+        std::string_view remaining = trimmed;
+        while (!remaining.empty()) {
+            const auto pos = remaining.find_first_of(",\n\r");
+            const auto tokenStr = trim(remaining.substr(0, pos));
+
+            if (!tokenStr.empty()) {
+                UserSpecifier spec{};
+                if (!parseUserSpecifier(tokenStr, spec)) {
+                    error = "Invalid entry: " + std::string(tokenStr);
+                    return false;
+                }
+                outSpecs.push_back(spec);
             }
 
-            UserSpecifier spec {};
-            if (!parseUserSpecifier(std::string(tokenStr), spec)) {
-                error = "Invalid entry: " + std::string(tokenStr);
-                return false;
-            }
-            outSpecs.push_back(spec);
+            if (pos == std::string_view::npos)
+                break;
+            remaining = remaining.substr(pos + 1);
         }
+
         return !outSpecs.empty();
     }
 
@@ -285,14 +290,27 @@ namespace {
         if (doSend) {
             g_addFriend.loading = true;
             WorkerThreads::runBackground([specs, cookie = account.cookie]() {
-                for (const auto &spec: specs) {
-                    const uint64_t uid = spec.isId ? spec.id : Roblox::getUserIdFromUsername(spec.username);
-                    Roblox::SocialActionResult social_action_result = Roblox::sendFriendRequestResult(std::to_string(uid), cookie);
-                    if (social_action_result.success)
+                for (const auto &spec : specs) {
+                    if (!g_addFriend.loading.load())
+                        break;
+
+                    const uint64_t uid = spec.isId
+                        ? spec.id
+                        : Roblox::getUserIdFromUsername(spec.username);
+
+                    if (uid == 0) {
+                        LOG_ERROR("Could not resolve user: {}", spec.username);
+                        continue;
+                    }
+
+                    auto result = Roblox::sendFriendRequest(std::to_string(uid), cookie);
+                    if (result.success) {
                         LOG_INFO("Friend request sent");
-                    else {
-                        if (social_action_result.error != Roblox::ApiError::Success) {
-                            LOG_ERROR("Friend request Error: {}", Roblox::apiErrorToString(social_action_result.error));
+                    } else {
+                        LOG_ERROR("Friend request Error: {}", Roblox::apiErrorToString(result.error));
+                        if (result.error == Roblox::ApiError::RateLimited) {
+                            LOG_WARN("Rate limited, backing off 30s...");
+                            HttpClient::RateLimiter::instance().backoff(std::chrono::seconds(30));
                         }
                     }
                 }
@@ -360,8 +378,8 @@ namespace {
                 std::format("Unfriend {}?", frend.username),
                 [frend, cookie = account.cookie, accountId = account.id]() {
                     WorkerThreads::runBackground([frend, cookie, accountId]() {
-                        std::string resp;
-                        if (Roblox::unfriend(std::to_string(frend.id), cookie, &resp)) {
+                        auto result = Roblox::unfriend(std::to_string(frend.id), cookie);
+                        if (result.success) {
                             std::erase_if(g_friends, [&](const auto &f) {
                                 return f.id == frend.id;
                             });
@@ -491,8 +509,10 @@ namespace {
                             const uint64_t uid = unfriend.id;
                             const std::string cookie = acc->cookie;
                             WorkerThreads::runBackground([uid, cookie]() {
-                                std::string resp;
-                                Roblox::sendFriendRequest(std::to_string(uid), cookie, &resp);
+                                auto result = Roblox::sendFriendRequest(std::to_string(uid), cookie);
+                                if (!result.success) {
+                                    LOG_ERROR("Friend request Error: {}", Roblox::apiErrorToString(result.error));
+                                }
                             });
                         }
                     }

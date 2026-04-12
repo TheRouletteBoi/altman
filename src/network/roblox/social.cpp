@@ -481,54 +481,18 @@ namespace Roblox {
         return {false, resp.text, httpStatusToError(resp.status_code)};
     }
 
-    bool sendFriendRequest(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
-        if (!canUseCookie(cookie)) {
-            if (outResponse) {
-                *outResponse = "Banned/warned cookie";
-            }
-            return false;
-        }
-
-        std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/request-friendship";
-
-        nlohmann::json body = {
-            {"friendshipOriginSourceType", 0}
-        };
-
-        auto resp = authenticatedPost(url, cookie, body.dump());
-
-        if (outResponse) {
-            *outResponse = resp.text;
-        }
-
-        if (resp.status_code < 200 || resp.status_code >= 300) {
-            LOG_ERROR("Friend request failed HTTP {}: {}", resp.status_code, resp.text);
-            return false;
-        }
-
-        auto j = HttpClient::decode(resp);
-        bool success = j.value("success", false);
-        if (success) {
-            LOG_INFO("Friend request success: {}", resp.text);
-        } else {
-            LOG_ERROR("Friend request API failure: {}", resp.text);
-        }
-        return success;
-    }
-
-    SocialActionResult sendFriendRequestResult(const std::string &targetUserId, const std::string &cookie) {
+    SocialActionResult sendFriendRequest(const std::string &targetUserId, const std::string &cookie) {
         ApiError validationError = validateCookieForRequest(cookie);
         if (validationError != ApiError::Success) {
             return {false, std::string(apiErrorToString(validationError)), validationError};
         }
 
         std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/request-friendship";
+        nlohmann::json body = {{"friendshipOriginSourceType", 0}};
 
-        nlohmann::json body = {
-            {"friendshipOriginSourceType", 0}
-        };
-
-        auto resp = authenticatedPost(url, cookie, body.dump());
+        auto resp = HttpClient::rateLimitedRequest([&]() {
+            return authenticatedPost(url, cookie, body.dump());
+        });
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
             return {false, resp.text, httpStatusToError(resp.status_code)};
@@ -539,7 +503,7 @@ namespace Roblox {
         return {success, resp.text, success ? ApiError::Success : ApiError::Unknown};
     }
 
-    bool unfriend(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
+    /*bool unfriend(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
         if (!canUseCookie(cookie)) {
             if (outResponse) {
                 *outResponse = "Banned/warned cookie";
@@ -560,9 +524,9 @@ namespace Roblox {
         }
 
         return true;
-    }
+    }*/
 
-    SocialActionResult unfriendResult(const std::string &targetUserId, const std::string &cookie) {
+    SocialActionResult unfriend(const std::string &targetUserId, const std::string &cookie) {
         ApiError validationError = validateCookieForRequest(cookie);
         if (validationError != ApiError::Success) {
             return {false, std::string(apiErrorToString(validationError)), validationError};
@@ -578,7 +542,7 @@ namespace Roblox {
         return {false, resp.text, httpStatusToError(resp.status_code)};
     }
 
-    bool followUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
+    /*bool followUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
         if (!canUseCookie(cookie)) {
             if (outResponse) {
                 *outResponse = "Banned/warned cookie";
@@ -593,9 +557,9 @@ namespace Roblox {
             *outResponse = resp.text;
         }
         return resp.status_code >= 200 && resp.status_code < 300;
-    }
+    }*/
 
-    SocialActionResult followUserResult(const std::string &targetUserId, const std::string &cookie) {
+    SocialActionResult followUser(const std::string &targetUserId, const std::string &cookie) {
         ApiError validationError = validateCookieForRequest(cookie);
         if (validationError != ApiError::Success) {
             return {false, std::string(apiErrorToString(validationError)), validationError};
@@ -611,7 +575,7 @@ namespace Roblox {
         return {false, resp.text, httpStatusToError(resp.status_code)};
     }
 
-    bool unfollowUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
+    /*bool unfollowUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
         if (!canUseCookie(cookie)) {
             if (outResponse) {
                 *outResponse = "Banned/warned cookie";
@@ -626,9 +590,9 @@ namespace Roblox {
             *outResponse = resp.text;
         }
         return resp.status_code >= 200 && resp.status_code < 300;
-    }
+    }*/
 
-    SocialActionResult unfollowUserResult(const std::string &targetUserId, const std::string &cookie) {
+    SocialActionResult unfollowUser(const std::string &targetUserId, const std::string &cookie) {
         ApiError validationError = validateCookieForRequest(cookie);
         if (validationError != ApiError::Success) {
             return {false, std::string(apiErrorToString(validationError)), validationError};
@@ -644,7 +608,7 @@ namespace Roblox {
         return {false, resp.text, httpStatusToError(resp.status_code)};
     }
 
-    bool blockUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
+    /*bool blockUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
         if (!canUseCookie(cookie)) {
             if (outResponse) {
                 *outResponse = "Banned/warned cookie";
@@ -659,9 +623,9 @@ namespace Roblox {
             *outResponse = resp.text;
         }
         return resp.status_code >= 200 && resp.status_code < 300;
-    }
+    }*/
 
-    SocialActionResult blockUserResult(const std::string &targetUserId, const std::string &cookie) {
+    SocialActionResult blockUser(const std::string &targetUserId, const std::string &cookie) {
         ApiError validationError = validateCookieForRequest(cookie);
         if (validationError != ApiError::Success) {
             return {false, std::string(apiErrorToString(validationError)), validationError};
