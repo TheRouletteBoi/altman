@@ -422,11 +422,11 @@ bool RenderMainMenu() {
         ImGui::Separator();
 
         if (ImGui::MenuItem("Report Issue")) {
-            OpenURL("https://github.com/TheRouletteBoi/altman/issues/new");
+            OpenURL("https://github.com/TheRouletteBoi/AltMan-RobloxAccountManager/issues/new");
         }
 
         if (ImGui::MenuItem("View on GitHub")) {
-            OpenURL("https://github.com/TheRouletteBoi/altman");
+            OpenURL("https://github.com/TheRouletteBoi/AltMan-RobloxAccountManager");
         }
 
         ImGui::EndMenu();

@@ -6,7 +6,7 @@
             style="display: block; margin: 0 auto" />
 <h1>AltMan</h1>
 <h3>Roblox Account Manager & Multi Instance Launcher</h3>
-<p><strong>AltMan</strong> is a cross platform Roblox account manager. It lets you store multiple accounts, launch multiple Roblox instances, and switch between accounts without logging in every time.</p>
+<p><strong>AltMan</strong> is a cross platform Roblox account manager. It lets you store multiple accounts, launch multiple Roblox instances, and switch between accounts without logging in every time. This repo is a maintained fork of https://github.com/6E6B/altman</p>
 
 <p>
     <img src="https://img.shields.io/badge/Roblox-Account%20Manager-red" alt="Roblox Account Manager"/>

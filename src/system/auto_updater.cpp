@@ -631,7 +631,7 @@ UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json &release, UpdateCh
 }
 
 std::string AutoUpdater::GetReleaseEndpoint(UpdateChannel channel) {
-    constexpr std::string_view base = "https://api.github.com/repos/TheRouletteBoi/altman/releases";
+    constexpr std::string_view base = "https://api.github.com/repos/TheRouletteBoi/AltMan-RobloxAccountManager/releases";
 
     switch (channel) {
         case UpdateChannel::Beta:
