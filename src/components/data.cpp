@@ -487,7 +487,6 @@ namespace Data {
             }
 
             LOG_INFO("Default account ID = {}", g_defaultAccountId);
-            LOG_INFO("Status refresh interval = {}", g_statusRefreshInterval);
         } catch (const std::exception &e) {
             LOG_ERROR("Failed to parse {}: {}", filename, e.what());
         }
